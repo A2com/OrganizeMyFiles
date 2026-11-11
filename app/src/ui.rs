@@ -486,6 +486,11 @@ fn backdrop(ui: &mut egui::Ui, rect: Rect, accent: Color32, t: f64) {
     ui.painter().add(egui::Shape::mesh(mesh));
 }
 
+/// Écart unique entre les cartes (horizontal et vertical) sur l'écran Aperçu.
+const GAP: f32 = 20.0;
+/// Hauteur utile commune des deux cartes de listes (titre + 4 lignes) : elles restent alignées.
+const LIST_CARD_MIN_H: f32 = 258.0;
+
 /// Rayon des cartes de verre.
 const CARD_RADIUS: f32 = 16.0;
 
@@ -977,7 +982,7 @@ fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub
     if resp.hovered() {
         p.rect_filled(r, Rounding::same(CARD_RADIUS), glass(12));
     }
-    let tile = Rect::from_min_size(r.min + Vec2::new(18.0, 18.0), Vec2::splat(34.0));
+    let tile = Rect::from_min_size(r.min + Vec2::new(20.0, 20.0), Vec2::splat(34.0));
     p.rect_filled(tile, Rounding::same(10.0), with_alpha(accent, 70));
     draw_icon(&p, tile.center(), icon, Color32::WHITE, 17.0);
     p.text(
@@ -988,14 +993,14 @@ fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub
         text_label(),
     );
     p.text(
-        Pos2::new(r.left() + 18.0, r.top() + 84.0),
+        Pos2::new(r.left() + 20.0, r.top() + 86.0),
         egui::Align2::LEFT_CENTER,
         value,
         egui::FontId::new(38.0, bold()),
         Color32::WHITE,
     );
     p.text(
-        Pos2::new(r.left() + 18.0, r.bottom() - 18.0),
+        Pos2::new(r.left() + 20.0, r.bottom() - 20.0),
         egui::Align2::LEFT_CENTER,
         sub,
         egui::FontId::proportional(14.5),
@@ -1542,6 +1547,7 @@ impl App {
             ),
         };
         let avail = ui.available_width();
+        let vgap = GAP - ui.spacing().item_spacing.y;
         let (hero, _) = ui.allocate_exact_size(Vec2::new(avail, 214.0), egui::Sense::hover());
         ui.painter().add(glass_shapes(hero));
         {
@@ -1556,7 +1562,7 @@ impl App {
         let mut preview = false;
         let mut new_rule = false;
         let text_w = (avail - 250.0).max(260.0);
-        let inner = Rect::from_min_size(hero.min + Vec2::new(30.0, 26.0), Vec2::new(text_w, hero.height() - 52.0));
+        let inner = Rect::from_min_size(hero.min + Vec2::new(28.0, 24.0), Vec2::new(text_w, hero.height() - 48.0));
         let mut c = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
         c.label(RichText::new("APERÇU").size(12.5).family(semibold()).color(text_label()));
         c.add_space(4.0);
@@ -1613,10 +1619,10 @@ impl App {
             egui::FontId::proportional(14.0),
             text_dim(),
         );
-        ui.add_space(16.0);
+        ui.add_space(vgap);
 
         // ---------------------------------------------------------------- tuiles
-        let gap = 14.0;
+        let gap = GAP;
         let w = ((avail - 3.0 * gap) / 4.0).max(120.0);
         let (matched_actions, actions_sub) = match self.last_run {
             Some((_, actions, _)) => (count(actions).to_string(), "actions au dernier passage"),
@@ -1637,17 +1643,20 @@ impl App {
                 go = Some(Tab::History);
             }
         });
-        ui.add_space(16.0);
+        ui.add_space(vgap);
 
         // ---------------------------------------------------------- dossiers + activité
         if avail >= 760.0 {
+            let old_gap = ui.spacing().item_spacing.x;
+            ui.spacing_mut().item_spacing.x = GAP;
             ui.columns(2, |cols| {
                 self.dash_folders(&mut cols[0], accent);
                 self.dash_activity(&mut cols[1], accent);
             });
+            ui.spacing_mut().item_spacing.x = old_gap;
         } else {
             self.dash_folders(ui, accent);
-            ui.add_space(14.0);
+            ui.add_space(vgap);
             self.dash_activity(ui, accent);
         }
 
@@ -1670,6 +1679,7 @@ impl App {
         let folders = self.folders.clone();
         let mut open = false;
         panel_card(ui, |ui| {
+            ui.set_min_height(LIST_CARD_MIN_H);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Dossiers suivis").size(17.0).family(semibold()).color(Color32::WHITE));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1740,22 +1750,20 @@ impl App {
                     open = true;
                 }
             }
-            if folders.len() > 4 {
-                ui.label(RichText::new(format!("+ {} autres", folders.len() - 4)).size(13.5).color(text_dim()));
-            }
         });
         if open {
             self.tab = Tab::Folders;
         }
     }
 
-    /// Carte « Activité récente » : les 5 dernières actions, annulables quand c'est possible.
+    /// Carte « Activité récente » : les 4 dernières actions, annulables quand c'est possible.
     fn dash_activity(&mut self, ui: &mut egui::Ui, accent: Color32) {
         let now = SystemTime::now();
-        let items: Vec<(usize, HistoryEntry)> = self.history.iter().cloned().enumerate().rev().take(5).collect();
+        let items: Vec<(usize, HistoryEntry)> = self.history.iter().cloned().enumerate().rev().take(4).collect();
         let mut open = false;
         let mut undo_idx: Option<usize> = None;
         panel_card(ui, |ui| {
+            ui.set_min_height(LIST_CARD_MIN_H);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Activité récente").size(17.0).family(semibold()).color(Color32::WHITE));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
