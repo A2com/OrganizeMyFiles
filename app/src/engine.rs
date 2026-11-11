@@ -409,11 +409,13 @@ impl Condition {
                 }
             }
             Field::Extension => {
+                // Plusieurs extensions possibles, séparées par des virgules : « .png, .jpg ».
                 let e = f.ext.to_lowercase();
+                let wanted: Vec<&str> = lv.split(',').map(|x| x.trim().trim_start_matches('.')).collect();
                 match self.op {
-                    Op::Equals | Op::Is => e == lv.trim_start_matches('.'),
-                    Op::IsNot => e != lv.trim_start_matches('.'),
-                    Op::Contains => e.contains(lv.trim_start_matches('.')),
+                    Op::Equals | Op::Is => wanted.iter().any(|w| e == *w),
+                    Op::IsNot => wanted.iter().all(|w| e != *w),
+                    Op::Contains => wanted.iter().any(|w| e.contains(w)),
                     _ => false,
                 }
             }
@@ -983,7 +985,7 @@ impl Runner {
                 }
                 let dest = expand_destination(&dest_raw, now);
                 let dest_dir = PathBuf::from(shim_expand(&dest));
-                let target = dest_dir.join(current.file_name().unwrap_or_default());
+                let mut target = dest_dir.join(current.file_name().unwrap_or_default());
                 if target == current {
                     return base(Status::Applied, "Déjà à la destination".into(), current.to_path_buf(), None);
                 }
@@ -994,6 +996,8 @@ impl Runner {
                     let on_conflict = action.param(ON_CONFLICT_PARAM_KEY);
                     if on_conflict == "replace" {
                         let _ = fs::remove_file(&target);
+                    } else if on_conflict == CONFLICT_NUMBER {
+                        target = numbered_path(&target);
                     } else {
                         return base(
                             Status::BlockedByConflict,
@@ -1295,6 +1299,24 @@ fn dirs_trash() -> PathBuf {
     PathBuf::from(home_dir()).join(".Trash")
 }
 
+/// Valeur de `on_conflict` ajoutée par la reconstruction : suffixe « (n) » au lieu de bloquer.
+pub const CONFLICT_NUMBER: &str = "number";
+
+/// `photo.png` → `photo (1).png`, `photo (2).png`… premier nom libre (uniqueDest 0x100138560).
+fn numbered_path(target: &Path) -> PathBuf {
+    let dir = target.parent().unwrap_or(Path::new("."));
+    let stem = target.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let mut n = 1;
+    loop {
+        let candidate = dir.join(format!("{stem} ({n}){ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
 /// Existing archives are kept; new ones are numbered (0x1001e0820).
 fn unique_zip_path(dir: &Path, name: &str) -> PathBuf {
     let name = if name.to_lowercase().ends_with(".zip") {
@@ -1506,5 +1528,29 @@ mod tests {
         assert_eq!(meta("a", "zip", 1).kind(), "archive");
         assert_eq!(meta("a", "jpg", 1).kind(), "image");
         assert_eq!(meta("a", "mp3", 1).kind(), "audio");
+    }
+
+    #[test]
+    fn extension_accepts_comma_separated_list() {
+        let c = Condition { field: Field::Extension, op: Op::Equals, value: ".png, .JPG".into() };
+        let now = SystemTime::now();
+        assert!(c.evaluate(&meta("a", "png", 1), now));
+        assert!(c.evaluate(&meta("b", "jpg", 1), now));
+        assert!(!c.evaluate(&meta("c", "gif", 1), now));
+        let not = Condition { field: Field::Extension, op: Op::IsNot, value: "png, jpg".into() };
+        assert!(not.evaluate(&meta("c", "gif", 1), now));
+        assert!(!not.evaluate(&meta("a", "png", 1), now));
+    }
+
+    #[test]
+    fn numbered_path_skips_existing_names() {
+        let dir = std::env::temp_dir().join(format!("forel-num-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("photo.png");
+        fs::write(&first, b"x").unwrap();
+        assert_eq!(numbered_path(&first), dir.join("photo (1).png"));
+        fs::write(dir.join("photo (1).png"), b"x").unwrap();
+        assert_eq!(numbered_path(&first), dir.join("photo (2).png"));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

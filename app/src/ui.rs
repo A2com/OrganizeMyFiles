@@ -146,7 +146,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, screenshot: Option<String>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, screenshot: Option<String>, tab: Option<String>) -> Self {
         apply_theme(&cc.egui_ctx);
         let mut app = App {
             tab: Tab::Dashboard,
@@ -175,6 +175,14 @@ impl App {
         if app.screenshot.is_some() {
             app.seed_demo();
         }
+        app.tab = match tab.as_deref() {
+            Some("folders") => Tab::Folders,
+            Some("rules") => Tab::Rules,
+            Some("history") => Tab::History,
+            Some("plan") => Tab::Plan,
+            Some("settings") => Tab::Settings,
+            _ => Tab::Dashboard,
+        };
         app
     }
 
@@ -191,18 +199,18 @@ impl App {
             self.next_id += 1;
         }
         let f0 = self.folders[0].id;
-        self.rules.push(sample_rule(self.next_id, f0, "Invoices to Archive", 0));
+        self.rules.push(sample_rule(self.next_id, f0, "Tri Bureau & Téléchargements", 0));
         self.next_id += 1;
-        self.rules.push(sample_rule(self.next_id, f0, "Screenshots to Pictures", 1));
+        self.rules.push(sample_rule(self.next_id, f0, "Compression Médias", 1));
         self.next_id += 1;
-        self.rules.push(sample_rule(self.next_id, self.folders[1].id, "Music to Library", 0));
+        self.rules.push(sample_rule(self.next_id, self.folders[1].id, "Import Musique", 2));
         self.next_id += 1;
         self.monthly_used = 42;
         let now = SystemTime::now();
         for i in 0..6 {
             self.history.push(HistoryEntry {
                 batch_id: 1,
-                rule_name: ["Invoices to Archive", "Screenshots to Pictures"][i % 2].into(),
+                rule_name: ["Tri Bureau & Téléchargements", "Compression Médias"][i % 2].into(),
                 action_label: ["Move to folder", "Rename with pattern", "Compress (ZIP)"][i % 3].into(),
                 original_path: PathBuf::from(format!("{home}/Downloads/file-{i}.pdf")),
                 result_path: PathBuf::from(format!("{home}/Documents/Archive/2026-11/file-{i}.pdf")),
@@ -285,52 +293,31 @@ fn sample_rule(id: u64, folder_id: u64, name: &str, prio: i64) -> Rule {
         name: name.into(),
         enabled: true,
         match_all: true,
-        recursion_depth: if prio == 0 { 1 } else { 0 },
+        recursion_depth: 0,
         priority: prio,
         conditions: Vec::new(),
         actions: Vec::new(),
     };
     match prio {
         0 => {
-            r.conditions.push(Condition {
-                field: Field::Extension,
-                op: Op::Equals,
-                value: "pdf".into(),
-            });
-            r.conditions.push(Condition {
-                field: Field::Name,
-                op: Op::Contains,
-                value: "invoice".into(),
-            });
+            r.conditions.push(Condition { field: Field::Extension, op: Op::Equals, value: ".png, .jpg".into() });
+            r.conditions.push(Condition { field: Field::Size, op: Op::Greater, value: "50 MB".into() });
             let mut a = Action::new(ActionKind::Move);
-            a.params
-                .insert("destination".into(), "~/Documents/Archive/{year}/{month}".into());
-            a.params.insert(ON_CONFLICT_PARAM_KEY.into(), "skip".into());
+            a.params.insert("destination".into(), "~/Pictures/Screenshots-Classés".into());
+            a.params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_NUMBER.into());
             r.actions.push(a);
-            let mut b = Action::new(ActionKind::AddTag);
-            b.params.insert("tags".into(), "paperwork".into());
+            let mut b = Action::new(ActionKind::Rename);
+            b.params.insert("pattern".into(), "{current_date}-{name}.{extension}".into());
             r.actions.push(b);
         }
         1 => {
-            r.conditions.push(Condition {
-                field: Field::Kind,
-                op: Op::Is,
-                value: "image".into(),
-            });
-            let mut a = Action::new(ActionKind::Rename);
-            a.params
-                .insert("pattern".into(), "{name}-{current_date}.{extension}".into());
-            r.actions.push(a);
+            r.conditions.push(Condition { field: Field::Kind, op: Op::Is, value: "video".into() });
             let mut c = Action::new(ActionKind::Compress);
             c.params.insert("pattern".into(), "{name}-{timestamp}".into());
             r.actions.push(c);
         }
         _ => {
-            r.conditions.push(Condition {
-                field: Field::Kind,
-                op: Op::Is,
-                value: "audio".into(),
-            });
+            r.conditions.push(Condition { field: Field::Kind, op: Op::Is, value: "audio".into() });
             let mut a = Action::new(ActionKind::ImportToLibrary);
             a.params.insert("library_type".into(), "music".into());
             r.actions.push(a);
