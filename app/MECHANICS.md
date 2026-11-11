@@ -97,3 +97,8 @@ Schéma SQL (relevé sur la base, fnd_3) inchangé : règles triées par `(prior
 - Conservation de l'historique 30 jours : la **clé** `history_max_days` est réelle (chaîne `0x1001ded10`, get `0x10000a048`, set `0x10000c210`), mais **aucun littéral de valeur par défaut** n'a été trouvé (la closure d'init renvoie nil quand la clé est absente) ; 30 jours (plage du curseur 1..=365 dans la reconstruction) reste estimé.
 - Taille de page de l'historique 50, limite d'aperçu 200, délai de script 60 s : estimés (reconstruits), aucune adresse de fonction trouvée.
 - Limites du plan gratuit appliquées **non** dans la reconstruction (demande client : tout débloqué, sans compte) — les adresses ci-dessus documentent l'original.
+
+## 14. Écarts volontaires de la reconstruction (non présents dans l'original)
+
+- `on_conflict = "number"` : au lieu de bloquer, le fichier prend un suffixe « (n) » (`numbered_path`, inspiré de uniqueDest 0x100138560). Les valeurs d'origine `replace` / `skip` sont inchangées ; vide = `skip`.
+- Condition Extension : plusieurs extensions séparées par des virgules (`.png, .jpg`), avec ou sans point, casse ignorée. L'original ne documente qu'une seule valeur.

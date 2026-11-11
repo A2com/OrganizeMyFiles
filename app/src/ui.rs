@@ -37,6 +37,7 @@ enum Icon {
     Bell,
     Gear,
     Search,
+    Cross,
 }
 
 const TABS: &[(Tab, &str, Icon, &str)] = &[
@@ -89,6 +90,17 @@ fn with_alpha(c: Color32, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
 }
 
+/// Police système macOS (SF Pro) en tête des familles, si elle est présente.
+fn load_system_font(ctx: &egui::Context) {
+    let Ok(bytes) = std::fs::read("/System/Library/Fonts/SFNS.ttf") else { return };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert("sf-pro".into(), egui::FontData::from_owned(bytes));
+    for family in [egui::FontFamily::Proportional] {
+        fonts.families.entry(family).or_default().insert(0, "sf-pro".into());
+    }
+    ctx.set_fonts(fonts);
+}
+
 /// Applique le style sombre global : champs `#0c0e15`, focus orange, coins doux.
 fn apply_theme(ctx: &egui::Context) {
     let mut v = egui::Visuals::dark();
@@ -112,9 +124,12 @@ fn apply_theme(ctx: &egui::Context) {
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, with_alpha(ACCENTS[0].1, 120));
     v.widgets.active.bg_stroke = Stroke::new(1.0, ACCENTS[0].1);
     ctx.set_visuals(v);
+    load_system_font(ctx);
     ctx.style_mut(|s| {
         s.spacing.scroll = egui::style::ScrollStyle::thin();
         s.spacing.item_spacing = Vec2::new(8.0, 6.0);
+        s.spacing.interact_size.y = 30.0;
+        s.spacing.button_padding = Vec2::new(10.0, 5.0);
     });
 }
 
@@ -509,6 +524,10 @@ fn draw_icon(painter: &egui::Painter, c: Pos2, icon: Icon, color: Color32, s: f3
             painter.circle_stroke(Pos2::new(c.x - 2.0 * u, c.y - 2.0 * u), 5.5 * u, Stroke::new(2.0 * u, color));
             seg((2.0, 2.0), (7.5, 7.5), 2.2);
         }
+        Icon::Cross => {
+            seg((-5.0, -5.0), (5.0, 5.0), 2.0);
+            seg((-5.0, 5.0), (5.0, -5.0), 2.0);
+        }
         Icon::Sort => {
             seg((-8.0, -6.0), (8.0, -6.0), 2.4);
             seg((-5.0, 0.0), (5.0, 0.0), 2.4);
@@ -631,6 +650,18 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
         x += widths[i];
     }
     out
+}
+
+/// Petite croix de suppression (22 px) ; true si cliquée.
+fn cross_button(ui: &mut egui::Ui, tip: &str) -> bool {
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::click());
+    let hot = resp.hovered();
+    if hot {
+        ui.painter().rect_filled(r, Rounding::same(7.0), with_alpha(Color32::from_rgb(0xf8, 0x71, 0x71), 36));
+    }
+    let col = if hot { Color32::from_rgb(0xf8, 0x71, 0x71) } else { text_dim() };
+    draw_icon(&ui.painter().clone(), r.center(), Icon::Cross, col, 16.0);
+    resp.on_hover_text(tip).clicked()
 }
 
 /// Ligne glissable d'une liste (conditions = 0, actions = 1).
@@ -1078,11 +1109,12 @@ impl App {
                 );
                 if let Some(n) = badge {
                     let text = n.to_string();
-                    let g = p.layout_no_wrap(text.clone(), egui::FontId::proportional(11.0), fg);
+                    let badge_fg = if active { Color32::WHITE } else { fg };
+                    let g = p.layout_no_wrap(text.clone(), egui::FontId::proportional(11.0), badge_fg);
                     let w = (g.size().x + 14.0).max(22.0);
                     let b = Rect::from_center_size(Pos2::new(rect.right() - 12.0 - w / 2.0, rect.center().y), Vec2::new(w, 20.0));
                     p.rect_filled(b, Rounding::same(10.0), if active { with_alpha(accent, 60) } else { with_alpha(Color32::WHITE, 16) });
-                    p.text(b.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(11.0), fg);
+                    p.text(b.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(11.0), badge_fg);
                     if active && *tab == Tab::Rules {
                         p.circle_filled(Pos2::new(b.left() - 9.0, rect.center().y), 3.0, accent);
                     }
@@ -1124,42 +1156,35 @@ impl App {
             }
         });
 
-        // Pied : état de l'application.
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            ui.add_space(16.0);
-            ui.horizontal(|ui| {
-                ui.add_space(12.0);
-                let (rect, _) = ui.allocate_exact_size(Vec2::new(232.0, 84.0), egui::Sense::hover());
-                ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(CANVAS, 150));
-                ui.painter().rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0f32, with_alpha(Color32::WHITE, 13)));
-                let mut c = ui.new_child(
-                    egui::UiBuilder::new().max_rect(rect.shrink(12.0)).layout(Layout::top_down(Align::Min)),
+        // Pied : état de l'application, collé en bas de la barre.
+        let avail = ui.max_rect();
+        let rect = Rect::from_min_size(Pos2::new(avail.left() + 12.0, avail.bottom() - 16.0 - 84.0), Vec2::new(232.0, 84.0));
+        ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(CANVAS, 150));
+        ui.painter().rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0f32, with_alpha(Color32::WHITE, 13)));
+        let mut c = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(12.0)).layout(Layout::top_down(Align::Min)));
+        c.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(caps("APPLICATION"));
+                ui.label(
+                    RichText::new(if self.app_enabled { "Activée" } else { "En veille" })
+                        .size(13.5)
+                        .color(Color32::WHITE),
                 );
-                c.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new("APPLICATION").size(10.0).strong().color(text_dim()));
-                        ui.label(
-                            RichText::new(if self.app_enabled { "Activée" } else { "En veille" })
-                                .size(13.5)
-                                .color(Color32::WHITE),
-                        );
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        toggle(ui, &mut self.app_enabled, accent);
-                    });
-                });
-                c.add_space(6.0);
-                let (dot, txt) = if self.app_enabled {
-                    (GREEN, "Surveillance active • v0.1")
-                } else {
-                    (text_dim(), "En veille • v0.1")
-                };
-                c.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
-                    ui.painter().circle_filled(r.center(), 3.5, dot);
-                    ui.label(RichText::new(txt).size(11.0).color(text_dim()));
-                });
             });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                toggle(ui, &mut self.app_enabled, accent);
+            });
+        });
+        c.add_space(4.0);
+        let (dot, txt) = if self.app_enabled {
+            (GREEN, "Surveillance active • v0.1")
+        } else {
+            (text_dim(), "En veille • v0.1")
+        };
+        c.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
+            ui.painter().circle_filled(r.center(), 3.5, dot);
+            ui.label(RichText::new(txt).size(11.0).color(text_dim()));
         });
     }
 
@@ -1455,7 +1480,7 @@ impl App {
                 ui.vertical(|ui| {
                     ui.label(caps("NOM DE LA RÈGLE"));
                     let mut name = self.rules[idx].name.clone();
-                    if ui.add(egui::TextEdit::singleline(&mut name).desired_width(300.0)).changed() {
+                    if ui.add(egui::TextEdit::singleline(&mut name).margin(egui::Margin::symmetric(8.0, 7.0)).desired_width(300.0)).changed() {
                         self.rules[idx].name = name;
                     }
                 });
@@ -1585,11 +1610,11 @@ impl App {
                             _ => "valeur",
                         };
                         let mut val = self.rules[idx].conditions[ci].value.clone();
-                        let w = (ui.available_width() - 44.0).max(80.0);
-                        if ui.add(egui::TextEdit::singleline(&mut val).desired_width(w).hint_text(hint)).changed() {
+                        let w = (ui.available_width() - 60.0).max(80.0);
+                        if ui.add(egui::TextEdit::singleline(&mut val).margin(egui::Margin::symmetric(8.0, 7.0)).desired_width(w).hint_text(hint)).changed() {
                             self.rules[idx].conditions[ci].value = val;
                         }
-                        if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Supprimer").clicked() {
+                        if cross_button(ui, "Supprimer") {
                             drop = Some(ci);
                         }
                     });
@@ -1648,7 +1673,7 @@ impl App {
                             }
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Supprimer").clicked() {
+                            if cross_button(ui, "Supprimer") {
                                 drop = Some(ai);
                             }
                         });
@@ -1664,7 +1689,8 @@ impl App {
                             let entry = self.rules[idx].actions[ai].params.entry((*k).to_string()).or_default();
                             ui.add(
                                 egui::TextEdit::singleline(entry)
-                                    .desired_width((ui.available_width() - 8.0).max(120.0))
+                                    .margin(egui::Margin::symmetric(8.0, 7.0))
+                                    .desired_width((ui.available_width() - 24.0).max(120.0))
                                     .hint_text(*placeholder),
                             );
                         });
