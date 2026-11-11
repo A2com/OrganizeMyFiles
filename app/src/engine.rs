@@ -1,6 +1,7 @@
 //! Rule engine: conditions, actions, batches, quota, history.
 //! Behaviour mirrors the rules documented in MECHANICS.md / mechanics.json.
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -267,7 +268,7 @@ fn write_tags(path: &Path, tags: &[String]) {
 
 // ---------------------------------------------------------------- conditions
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Field {
     Name,
     Extension,
@@ -330,7 +331,7 @@ impl Field {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Op {
     Contains,
     Equals,
@@ -385,7 +386,7 @@ impl Op {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Condition {
     pub field: Field,
     pub op: Op,
@@ -577,7 +578,7 @@ fn glob_parts(hay: &str, parts: &[&str]) -> bool {
 
 // -------------------------------------------------------------------- rules
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionKind {
     Move,
     Copy,
@@ -664,7 +665,7 @@ impl ActionKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Action {
     pub kind: ActionKind,
     pub params: BTreeMap<String, String>,
@@ -695,7 +696,7 @@ impl Action {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rule {
     pub id: u64,
     pub folder_id: u64,
@@ -708,7 +709,7 @@ pub struct Rule {
     pub actions: Vec<Action>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Folder {
     pub id: u64,
     pub path: PathBuf,
@@ -718,7 +719,7 @@ pub struct Folder {
 
 // ------------------------------------------------------------------ results
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
     Applied,
     Failed,
@@ -748,14 +749,14 @@ impl Status {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Undo {
     pub kind: ActionKind,
     pub from: PathBuf,
     pub to: PathBuf,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HistoryEntry {
     pub batch_id: u64,
     pub rule_name: String,

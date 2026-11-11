@@ -8,6 +8,7 @@ use eframe::egui::{self, Align, Color32, Layout, Pos2, Rect, RichText, Rounding,
 
 use crate::engine::*;
 use crate::mechanics::*;
+use crate::store::{self, Loaded, Settings, State};
 
 // ------------------------------------------------------------------- theme
 
@@ -198,6 +199,10 @@ pub struct App {
     search: String,
     toast: Option<String>,
     undo_folder: Option<UndoFolder>,
+    /// Fichier de sauvegarde ; `None` en mode capture d'écran (on n'écrit jamais dans les vraies données).
+    store_path: Option<std::path::PathBuf>,
+    last_saved: String,
+    next_save_check: f64,
     show_path_input: bool,
     folder_counts: std::collections::HashMap<u64, Option<usize>>,
     last_run: Option<(usize, usize, usize)>, // matched, actions, scanned
@@ -211,9 +216,35 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, launch: Launch) -> Self {
-        let Launch { screenshot, tab, empty, bg_time } = launch;
         apply_theme(&cc.egui_ctx);
-        let mut app = App {
+        let empty = launch.empty;
+        let tab = launch.tab.clone();
+        let mut app = Self::blank(launch);
+        if app.screenshot.is_some() {
+            // Capture d'écran : jamais d'écriture. Avec FOREL_STATE_DIR, on charge ce dossier (contrôle de la restauration).
+            if std::env::var_os("FOREL_STATE_DIR").is_some() {
+                app.load_saved_state();
+                app.store_path = None;
+            } else if !empty {
+                app.seed_demo();
+            }
+        } else {
+            app.load_saved_state();
+        }
+        app.tab = match tab.as_deref() {
+            Some("folders") => Tab::Folders,
+            Some("rules") => Tab::Rules,
+            Some("history") => Tab::History,
+            Some("settings") => Tab::Settings,
+            _ => Tab::Dashboard,
+        };
+        app
+    }
+
+    /// État initial sans aucun contexte graphique (utilisable dans les tests).
+    fn blank(launch: Launch) -> Self {
+        let Launch { screenshot, tab: _, empty: _, bg_time } = launch;
+        App {
             tab: Tab::Dashboard,
             folders: Vec::new(),
             rules: Vec::new(),
@@ -233,6 +264,9 @@ impl App {
             search: String::new(),
             toast: None,
             undo_folder: None,
+            store_path: None,
+            last_saved: String::new(),
+            next_save_check: 0.0,
             show_path_input: false,
             folder_counts: std::collections::HashMap::new(),
             last_run: None,
@@ -242,18 +276,7 @@ impl App {
             frame: 0,
             screenshot,
             shot_done: false,
-        };
-        if app.screenshot.is_some() && !empty {
-            app.seed_demo();
         }
-        app.tab = match tab.as_deref() {
-            Some("folders") => Tab::Folders,
-            Some("rules") => Tab::Rules,
-            Some("history") => Tab::History,
-            Some("settings") => Tab::Settings,
-            _ => Tab::Dashboard,
-        };
-        app
     }
 
     /// Demo content so the saved picture shows a living app.
@@ -323,6 +346,82 @@ impl App {
         self.toast = Some(msg.into());
     }
 
+    /// Photographie de tout ce qui doit survivre à la fermeture.
+    fn snapshot(&self) -> State {
+        State {
+            schema_version: store::SCHEMA_VERSION,
+            folders: self.folders.clone(),
+            rules: self.rules.clone(),
+            history: self.history.clone(),
+            settings: Settings {
+                accent: self.accent,
+                menu_bar: self.menu_bar,
+                notify: self.notify,
+                animate_bg: self.animate_bg,
+                retention_days: self.retention_days,
+                app_enabled: self.app_enabled,
+            },
+            next_id: self.next_id,
+            next_batch: self.next_batch,
+            monthly_used: self.monthly_used,
+            last_run: self.last_run,
+            last_run_dry: self.last_run_dry,
+        }
+    }
+
+    fn restore(&mut self, state: State) {
+        let max_id = state
+            .folders
+            .iter()
+            .map(|f| f.id)
+            .chain(state.rules.iter().map(|r| r.id))
+            .max()
+            .unwrap_or(0);
+        self.folders = state.folders;
+        self.rules = state.rules;
+        self.history = state.history;
+        self.accent = state.settings.accent.min(ACCENTS.len() - 1);
+        self.menu_bar = state.settings.menu_bar;
+        self.notify = state.settings.notify;
+        self.animate_bg = state.settings.animate_bg;
+        self.retention_days = state.settings.retention_days.clamp(1, 365);
+        self.app_enabled = state.settings.app_enabled;
+        self.next_id = state.next_id.max(max_id + 1);
+        self.next_batch = state.next_batch.max(1);
+        self.monthly_used = state.monthly_used;
+        self.last_run = state.last_run;
+        self.last_run_dry = state.last_run_dry;
+        // La rétention s'applique dès le chargement.
+        purge_history(&mut self.history, self.retention_days, SystemTime::now());
+    }
+
+    /// Premier lancement : rien à faire. Sinon restaure les données ; un fichier illisible est mis de côté.
+    fn load_saved_state(&mut self) {
+        let path = store::state_path();
+        match store::load(&path) {
+            Loaded::Fresh => {}
+            Loaded::Restored(state) => self.restore(*state),
+            Loaded::Unreadable { backup, reason } => {
+                self.toast(format!("Données illisibles ({reason}) : copie gardée dans {}", backup.display()));
+            }
+        }
+        self.last_saved = store::to_json(&self.snapshot());
+        self.store_path = Some(path);
+    }
+
+    /// Écrit l'état s'il a changé depuis la dernière sauvegarde.
+    fn persist(&mut self) {
+        let Some(path) = self.store_path.clone() else { return };
+        let json = store::to_json(&self.snapshot());
+        if json == self.last_saved {
+            return;
+        }
+        match store::save(&path, &json) {
+            Ok(()) => self.last_saved = json,
+            Err(e) => self.toast(format!("Sauvegarde impossible : {e}")),
+        }
+    }
+
     fn run_batch(&mut self, dry_run: bool) {
         if self.folders.is_empty() {
             self.toast("Ajoutez d'abord un dossier");
@@ -344,6 +443,7 @@ impl App {
         for e in outcome.history {
             self.history.push(e);
         }
+        purge_history(&mut self.history, self.retention_days, SystemTime::now());
         if dry_run {
             self.toast(format!("Aperçu : {} fichier(s) concerné(s)", outcome.matched));
         } else {
@@ -1227,6 +1327,10 @@ fn combo(ui: &mut egui::Ui, id: &str, current: &str, options: &[impl AsRef<str>]
 // ------------------------------------------------------------------ render
 
 impl eframe::App for App {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.persist();
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame += 1;
 
@@ -1256,6 +1360,14 @@ impl eframe::App for App {
             }
             ctx.request_repaint();
         }
+
+        // Sauvegarde : au plus une vérification par seconde, écriture seulement si quelque chose a changé.
+        let clock = ctx.input(|i| i.time);
+        if clock >= self.next_save_check {
+            self.next_save_check = clock + 1.0;
+            self.persist();
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(1100));
 
         let screen = ctx.screen_rect();
         let accent_now = self.accent();
@@ -2824,6 +2936,38 @@ mod tests {
         assert!(moved / total >= 6, "le fond doit visiblement évoluer en 20 s (écart {moved})");
         // Fond figé quand le temps ne change pas.
         assert_eq!(bg_color(0.4, 0.4, 3.0, 1.5, accent), bg_color(0.4, 0.4, 3.0, 1.5, accent));
+    }
+
+    #[test]
+    fn app_state_survives_snapshot_and_restore() {
+        let launch = || Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false };
+        let mut a = App::blank(launch());
+        a.seed_demo();
+        a.accent = 3;
+        a.animate_bg = false;
+        a.retention_days = 90;
+        a.monthly_used = 17;
+        let saved = a.snapshot();
+        let json = store::to_json(&saved);
+
+        let mut b = App::blank(launch());
+        b.restore(saved);
+        assert_eq!(store::to_json(&b.snapshot()), json, "restaurer puis re-photographier doit être identique");
+        assert_eq!((b.accent, b.animate_bg, b.retention_days, b.monthly_used), (3, false, 90, 17));
+        assert!(b.next_id > b.rules.iter().map(|r| r.id).max().unwrap(), "les identifiants ne doivent pas se recouvrir");
+    }
+
+    #[test]
+    fn restore_applies_history_retention() {
+        let mut a = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false });
+        a.seed_demo();
+        let mut state = a.snapshot();
+        state.settings.retention_days = 1;
+        state.history[0].created = SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
+        let before = state.history.len();
+        let mut b = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false });
+        b.restore(state);
+        assert_eq!(b.history.len(), before - 1);
     }
 
     #[test]
