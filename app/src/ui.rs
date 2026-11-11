@@ -172,6 +172,7 @@ const UNDO_SECONDS: u64 = 8;
 
 /// Options de lancement (ligne de commande).
 pub struct Launch {
+    pub bg_time: f64,
     pub screenshot: Option<String>,
     pub tab: Option<String>,
     pub empty: bool,
@@ -189,6 +190,7 @@ pub struct App {
     menu_bar: bool,
     notify: bool,
     animate_bg: bool,
+    bg_offset: f64,
     retention_days: u32,
     add_folder_text: String,
     selected_rule: usize,
@@ -209,7 +211,7 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, launch: Launch) -> Self {
-        let Launch { screenshot, tab, empty } = launch;
+        let Launch { screenshot, tab, empty, bg_time } = launch;
         apply_theme(&cc.egui_ctx);
         let mut app = App {
             tab: Tab::Dashboard,
@@ -223,6 +225,7 @@ impl App {
             menu_bar: true,
             notify: true,
             animate_bg: true,
+            bg_offset: bg_time,
             retention_days: HISTORY_RETENTION_DEFAULT_DAYS,
             add_folder_text: String::new(),
             selected_rule: 0,
@@ -404,41 +407,169 @@ fn sample_rule(id: u64, folder_id: u64, name: &str, prio: i64) -> Rule {
 
 // ------------------------------------------------------------ egui helpers
 
-/// Couleur du fond au point (u, v) ∈ [0,1]² à l'instant `t` (secondes).
-/// Trois champs de lumière (accent, bleu nuit, accent doux) qui dérivent lentement, vus à travers
-/// une déformation ondulante, plus un reflet discret qui traverse l'écran (esprit « NEAT »).
-fn bg_color(u: f64, v: f64, t: f64, aspect: f64, accent: Color32) -> Color32 {
-    let wu = u + 0.05 * (3.0 * v + t * 0.35).sin() + 0.035 * (5.0 * u - t * 0.25).sin();
-    let wv = v + 0.05 * (3.0 * u + t * 0.30).cos() + 0.035 * (4.0 * v + t * 0.20).sin();
-    // Distance en unités de la hauteur, corrigée du rapport largeur/hauteur.
-    let glow = |cx: f64, cy: f64, r: f64| {
-        let (dx, dy) = ((wu - cx) * aspect, wv - cy);
-        (-(dx * dx + dy * dy) / (r * r)).exp()
-    };
-    let g1 = glow(0.18 + 0.12 * (t * 0.18).sin(), 0.02 + 0.10 * (t * 0.15).cos(), 0.62);
-    let g2 = glow(0.98 - 0.10 * (t * 0.13 + 1.0).sin(), 1.0 - 0.10 * (t * 0.17).cos(), 0.70);
-    let g3 = glow(0.60 + 0.15 * (t * 0.21 + 2.0).sin(), 0.55 + 0.12 * (t * 0.19).cos(), 0.36);
-    let band = (((wu * aspect + wv) * 4.5) - t * 0.45).sin().max(0.0).powi(3) * 0.5;
-    let mut c = [CANVAS.r() as f64, CANVAS.g() as f64, CANVAS.b() as f64];
-    let layers = [(accent, 0.52 * g1 + 0.20 * g3), (SKY_DEEP, 0.48 * g2)];
-    for (col, k) in layers {
-        let target = [col.r() as f64, col.g() as f64, col.b() as f64];
-        for i in 0..3 {
-            c[i] += (target[i] - c[i]) * k;
+// ------------------------------------------------------------ fond animé (esprit NEAT)
+//
+// Principe repris de NEAT (https://neat.rebase.pro) : un plan 3D ondulé par du bruit, dont la couleur
+// vient de plusieurs champs de bruit qui se disputent le terrain (seuils + `smoothstep`),
+// éclairé comme un tissu (reflets et ombres selon la pente des vagues). Code réécrit ici, sur le CPU.
+
+/// Table de permutation du bruit (mélange déterministe de 0..255, doublée).
+fn perm_table() -> &'static [u8; 512] {
+    static TABLE: std::sync::OnceLock<[u8; 512]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut p: Vec<u8> = (0..=255u8).collect();
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        for i in (1..256).rev() {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            p.swap(i, (state % (i as u64 + 1)) as usize);
         }
+        let mut out = [0u8; 512];
+        for i in 0..512 {
+            out[i] = p[i & 255];
+        }
+        out
+    })
+}
+
+/// Bruit simplexe 3D (algorithme de Gustavson), valeurs dans ≈ [-1, 1].
+fn snoise(x: f32, y: f32, z: f32) -> f32 {
+    const GRAD: [[f32; 3]; 12] = [
+        [1.0, 1.0, 0.0], [-1.0, 1.0, 0.0], [1.0, -1.0, 0.0], [-1.0, -1.0, 0.0],
+        [1.0, 0.0, 1.0], [-1.0, 0.0, 1.0], [1.0, 0.0, -1.0], [-1.0, 0.0, -1.0],
+        [0.0, 1.0, 1.0], [0.0, -1.0, 1.0], [0.0, 1.0, -1.0], [0.0, -1.0, -1.0],
+    ];
+    const F3: f32 = 1.0 / 3.0;
+    const G3: f32 = 1.0 / 6.0;
+    let perm = perm_table();
+    let s = (x + y + z) * F3;
+    let (i, j, k) = ((x + s).floor(), (y + s).floor(), (z + s).floor());
+    let t = (i + j + k) * G3;
+    let (x0, y0, z0) = (x - (i - t), y - (j - t), z - (k - t));
+    let (i1, j1, k1, i2, j2, k2) = if x0 >= y0 {
+        if y0 >= z0 {
+            (1, 0, 0, 1, 1, 0)
+        } else if x0 >= z0 {
+            (1, 0, 0, 1, 0, 1)
+        } else {
+            (0, 0, 1, 1, 0, 1)
+        }
+    } else if y0 < z0 {
+        (0, 0, 1, 0, 1, 1)
+    } else if x0 < z0 {
+        (0, 1, 0, 0, 1, 1)
+    } else {
+        (0, 1, 0, 1, 1, 0)
+    };
+    let (x1, y1, z1) = (x0 - i1 as f32 + G3, y0 - j1 as f32 + G3, z0 - k1 as f32 + G3);
+    let (x2, y2, z2) = (x0 - i2 as f32 + 2.0 * G3, y0 - j2 as f32 + 2.0 * G3, z0 - k2 as f32 + 2.0 * G3);
+    let (x3, y3, z3) = (x0 - 1.0 + 3.0 * G3, y0 - 1.0 + 3.0 * G3, z0 - 1.0 + 3.0 * G3);
+    let (ii, jj, kk) = ((i as i32 & 255) as usize, (j as i32 & 255) as usize, (k as i32 & 255) as usize);
+    let gi = |a: usize, b: usize, c: usize| (perm[a + perm[b + perm[c] as usize] as usize] % 12) as usize;
+    let contrib = |g: usize, x: f32, y: f32, z: f32| {
+        let t = 0.6 - x * x - y * y - z * z;
+        if t < 0.0 {
+            0.0
+        } else {
+            let t2 = t * t;
+            t2 * t2 * (GRAD[g][0] * x + GRAD[g][1] * y + GRAD[g][2] * z)
+        }
+    };
+    let n0 = contrib(gi(ii, jj, kk), x0, y0, z0);
+    let n1 = contrib(gi(ii + i1, jj + j1, kk + k1), x1, y1, z1);
+    let n2 = contrib(gi(ii + i2, jj + j2, kk + k2), x2, y2, z2);
+    let n3 = contrib(gi(ii + 1, jj + 1, kk + 1), x3, y3, z3);
+    32.0 * (n0 + n1 + n2 + n3)
+}
+
+fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Vitesse du fond (secondes de « temps de bruit » par seconde réelle).
+const BG_SPEED: f64 = 0.22;
+/// Largeur du plan en unités de bruit (comme NEAT : 50), fréquence des vagues, amplitude, pression des couleurs.
+const BG_PLANE_W: f32 = 50.0;
+const BG_WAVE_FREQ: f32 = 0.055;
+const BG_WAVE_AMP: f32 = 2.4;
+const BG_COLOR_PRESSURE: f32 = 0.95;
+const BG_BLENDING: f32 = 0.5;
+/// Reflets et ombres du tissu.
+const BG_HIGHLIGHTS: f32 = 0.07;
+const BG_SHADOWS: f32 = 0.06;
+
+/// Couleur du fond au point (u, v) ∈ [0,1]² à l'instant `t` (secondes).
+/// Mêmes couleurs que le thème : nuit, orange accent, bleu nuit, et leurs variantes sombres.
+fn bg_color(u: f64, v: f64, t: f64, aspect: f64, accent: Color32) -> Color32 {
+    let tt = ((t * BG_SPEED) % 7200.0) as f32;
+    let x = (u as f32 - 0.5) * BG_PLANE_W;
+    let y = (v as f32 - 0.5) * BG_PLANE_W / aspect as f32;
+
+    // 1. Vagues : élévation du plan et pente (différences finies) → normale.
+    let h = 0.35;
+    let disp = |px: f32, py: f32| snoise(BG_WAVE_FREQ * px + tt, BG_WAVE_FREQ * py + tt, tt);
+    let d = disp(x, y);
+    let sx = BG_WAVE_AMP * (disp(x + h, y) - d) / h;
+    let sy = BG_WAVE_AMP * (disp(x, y + h) - d) / h;
+    let inv = 1.0 / (sx * sx + sy * sy + 1.0).sqrt();
+    let n = [-sx * inv, -sy * inv, inv];
+
+    // 2. Couleurs : chaque champ de bruit pousse sa teinte plus ou moins loin (seuils + smoothstep).
+    let mix = |a: Color32, b: Color32, k: f32| {
+        [
+            a.r() as f32 + (b.r() as f32 - a.r() as f32) * k,
+            a.g() as f32 + (b.g() as f32 - a.g() as f32) * k,
+            a.b() as f32 + (b.b() as f32 - a.b() as f32) * k,
+        ]
+    };
+    let lerp_col = |a: Color32, b: Color32, k: f32| {
+        let m = mix(a, b, k);
+        Color32::from_rgb(m[0] as u8, m[1] as u8, m[2] as u8)
+    };
+    let palette = [
+        CANVAS,
+        lerp_col(CANVAS, accent, 0.58),
+        lerp_col(CANVAS, SKY_DEEP, 0.50),
+        lerp_col(CANVAS, accent, 0.28),
+        lerp_col(CANVAS, SKY_DEEP, 0.26),
+    ];
+    let (cx, cy) = (x / 50.0 * BG_COLOR_PRESSURE * BG_COLOR_PRESSURE, y / 50.0 * BG_COLOR_PRESSURE * BG_COLOR_PRESSURE);
+    let mut c = [CANVAS.r() as f32, CANVAS.g() as f32, CANVAS.b() as f32];
+    for (i, col) in palette.iter().enumerate().skip(1) {
+        let fi = i as f32;
+        let seed = 13.0 + fi * 7.0;
+        let noise = snoise(cx + tt * (1.0 + fi) / 30.0 * 2.0 + seed, cy + seed, tt * (1.0 + fi) * 0.11 + seed) - 0.1 * fi
+            + 0.5 * BG_BLENDING;
+        let noise = noise.clamp(0.0, 0.9 + fi * 0.02);
+        let k = smoothstep(0.0, BG_BLENDING, noise);
+        c = {
+            let m = [
+                c[0] + (col.r() as f32 - c[0]) * k,
+                c[1] + (col.g() as f32 - c[1]) * k,
+                c[2] + (col.b() as f32 - c[2]) * k,
+            ];
+            m
+        };
     }
-    let lift = band * 5.0 * (0.4 + g1 + g2);
-    Color32::from_rgb(
-        (c[0] + lift).clamp(0.0, 255.0) as u8,
-        (c[1] + lift).clamp(0.0, 255.0) as u8,
-        (c[2] + lift).clamp(0.0, 255.0) as u8,
-    )
+
+    // 3. Éclairage du tissu : lumière rasante venue d'en haut à droite, reflet spéculaire.
+    let light = [0.577_35, 0.577_35, 0.577_35];
+    let diffuse = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]).max(0.0);
+    let half = [light[0], light[1], light[2] + 1.0];
+    let hl = (half[0] * half[0] + half[1] * half[1] + half[2] * half[2]).sqrt();
+    let spec = ((n[0] * half[0] + n[1] * half[1] + n[2] * half[2]) / hl).max(0.0).powi(32);
+    let height_shadow = (1.0 - d) * (1.0 - d);
+    let shade = spec * BG_HIGHLIGHTS + d * BG_HIGHLIGHTS * 0.5 - height_shadow * BG_SHADOWS * 0.5 - (1.0 - diffuse) * BG_SHADOWS * 0.5;
+    let out = |v: f32| (v + shade * 255.0).clamp(0.0, 255.0) as u8;
+    Color32::from_rgb(out(c[0]), out(c[1]), out(c[2]))
 }
 
 /// Fond « verre » animé : maillage coloré par sommet (interpolé par le GPU), recalculé à chaque image.
 fn backdrop(ui: &mut egui::Ui, rect: Rect, accent: Color32, t: f64) {
-    const COLS: u32 = 40;
-    const ROWS: u32 = 26;
+    const COLS: u32 = 72;
+    const ROWS: u32 = 46;
     let aspect = (rect.width() / rect.height().max(1.0)) as f64;
     let mut mesh = egui::epaint::Mesh::default();
     for j in 0..=ROWS {
@@ -1134,9 +1265,9 @@ impl eframe::App for App {
         }
         let bg_time = if self.animate_bg {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
-            ctx.input(|i| i.time)
+            ctx.input(|i| i.time) + self.bg_offset
         } else {
-            0.0
+            self.bg_offset
         };
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
             backdrop(ui, screen, self.accent(), bg_time);
@@ -2635,23 +2766,6 @@ impl App {
             });
         });
 
-        ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 128.0), |ui| {
-            ui.label(RichText::new("À propos des chiffres").size(15.0).family(semibold()).color(text_primary()));
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(format!(
-                    "Limites de l'original, non appliquées ici : {} fichiers/mois, {} dossiers, {} Mo de texte, {} Mo d'OCR, noms de {} caractères. Détails : MECHANICS.md.",
-                    MONTHLY_FILE_LIMIT,
-                    FREE_FOLDER_LIMIT,
-                    TEXT_LIMIT_BYTES / 1024 / 1024,
-                    OCR_LIMIT_BYTES / 1024 / 1024,
-                    FILENAME_MAX_LENGTH
-                ))
-                .size(14.0)
-                .color(text_dim()),
-            );
-        });
         let _ = accent;
     }
 }
