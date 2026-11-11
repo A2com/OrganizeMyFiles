@@ -24,7 +24,11 @@ fn main() -> eframe::Result {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 780.0])
             .with_min_inner_size([980.0, 640.0])
-            .with_title("OrganizeMyFiles"),
+            .with_title("OrganizeMyFiles")
+            // macOS : barre de titre fondue dans le contenu, feux natifs conservés.
+            .with_fullsize_content_view(cfg!(target_os = "macos"))
+            .with_titlebar_shown(!cfg!(target_os = "macos"))
+            .with_title_shown(!cfg!(target_os = "macos")),
         ..Default::default()
     };
 

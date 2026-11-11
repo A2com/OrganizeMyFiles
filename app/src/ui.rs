@@ -31,6 +31,12 @@ enum Icon {
     Check,
     Sliders,
     Sort,
+    Funnel,
+    Bolt,
+    Grip,
+    Bell,
+    Gear,
+    Search,
 }
 
 const TABS: &[(Tab, &str, Icon, &str)] = &[
@@ -130,6 +136,8 @@ pub struct App {
     add_folder_text: String,
     selected_folder: usize,
     selected_rule: usize,
+    app_enabled: bool,
+    search: String,
     toast: Option<String>,
     last_run: Option<(usize, usize, usize)>, // matched, actions, scanned
     frame: u32,
@@ -156,6 +164,8 @@ impl App {
             add_folder_text: String::new(),
             selected_folder: 0,
             selected_rule: 0,
+            app_enabled: true,
+            search: String::new(),
             toast: None,
             last_run: None,
             frame: 0,
@@ -471,12 +481,169 @@ fn draw_icon(painter: &egui::Painter, c: Pos2, icon: Icon, color: Color32, s: f3
                 );
             }
         }
+        Icon::Funnel => {
+            for (a, b) in [
+                ((-8.0, -6.0), (8.0, -6.0)),
+                ((-8.0, -6.0), (-2.0, 1.0)),
+                ((8.0, -6.0), (2.0, 1.0)),
+                ((-2.0, 1.0), (-2.0, 7.0)),
+                ((2.0, 1.0), (2.0, 5.0)),
+                ((-2.0, 7.0), (2.0, 5.0)),
+            ] {
+                seg(a, b, 2.0);
+            }
+        }
+        Icon::Bolt => {
+            let pts = [(2.0, -8.0), (-4.0, 1.0), (1.0, 1.0), (-2.0, 8.0), (5.0, -2.0), (0.0, -2.0), (2.0, -8.0)];
+            for w in pts.windows(2) {
+                seg(w[0], w[1], 2.0);
+            }
+        }
+        Icon::Grip => {
+            for x in [-2.5f32, 2.5] {
+                for y in [-5.0f32, 0.0, 5.0] {
+                    painter.circle_filled(Pos2::new(c.x + x * u, c.y + y * u), 1.4 * u, color);
+                }
+            }
+        }
+        Icon::Bell => {
+            painter.circle_stroke(Pos2::new(c.x, c.y - 1.5 * u), 5.5 * u, Stroke::new(2.0 * u, color));
+            seg((-7.5, 4.0), (7.5, 4.0), 2.0);
+            painter.circle_filled(Pos2::new(c.x, c.y + 7.0 * u), 1.5 * u, color);
+        }
+        Icon::Gear => {
+            painter.circle_stroke(c, 3.0 * u, Stroke::new(2.0 * u, color));
+            painter.circle_stroke(c, 7.0 * u, Stroke::new(2.0 * u, color));
+            for (a, b) in [((0.0, -10.0), (0.0, -7.0)), ((0.0, 7.0), (0.0, 10.0)), ((-10.0, 0.0), (-7.0, 0.0)), ((7.0, 0.0), (10.0, 0.0))] {
+                seg(a, b, 2.4);
+            }
+        }
+        Icon::Search => {
+            painter.circle_stroke(Pos2::new(c.x - 2.0 * u, c.y - 2.0 * u), 5.5 * u, Stroke::new(2.0 * u, color));
+            seg((2.0, 2.0), (7.5, 7.5), 2.2);
+        }
         Icon::Sort => {
             seg((-8.0, -6.0), (8.0, -6.0), 2.4);
             seg((-5.0, 0.0), (5.0, 0.0), 2.4);
             seg((-2.0, 6.0), (2.0, 6.0), 2.4);
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Btn {
+    Primary,
+    Ghost,
+    Sky,
+    Danger,
+}
+
+/// Bouton 32 px de haut (rayon 8) : primaire orange, fantôme, bleu azur ou danger.
+fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<Icon>) -> egui::Response {
+    let font = egui::FontId::proportional(12.5);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font.clone(), Color32::WHITE);
+    let icon_w = if icon.is_some() { 20.0 } else { 0.0 };
+    let size = Vec2::new(galley.size().x + 28.0 + icon_w, 32.0);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let enabled = resp.enabled();
+    let hover = resp.hovered() && enabled;
+    let (fill, stroke, fg) = match kind {
+        Btn::Primary => (if hover { lighten(accent, 16) } else { accent }, Color32::TRANSPARENT, Color32::WHITE),
+        Btn::Ghost => (
+            if hover { Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 14) } else { Color32::TRANSPARENT },
+            field_stroke(),
+            text_primary(),
+        ),
+        Btn::Sky => (with_alpha(SKY, if hover { 40 } else { 22 }), with_alpha(SKY, 100), SKY),
+        Btn::Danger => (
+            with_alpha(Color32::from_rgb(0xf8, 0x71, 0x71), if hover { 36 } else { 0 }),
+            with_alpha(Color32::from_rgb(0xf8, 0x71, 0x71), 90),
+            Color32::from_rgb(0xf8, 0x71, 0x71),
+        ),
+    };
+    let (fill, fg) = if enabled { (fill, fg) } else { (with_alpha(Color32::WHITE, 12), with_alpha(Color32::WHITE, 70)) };
+    let p = ui.painter();
+    if kind == Btn::Primary && enabled {
+        p.rect_filled(rect.expand(3.0), Rounding::same(10.0), with_alpha(accent, 40));
+    }
+    p.rect_filled(rect, Rounding::same(8.0), fill);
+    if stroke != Color32::TRANSPARENT {
+        p.rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0, stroke));
+    }
+    let mut x = rect.left() + 14.0;
+    if let Some(ic) = icon {
+        draw_icon(p, Pos2::new(x + 7.0, rect.center().y), ic, fg, 15.0);
+        x += icon_w;
+    }
+    p.text(Pos2::new(x, rect.center().y), egui::Align2::LEFT_CENTER, text, font, fg);
+    resp
+}
+
+/// Pastille d'information (22 px) : badge compteur, version, statut.
+fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32, stroke: Color32) -> egui::Response {
+    let font = egui::FontId::proportional(11.5);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font, fg);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 18.0, 22.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, Rounding::same(11.0), bg);
+    ui.painter().rect_stroke(rect, Rounding::same(11.0), Stroke::new(1.0, stroke));
+    let pos = Pos2::new(rect.left() + 9.0, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, fg);
+    resp
+}
+
+/// Interrupteur façon macOS.
+fn toggle(ui: &mut egui::Ui, on: &mut bool, accent: Color32) -> egui::Response {
+    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(38.0, 22.0), egui::Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let t = ui.ctx().animate_bool(resp.id, *on);
+    let fill = if *on { accent } else { Color32::from_rgb(0x3a, 0x3d, 0x4a) };
+    if *on {
+        ui.painter().rect_filled(rect.expand(2.0), Rounding::same(13.0), with_alpha(accent, 40));
+    }
+    ui.painter().rect_filled(rect, Rounding::same(11.0), fill);
+    let x = egui::lerp((rect.left() + 11.0)..=(rect.right() - 11.0), t);
+    ui.painter().circle_filled(Pos2::new(x, rect.center().y), 8.5, Color32::WHITE);
+    resp
+}
+
+/// Contrôle segmenté ; renvoie l'index cliqué.
+fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, active: Color32) -> Option<usize> {
+    let font = egui::FontId::proportional(12.0);
+    let widths: Vec<f32> = labels
+        .iter()
+        .map(|l| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::WHITE).size().x + 28.0)
+        .collect();
+    let total = widths.iter().sum::<f32>() + 8.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(total, 34.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, Rounding::same(9.0), CANVAS);
+    ui.painter().rect_stroke(rect, Rounding::same(9.0), Stroke::new(1.0, field_stroke()));
+    let mut x = rect.left() + 4.0;
+    let mut out = None;
+    for (i, label) in labels.iter().enumerate() {
+        let seg = Rect::from_min_size(Pos2::new(x, rect.top() + 4.0), Vec2::new(widths[i], 26.0));
+        let resp = ui.interact(seg, id.with(i), egui::Sense::click());
+        let on = i == selected;
+        if on {
+            ui.painter().rect_filled(seg, Rounding::same(6.0), active);
+        } else if resp.hovered() {
+            ui.painter().rect_filled(seg, Rounding::same(6.0), CARD_HI);
+        }
+        ui.painter().text(
+            seg.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            font.clone(),
+            if on { Color32::WHITE } else { text_dim() },
+        );
+        if resp.clicked() {
+            out = Some(i);
+        }
+        x += widths[i];
+    }
+    out
 }
 
 fn icon_square(ui: &mut egui::Ui, icon: Icon, accent: Color32, active: bool) {
@@ -565,11 +732,18 @@ impl eframe::App for App {
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
             flat_bg(ui, screen);
 
+            egui::TopBottomPanel::top("topbar")
+                .exact_height(56.0)
+                .frame(egui::Frame::none().fill(PANEL).stroke(Stroke::new(1.0f32, card_stroke())))
+                .show_inside(ui, |ui| {
+                    self.top_bar(ui);
+                });
+
             egui::SidePanel::left("sidebar")
                 .resizable(false)
-                .exact_width(232.0)
-                .frame(egui::Frame::none())
-                .show_animated_inside(ui, true, |ui| {
+                .exact_width(256.0)
+                .frame(egui::Frame::none().fill(PANEL).stroke(Stroke::new(1.0f32, card_stroke())))
+                .show_inside(ui, |ui| {
                     self.sidebar(ui);
                 });
 
@@ -606,82 +780,299 @@ impl eframe::App for App {
 }
 
 impl App {
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let accent = self.accent();
+        let ctx = ui.ctx().clone();
+        let rect = ui.max_rect();
+        let wide = rect.width() >= 1100.0;
+
+        // La barre sert de poignée pour déplacer la fenêtre (barre de titre masquée).
+        let drag = ui.interact(rect, ui.id().with("drag"), egui::Sense::click_and_drag());
+        if drag.drag_started_by(egui::PointerButton::Primary) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+
+        // ⌘K : focus sur la recherche.
+        let search_id = egui::Id::new("global-search");
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
+            ctx.memory_mut(|m| m.request_focus(search_id));
+        }
+
+        let search_w = (rect.width() * 0.24).clamp(190.0, 300.0);
+        let search_rect = Rect::from_center_size(rect.center(), Vec2::new(search_w, 34.0));
+
+        // --- gauche
+        let left = Rect::from_min_max(
+            Pos2::new(rect.left() + 16.0, rect.top()),
+            Pos2::new(search_rect.left() - 10.0, rect.bottom()),
+        );
+        let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left).layout(Layout::left_to_right(Align::Center)));
+        if cfg!(target_os = "macos") {
+            lui.add_space(76.0); // feux natifs de la fenêtre
+        } else {
+            for c in [(0xff, 0x5f, 0x56), (0xff, 0xbd, 0x2e), (0x27, 0xc9, 0x3f)] {
+                let (r, _) = lui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::hover());
+                lui.painter().circle_filled(r.center(), 6.0, Color32::from_rgb(c.0, c.1, c.2));
+                lui.add_space(2.0);
+            }
+            lui.add_space(10.0);
+        }
+        let (sep, _) = lui.allocate_exact_size(Vec2::new(1.0, 22.0), egui::Sense::hover());
+        lui.painter().rect_filled(sep, Rounding::ZERO, card_stroke());
+        lui.add_space(12.0);
+        let (logo, _) = lui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
+        draw_icon(&lui.painter().clone(), logo.center(), Icon::Folder, accent, 22.0);
+        lui.add_space(6.0);
+        lui.label(RichText::new("OrganizeMyFiles").size(15.0).strong().color(Color32::WHITE));
+        if wide {
+            lui.add_space(8.0);
+            let state = if self.app_enabled { "Actif" } else { "En veille" };
+            chip(
+                &mut lui,
+                &format!("V0.1 • {state}"),
+                text_dim(),
+                Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 12),
+                card_stroke(),
+            );
+        }
+
+        // --- centre : recherche
+        ui.painter().rect_filled(search_rect, Rounding::same(8.0), with_alpha(CANVAS, 180));
+        ui.painter().rect_stroke(search_rect, Rounding::same(8.0), Stroke::new(1.0f32, field_stroke()));
+        let mut sui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(search_rect.shrink2(Vec2::new(10.0, 0.0)))
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        let (ic, _) = sui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
+        draw_icon(&sui.painter().clone(), ic.center(), Icon::Search, text_dim(), 15.0);
+        sui.add(
+            egui::TextEdit::singleline(&mut self.search)
+                .id(search_id)
+                .frame(false)
+                .desired_width(search_w - 90.0)
+                .hint_text("Rechercher des règles, dossiers, actions..."),
+        );
+        let key = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };
+        ui.painter().text(
+            Pos2::new(search_rect.right() - 12.0, search_rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            key,
+            egui::FontId::proportional(11.0),
+            text_dim(),
+        );
+
+        // --- droite
+        let right = Rect::from_min_max(
+            Pos2::new(search_rect.right() + 10.0, rect.top()),
+            Pos2::new(rect.right() - 16.0, rect.bottom()),
+        );
+        let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right).layout(Layout::right_to_left(Align::Center)));
+        if wide {
+            let (r, resp) = rui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::click());
+            if resp.hovered() {
+                rui.painter().rect_filled(r, Rounding::same(8.0), with_alpha(Color32::WHITE, 14));
+            }
+            draw_icon(&rui.painter().clone(), r.center(), Icon::Gear, text_dim(), 17.0);
+            if resp.on_hover_text("Réglages").clicked() {
+                self.tab = Tab::Settings;
+            }
+            let (r, resp) = rui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::click());
+            if resp.hovered() {
+                rui.painter().rect_filled(r, Rounding::same(8.0), with_alpha(Color32::WHITE, 14));
+            }
+            draw_icon(&rui.painter().clone(), r.center(), Icon::Bell, text_dim(), 17.0);
+            if self.history.iter().any(|h| h.status == Status::BlockedByConflict) {
+                rui.painter().circle_filled(r.center() + Vec2::new(7.0, -7.0), 3.5, accent);
+            }
+            if resp.on_hover_text("Historique").clicked() {
+                self.tab = Tab::History;
+            }
+            rui.add_space(4.0);
+        }
+        let enabled = self.app_enabled;
+        let run = rui.add_enabled_ui(enabled, |ui| btn(ui, "Organiser", Btn::Primary, accent, Some(Icon::Bolt))).inner;
+        if run.clicked() {
+            self.run_batch(false);
+        }
+        if btn(&mut rui, "Aperçu simulation", Btn::Ghost, accent, None).clicked() {
+            self.run_batch(true);
+        }
+        // Statut : pastille verte pulsée.
+        let label = if self.app_enabled { "Actif" } else { "En veille" };
+        let dot = if self.app_enabled { GREEN } else { text_dim() };
+        let (r, resp) = rui.allocate_exact_size(Vec2::new(82.0, 32.0), egui::Sense::click());
+        rui.painter().rect_filled(r, Rounding::same(16.0), with_alpha(dot, if resp.hovered() { 36 } else { 22 }));
+        rui.painter().rect_stroke(r, Rounding::same(16.0), Stroke::new(1.0f32, with_alpha(dot, 80)));
+        let dc = Pos2::new(r.left() + 16.0, r.center().y);
+        if self.app_enabled {
+            let t = (ctx.input(|i| i.time) as f32 * 1.4).fract();
+            rui.painter().circle_filled(dc, 4.0 + 5.0 * t, with_alpha(dot, ((1.0 - t) * 90.0) as u8));
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        rui.painter().circle_filled(dc, 4.0, dot);
+        rui.painter().text(
+            Pos2::new(r.left() + 28.0, r.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            egui::FontId::proportional(12.5),
+            text_primary(),
+        );
+        if resp.on_hover_text("Activer / mettre en veille").clicked() {
+            self.app_enabled = !self.app_enabled;
+        }
+    }
+
+    fn new_rule(&mut self) {
+        let Some(folder) = self.folders.get(self.selected_folder.min(self.folders.len().saturating_sub(1))) else {
+            self.toast("Ajoutez d'abord un dossier suivi.");
+            return;
+        };
+        let folder_id = folder.id;
+        let count = self.rules.iter().filter(|r| r.folder_id == folder_id).count();
+        let id = self.next_id;
+        self.next_id += 1;
+        self.rules.push(Rule {
+            id,
+            folder_id,
+            name: format!("Règle {}", count + 1),
+            enabled: true,
+            match_all: true,
+            recursion_depth: 0,
+            priority: count as i64,
+            conditions: vec![Condition {
+                field: Field::Extension,
+                op: Op::Equals,
+                value: String::new(),
+            }],
+            actions: vec![Action::new(ActionKind::Move)],
+        });
+        self.selected_rule = count;
+        self.tab = Tab::Rules;
+    }
+
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
-        ui.add_space(24.0);
+        ui.add_space(18.0);
         ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(34.0, 34.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, Rounding::same(11.0), accent);
-            draw_icon(&ui.painter().clone(), rect.center(), Icon::Sort, Color32::WHITE, 18.0);
-            ui.add_space(12.0);
-            ui.vertical(|ui| {
-                ui.label(RichText::new("OrganizeMyFiles").size(16.0).strong().color(text_primary()));
-                ui.label(
-                    RichText::new("Toutes les fonctions débloquées")
-                        .size(11.0)
-                        .color(text_dim()),
-                );
-            });
+            ui.add_space(22.0);
+            ui.label(RichText::new("MENU").size(11.0).strong().color(Color32::from_rgb(0x64, 0x74, 0x8b)));
         });
-        ui.add_space(24.0);
+        ui.add_space(8.0);
 
         for (tab, label, icon, _desc) in TABS {
             let active = self.tab == *tab;
+            let badge = match tab {
+                Tab::Folders => Some(self.folders.len()),
+                Tab::Rules => Some(self.rules.len()),
+                _ => None,
+            };
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
-                let id = ui.next_auto_id();
-                let (rect, response) =
-                    ui.allocate_exact_size(Vec2::new(208.0, 42.0), egui::Sense::click());
+                let (rect, response) = ui.allocate_exact_size(Vec2::new(232.0, 40.0), egui::Sense::click());
+                let p = ui.painter();
                 if active {
-                    for (off, alpha) in [(5.0f32, 30u8), (2.0, 46)] {
-                        ui.painter().rect_filled(
-                            rect.translate(Vec2::new(0.0, off)),
-                            Rounding::same(14.0),
-                            Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), alpha),
-                        );
-                    }
-                    ui.painter().rect_filled(rect, Rounding::same(14.0), accent);
-                } else if response.hovered() {
-                    ui.painter().rect_filled(
-                        rect,
-                        Rounding::same(14.0),
-                        Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 160),
+                    p.rect_filled(rect, Rounding::same(10.0), with_alpha(accent, 38));
+                    p.rect_filled(
+                        Rect::from_min_size(rect.left_top() + Vec2::new(0.0, 9.0), Vec2::new(3.0, 22.0)),
+                        Rounding::same(2.0),
+                        accent,
                     );
+                } else if response.hovered() {
+                    p.rect_filled(rect, Rounding::same(10.0), with_alpha(Color32::WHITE, 10));
                 }
-                let mut child = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(rect.shrink2(Vec2::new(0.0, 7.0)))
-                        .layout(Layout::left_to_right(Align::Center)),
+                let fg = if active { accent } else { text_dim() };
+                draw_icon(p, Pos2::new(rect.left() + 26.0, rect.center().y), *icon, fg, 17.0);
+                p.text(
+                    Pos2::new(rect.left() + 46.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    *label,
+                    egui::FontId::proportional(13.5),
+                    if active { accent } else { text_primary() },
                 );
-                child.set_min_size(rect.size());
-                child.add_space(12.0);
-                icon_square(&mut child, *icon, accent, active);
-                child.add_space(12.0);
-                child.label(
-                    RichText::new(*label).size(13.5).color(if active { Color32::WHITE } else { text_primary() }),
-                );
-                let _ = id;
+                if let Some(n) = badge {
+                    let text = n.to_string();
+                    let g = p.layout_no_wrap(text.clone(), egui::FontId::proportional(11.0), fg);
+                    let w = (g.size().x + 14.0).max(22.0);
+                    let b = Rect::from_center_size(Pos2::new(rect.right() - 12.0 - w / 2.0, rect.center().y), Vec2::new(w, 20.0));
+                    p.rect_filled(b, Rounding::same(10.0), if active { with_alpha(accent, 60) } else { with_alpha(Color32::WHITE, 16) });
+                    p.text(b.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(11.0), fg);
+                    if active && *tab == Tab::Rules {
+                        p.circle_filled(Pos2::new(b.left() - 9.0, rect.center().y), 3.0, accent);
+                    }
+                }
                 if response.clicked() {
                     self.tab = *tab;
                 }
             });
-            ui.add_space(4.0);
+            ui.add_space(2.0);
         }
 
-        ui.add_space(32.0);
+        ui.add_space(14.0);
         ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(232.0, 38.0), egui::Sense::click());
+            let col = if resp.hovered() { with_alpha(accent, 130) } else { with_alpha(Color32::WHITE, 50) };
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, Rounding::same(10.0), with_alpha(accent, 14));
+            }
+            let r = rect.shrink(0.5);
+            let st = Stroke::new(1.0f32, col);
+            for (a, b) in [
+                (r.left_top() + Vec2::new(10.0, 0.0), r.right_top() - Vec2::new(10.0, 0.0)),
+                (r.left_bottom() + Vec2::new(10.0, 0.0), r.right_bottom() - Vec2::new(10.0, 0.0)),
+                (r.left_top() + Vec2::new(0.0, 10.0), r.left_bottom() - Vec2::new(0.0, 10.0)),
+                (r.right_top() + Vec2::new(0.0, 10.0), r.right_bottom() - Vec2::new(0.0, 10.0)),
+            ] {
+                ui.painter().extend(egui::Shape::dashed_line(&[a, b], st, 4.0, 3.0));
+            }
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "+  Nouvelle règle",
+                egui::FontId::proportional(13.0),
+                if resp.hovered() { accent } else { text_primary() },
+            );
+            if resp.clicked() {
+                self.new_rule();
+            }
+        });
+
+        // Pied : état de l'application.
+        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
             ui.add_space(16.0);
-            ui.vertical(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "{} dossiers  •  {} fichiers traités ce mois-ci (sans limites)",
-                        self.folders.iter().filter(|f| f.enabled).count(),
-                        self.monthly_used,
-                    ))
-                    .size(10.5)
-                    .color(text_dim()),
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(232.0, 84.0), egui::Sense::hover());
+                ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(CANVAS, 150));
+                ui.painter().rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0f32, with_alpha(Color32::WHITE, 13)));
+                let mut c = ui.new_child(
+                    egui::UiBuilder::new().max_rect(rect.shrink(12.0)).layout(Layout::top_down(Align::Min)),
                 );
+                c.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("APPLICATION").size(10.0).strong().color(text_dim()));
+                        ui.label(
+                            RichText::new(if self.app_enabled { "Activée" } else { "En veille" })
+                                .size(13.5)
+                                .color(Color32::WHITE),
+                        );
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        toggle(ui, &mut self.app_enabled, accent);
+                    });
+                });
+                c.add_space(6.0);
+                let (dot, txt) = if self.app_enabled {
+                    (GREEN, "Surveillance active • v0.1")
+                } else {
+                    (text_dim(), "En veille • v0.1")
+                };
+                c.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
+                    ui.painter().circle_filled(r.center(), 3.5, dot);
+                    ui.label(RichText::new(txt).size(11.0).color(text_dim()));
+                });
             });
         });
     }
