@@ -1564,7 +1564,7 @@ mod tests {
 
     #[test]
     fn numbered_path_skips_existing_names() {
-        let dir = std::env::temp_dir().join(format!("forel-num-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("organizefiles-num-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let first = dir.join("photo.png");
         fs::write(&first, b"x").unwrap();
@@ -1576,7 +1576,7 @@ mod tests {
 
     #[test]
     fn validate_new_folder_rejects_missing_and_duplicates() {
-        let dir = std::env::temp_dir().join(format!("forel-folders-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("organizefiles-folders-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("a.txt"), b"x").unwrap();
         fs::write(dir.join(".hidden"), b"x").unwrap();

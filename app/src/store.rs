@@ -48,9 +48,9 @@ pub enum Loaded {
     Unreadable { backup: PathBuf, reason: String },
 }
 
-/// Dossier de données de l'appli (`FOREL_STATE_DIR` permet de le rediriger, par exemple pour les tests).
+/// Dossier de données de l'appli (`ORGANIZEFILES_STATE_DIR` permet de le rediriger, par exemple pour les tests).
 pub fn state_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("FOREL_STATE_DIR") {
+    if let Ok(dir) = std::env::var("ORGANIZEFILES_STATE_DIR") {
         return PathBuf::from(dir);
     }
     let home = PathBuf::from(home_dir());
@@ -128,7 +128,7 @@ mod tests {
 
     fn temp_dir(tag: &str) -> PathBuf {
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos();
-        let dir = std::env::temp_dir().join(format!("forel-store-{tag}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("organizefiles-store-{tag}-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
