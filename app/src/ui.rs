@@ -472,12 +472,16 @@ fn shadow_ring(rect: Rect, r: f32, blur: f32, offset: Vec2, alpha: u8) -> egui::
     egui::Shape::mesh(mesh)
 }
 
-/// Surface de verre : ombre diffuse autour + voile blanc translucide.
+/// Liseré blanc fin des cartes (« 30 % » perçu : l'alpha brut est bien plus bas, le mélange étant linéaire).
+const CARD_BORDER: Color32 = Color32::from_rgba_premultiplied(26, 26, 26, 26);
+
+/// Surface de verre : ombre diffuse autour, voile blanc translucide et liseré fin.
 fn glass_shapes(rect: Rect) -> egui::Shape {
     let blur = (rect.height() * 0.25).clamp(20.0, 34.0);
     egui::Shape::Vec(vec![
         shadow_ring(rect, CARD_RADIUS, blur, Vec2::new(0.0, blur * 0.45), 64),
         egui::Shape::rect_filled(rect, Rounding::same(CARD_RADIUS), glass(11)),
+        egui::Shape::rect_stroke(rect, Rounding::same(CARD_RADIUS), Stroke::new(1.0f32, CARD_BORDER)),
     ])
 }
 
