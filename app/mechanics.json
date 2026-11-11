@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "values": [
+    {
+      "name": "free folder limit",
+      "group": "plan",
+      "value": 2,
+      "unit": "folders",
+      "source": "function 0x1000e2110 FreePlan.folderLimitSivgZ (ForelCore, ForelApp)"
+    },
+    {
+      "name": "monthly file limit",
+      "group": "plan",
+      "value": 300,
+      "unit": "files per calendar month",
+      "source": "function 0x100167f24 FreePlan.monthlyFileLimitSivgZ (ForelCore, ForelApp)"
+    },
+    {
+      "name": "month key format",
+      "group": "plan",
+      "value": "%04d-%02d",
+      "unit": "format YYYY-MM",
+      "source": "function 0x1001697f8 MonthlyFileUsageStore.runWithFreePlan (ForelCore, ForelApp)"
+    },
+    {
+      "name": "rule order",
+      "group": "rules",
+      "value": "priority, created_at",
+      "unit": "ordering",
+      "source": "SQL 0x1001e4500 (ForelApp)"
+    },
+    {
+      "name": "recursion depth default",
+      "group": "rules",
+      "value": 0,
+      "unit": "levels (0 = top-level files only)",
+      "source": "SQL 0x1001e45c0 (ForelApp)"
+    },
+    {
+      "name": "rename tokens",
+      "group": "actions",
+      "value": "{name} {extension} {current_date} {timestamp} {date_modified} {date_created} {size}",
+      "unit": "pattern tokens, space separated",
+      "source": "function 0x100140a14 ActionExecutor.archiveFileName (ForelCore, ForelApp)"
+    },
+    {
+      "name": "destination tokens",
+      "group": "actions",
+      "value": "{year} {month} {day}",
+      "unit": "destination path tokens, space separated",
+      "source": "strings 0x1001e0b30 (ForelApp)"
+    },
+    {
+      "name": "archive default name",
+      "group": "actions",
+      "value": "{name}.zip",
+      "unit": "pattern",
+      "source": "function 0x100140a14 ActionExecutor.archiveFileName (ForelCore, ForelApp)"
+    },
+    {
+      "name": "timestamp format",
+      "group": "actions",
+      "value": "yyyy-MM-dd_HH-mm-ss",
+      "unit": "date format for {timestamp} and {current_date}",
+      "source": "function 0x100140a14 ActionExecutor.archiveFileName (ForelCore, ForelApp)"
+    },
+    {
+      "name": "filename max length",
+      "group": "validation",
+      "value": 255,
+      "unit": "characters (UTF-8 bytes for archive names, .zip included)",
+      "source": "function 0x100138bec ActionExecutor.validateMacOSFilename and 0x100140a14 archiveFileName (ForelCore, ForelApp)"
+    },
+    {
+      "name": "text extraction limit",
+      "group": "extraction",
+      "value": 104857600,
+      "unit": "bytes (100 MB, 0x6400000)",
+      "source": "function 0x10014d10c ContentExtractor.extractPlainText (ForelCore, ForelApp)"
+    },
+    {
+      "name": "ocr extraction limit",
+      "group": "extraction",
+      "value": 26214400,
+      "unit": "bytes (25 MB, 0x1900000)",
+      "source": "function 0x100150c7c ContentExtractor.extractImageOCR (ForelCore, ForelApp)"
+    },
+    {
+      "name": "ocr image dimension limit",
+      "group": "extraction",
+      "value": 12000,
+      "unit": "pixels (width > 12000 or height >= 12001 refused, 0x2ee0)",
+      "source": "function 0x100150c7c ContentExtractor.extractImageOCR (ForelCore, ForelApp)"
+    },
+    {
+      "name": "text decode encodings",
+      "group": "extraction",
+      "value": "utf8 utf16 isoLatin1",
+      "unit": "encodings tried in order, space separated",
+      "source": "function 0x10014d10c ContentExtractor.extractPlainText (ForelCore, ForelApp)"
+    },
+    {
+      "name": "conflict policy",
+      "group": "actions",
+      "value": "replace, skip",
+      "unit": "enum, comma separated",
+      "source": "strings 0x1001a82d0 (ForelApp)"
+    },
+    {
+      "name": "archive kind extensions",
+      "group": "rules",
+      "value": "zip tar gz 7z rar xz zst tgz tbz cab",
+      "unit": "extensions, space separated",
+      "source": "strings 0x1001e0d60 (ForelApp)"
+    },
+    {
+      "name": "history retention default",
+      "group": "history",
+      "value": 30,
+      "unit": "days",
+      "estimated": true
+    },
+    {
+      "name": "history page size",
+      "group": "history",
+      "value": 50,
+      "unit": "entries",
+      "estimated": true
+    },
+    {
+      "name": "preview match limit",
+      "group": "rules",
+      "value": 200,
+      "unit": "matches",
+      "estimated": true
+    },
+    {
+      "name": "script timeout",
+      "group": "actions",
+      "value": 60,
+      "unit": "seconds",
+      "estimated": true
+    },
+    {
+      "name": "history retention setting key",
+      "group": "history",
+      "value": "history_max_days",
+      "unit": "app_settings key",
+      "source": "function 0x10000c210 AppModel.setHistoryMaxDays, read 0x10000a048, string 0x1001ded10 (ForelApp)"
+    },
+    {
+      "name": "conflict policy param key",
+      "group": "actions",
+      "value": "on_conflict",
+      "unit": "action param key",
+      "source": "function 0x100174b34 ActionParam.onConflict, string 0x1001ab120 (ForelCore, ForelApp)"
+    },
+    {
+      "name": "history purge seconds per day",
+      "group": "history",
+      "value": 86400,
+      "unit": "seconds/day",
+      "source": "function 0x10017a438 Database.purgeHistory, cutoff = now - days*86400 (ForelCore, ForelApp)"
+    },
+    {
+      "name": "finder color label mapping",
+      "group": "actions",
+      "value": "gray=1, green=2, purple=3, blue=4, yellow=5, red=6, orange=7 (case-insensitive)",
+      "unit": "label index",
+      "source": "function 0x1001539b8 FinderTags.colorIndex and 0x100154104 setColorLabel, entry format \"Name\\n<index>\" (ForelCore, ForelApp)"
+    },
+    {
+      "name": "pro features",
+      "group": "plan",
+      "value": "library_import, content_ocr",
+      "unit": "features, comma separated",
+      "source": "function 0x100167f2c FreePlan.requiredFeature (ForelCore, ForelApp)"
+    }
+  ]
+}
