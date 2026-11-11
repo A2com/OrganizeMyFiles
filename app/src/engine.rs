@@ -1375,6 +1375,33 @@ fn rel_depth(root: &Path, file: &Path) -> usize {
         .unwrap_or(0)
 }
 
+/// Traduit à l'affichage les messages du moteur (valeurs d'origine, laissées intactes
+/// dans les données). Un message inconnu est rendu tel quel.
+pub fn fr_message(msg: &str) -> String {
+    match msg {
+        "A file already exists at the destination." => return "un fichier existe déjà à la destination".into(),
+        "restored" => return "restauré".into(),
+        "nothing to undo" => return "rien à annuler".into(),
+        "permanently delete source after success" => return "source supprimée définitivement".into(),
+        "RunShortcut requires 'shortcut_name' param" => return "le nom du raccourci est obligatoire".into(),
+        _ => {}
+    }
+    for (en, fr) in [("move", "déplacé"), ("copy", "copié")] {
+        if let Some(rest) = msg.strip_prefix(&format!("{en} → ")) {
+            return format!("{fr} → {rest}");
+        }
+        if let Some(rest) = msg.strip_prefix(&format!("serait {en} vers ")) {
+            return format!("serait {fr} vers {rest}");
+        }
+    }
+    for (en, fr) in [("addTag", "ajouterait"), ("removeTag", "retirerait")] {
+        if let Some(rest) = msg.strip_prefix(&format!("serait {en} ")) {
+            return format!("{fr} les étiquettes {rest}");
+        }
+    }
+    msg.to_string()
+}
+
 /// Undo a reversible history entry (restores original_path from result_path).
 /// Pre-checks mirror UndoChecker.evaluate (0x10015e564): entry must be applied,
 /// the expected file must still exist, the original location must be free, and
@@ -1654,5 +1681,15 @@ mod tests {
     fn old_import_action_is_read_as_move() {
         let k: ActionKind = serde_json::from_str("\"ImportToLibrary\"").unwrap();
         assert_eq!(k, ActionKind::Move);
+    }
+
+    #[test]
+    fn fr_message_translates_known_messages_only() {
+        assert_eq!(fr_message("restored"), "restauré");
+        assert_eq!(fr_message("A file already exists at the destination."), "un fichier existe déjà à la destination");
+        assert_eq!(fr_message("move → /a/b"), "déplacé → /a/b");
+        assert_eq!(fr_message("serait copy vers /x"), "serait copié vers /x");
+        assert_eq!(fr_message("serait addTag [a]"), "ajouterait les étiquettes [a]");
+        assert_eq!(fr_message("Permission denied (os error 13)"), "Permission denied (os error 13)");
     }
 }
