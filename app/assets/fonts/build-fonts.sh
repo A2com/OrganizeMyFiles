@@ -5,7 +5,7 @@
 #   <dossier-sources>/inter/        = Inter-Regular.ttf, Inter-SemiBold.ttf, Inter-Bold.ttf (rsms/inter v4.1, extras/ttf)
 set -euo pipefail
 SRC="$1"; OUT="$(cd "$(dirname "$0")" && pwd)"
-ICONS="dashboard folder_managed rule history memory tune search notifications settings bolt filter_alt drag_indicator close add check_circle schedule visibility power_settings_new sort arrow_forward"
+ICONS="dashboard folder_managed rule history memory tune search notifications settings bolt filter_alt drag_indicator close add check_circle schedule visibility power_settings_new sort arrow_forward delete folder_open refresh check undo"
 UNI=""
 for n in $ICONS; do
   cp=$(awk -v n="$n" '$1==n {print $2}' "$SRC/ms.codepoints"); UNI="$UNI,U+$cp"
