@@ -199,6 +199,9 @@ pub struct App {
     show_path_input: bool,
     folder_counts: std::collections::HashMap<u64, Option<usize>>,
     last_run: Option<(usize, usize, usize)>, // matched, actions, scanned
+    last_run_dry: bool,
+    last_tab: Tab,
+    tab_since: f64,
     frame: u32,
     screenshot: Option<String>,
     shot_done: bool,
@@ -230,6 +233,9 @@ impl App {
             show_path_input: false,
             folder_counts: std::collections::HashMap::new(),
             last_run: None,
+            last_run_dry: true,
+            last_tab: Tab::Dashboard,
+            tab_since: 0.0,
             frame: 0,
             screenshot,
             shot_done: false,
@@ -298,10 +304,11 @@ impl App {
                 } else {
                     "moved to Archive/2026-11".into()
                 },
-                created: now,
+                created: now - std::time::Duration::from_secs(i as u64 * 1500),
             });
         }
         self.last_run = Some((12, 18, 30));
+        self.last_run_dry = false;
         self.next_batch = 2;
     }
 
@@ -330,6 +337,7 @@ impl App {
         }
         let actions = outcome.history.len();
         self.last_run = Some((outcome.matched, actions, outcome.scanned));
+        self.last_run_dry = dry_run;
         for e in outcome.history {
             self.history.push(e);
         }
@@ -902,14 +910,98 @@ fn section_title(ui: &mut egui::Ui, icon: Icon, title: &str) {
     ui.label(RichText::new(title).size(15.0).family(semibold()).color(Color32::WHITE));
 }
 
-fn stat_tile(ui: &mut egui::Ui, title: &str, big: &str, sub: &str, accent: Color32) {
-    card(ui, Vec2::new(240.0, 128.0), |ui| {
-        ui.label(RichText::new(title).size(14.5).color(text_dim()));
-        ui.add_space(8.0);
-        ui.label(RichText::new(big).size(30.0).color(accent).family(semibold()));
-        ui.add_space(4.0);
-        ui.label(RichText::new(sub).size(14.0).color(text_primary()));
-    });
+/// « il y a 5 min », « hier »… à partir d'un instant passé.
+fn ago(t: SystemTime, now: SystemTime) -> String {
+    let secs = now.duration_since(t).map(|d| d.as_secs()).unwrap_or(0);
+    match secs {
+        0..=44 => "à l'instant".to_string(),
+        45..=3599 => format!("il y a {} min", (secs + 30) / 60),
+        3600..=86_399 => format!("il y a {} h", secs / 3600),
+        86_400..=172_799 => "hier".to_string(),
+        _ => format!("il y a {} j", secs / 86_400),
+    }
+}
+
+/// Ce que l'écran Aperçu met en avant selon l'état de l'appli.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum HeroState {
+    NoFolder,
+    NoRule,
+    Ready,
+    Done,
+}
+
+fn hero_state(folders: usize, active_rules: usize, last_run_was_real: bool) -> HeroState {
+    if folders == 0 {
+        HeroState::NoFolder
+    } else if active_rules == 0 {
+        HeroState::NoRule
+    } else if last_run_was_real {
+        HeroState::Done
+    } else {
+        HeroState::Ready
+    }
+}
+
+/// Lien texte cliquable ; true si cliqué.
+fn link(ui: &mut egui::Ui, text: &str, color: Color32) -> bool {
+    ui.add(egui::Label::new(RichText::new(text).size(14.0).family(semibold()).color(color)).sense(egui::Sense::click()))
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+}
+
+/// Anneau de progression : piste de verre + arc accent aux extrémités arrondies.
+fn ring(painter: &egui::Painter, center: Pos2, radius: f32, frac: f32, accent: Color32) {
+    painter.circle_stroke(center, radius, Stroke::new(10.0f32, glass(44)));
+    if frac > 0.0 {
+        let steps = ((frac * 72.0).ceil() as usize).max(2);
+        let pts: Vec<Pos2> = (0..=steps)
+            .map(|i| {
+                let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * frac * (i as f32 / steps as f32);
+                center + Vec2::angled(a) * radius
+            })
+            .collect();
+        painter.circle_filled(pts[0], 5.0, accent);
+        painter.circle_filled(pts[pts.len() - 1], 5.0, accent);
+        painter.add(egui::Shape::line(pts, Stroke::new(10.0f32, accent)));
+    }
+}
+
+/// Tuile de chiffre cliquable : pastille d'icône, grand chiffre, légende ; s'élève au survol.
+fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub: &str, accent: Color32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 134.0), egui::Sense::click());
+    let lift = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), 0.15) * 3.0;
+    let r = rect.translate(Vec2::new(0.0, -lift));
+    let p = ui.painter().clone();
+    p.add(glass_shapes(r));
+    if resp.hovered() {
+        p.rect_filled(r, Rounding::same(CARD_RADIUS), glass(12));
+    }
+    let tile = Rect::from_min_size(r.min + Vec2::new(18.0, 18.0), Vec2::splat(34.0));
+    p.rect_filled(tile, Rounding::same(10.0), with_alpha(accent, 70));
+    draw_icon(&p, tile.center(), icon, Color32::WHITE, 17.0);
+    p.text(
+        Pos2::new(tile.right() + 10.0, tile.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::new(12.5, semibold()),
+        text_label(),
+    );
+    p.text(
+        Pos2::new(r.left() + 18.0, r.top() + 84.0),
+        egui::Align2::LEFT_CENTER,
+        value,
+        egui::FontId::new(38.0, bold()),
+        Color32::WHITE,
+    );
+    p.text(
+        Pos2::new(r.left() + 18.0, r.bottom() - 18.0),
+        egui::Align2::LEFT_CENTER,
+        sub,
+        egui::FontId::proportional(14.5),
+        text_dim(),
+    );
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn status_color(s: Status) -> Color32 {
@@ -973,6 +1065,10 @@ impl eframe::App for App {
 
         let screen = ctx.screen_rect();
         let accent_now = self.accent();
+        if self.tab != self.last_tab {
+            self.last_tab = self.tab;
+            self.tab_since = ctx.input(|i| i.time);
+        }
         let bg_time = if self.animate_bg {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
             ctx.input(|i| i.time)
@@ -1416,111 +1512,299 @@ impl App {
 
     fn dashboard(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
-        self.header(ui, "Bonjour", "Vos dossiers, rangés par vos règles.");
+        let ctx = ui.ctx().clone();
+        // Les chiffres montent à l'ouverture de l'écran.
+        let enter = (((ctx.input(|i| i.time) - self.tab_since) / 0.8) as f32).clamp(0.0, 1.0);
+        let ease = 1.0 - (1.0 - enter).powi(3);
+        if enter < 1.0 {
+            ctx.request_repaint();
+        }
+        let count = |n: usize| ((n as f32) * ease).round() as usize;
 
-        ui.horizontal(|ui| {
-            stat_tile(
-                ui,
-                "DOSSIERS SUIVIS",
-                &format!("{}", self.folders.iter().filter(|f| f.enabled).count()),
-                "tous traités",
-                accent,
-            );
-            ui.add_space(16.0);
-            stat_tile(
-                ui,
-                "FICHIERS CE MOIS-CI",
-                &format!("{}", self.monthly_used),
-                "simple compteur",
-                accent,
-            );
-            ui.add_space(16.0);
-            stat_tile(
-                ui,
-                "RÈGLES",
-                &format!("{}", self.rules.iter().filter(|r| r.enabled).count()),
-                "sans limite",
-                accent,
-            );
-        });
+        let folders_total = self.folders.len();
+        let folders_active = self.folders.iter().filter(|f| f.enabled).count();
+        let rules_total = self.rules.len();
+        let rules_active = self.rules.iter().filter(|r| r.enabled).count();
+        let state = hero_state(folders_total, rules_active, self.last_run.is_some() && !self.last_run_dry);
 
-        ui.add_space(20.0);
-        let run_now = {
-            let mut clicked = false;
-            card(ui, Vec2::new(756.0, 168.0), |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        ui.add_space(8.0);
-                        ui.label(RichText::new("Prêt à organiser").size(18.0).family(semibold()).color(text_primary()));
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new("Règles de haut en bas, actions dans l'ordre. L'aperçu ne touche à aucun fichier.")
-                                .size(14.5)
-                                .color(text_dim()),
-                        );
-                    });
-                });
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(8.0);
-                    if pill(ui, "Organiser maintenant", accent, true, true)
-                        .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).")
-                        .clicked()
-                    {
-                        clicked = true;
-                    }
-                    ui.add_space(12.0);
-                    if pill(ui, "Aperçu (simulation)", accent, false, true)
-                        .on_hover_text("Simule, sans toucher aux fichiers.")
-                        .clicked()
-                    {
-                        clicked = false;
-                        self.run_batch(true);
-                    }
-                });
-            });
-            clicked
+        // ---------------------------------------------------------------- héros
+        let (title, sub) = match state {
+            HeroState::NoFolder => ("Commençons".to_string(), "Ajoutez un dossier à surveiller.".to_string()),
+            HeroState::NoRule => ("Aucune règle active".to_string(), "Créez une règle pour ranger vos fichiers.".to_string()),
+            HeroState::Ready | HeroState::Done => (
+                if state == HeroState::Done { "Tout est en ordre" } else { "Prêt à organiser" }.to_string(),
+                format!(
+                    "{folders_active} dossier{} · {rules_active} règle{} active{}",
+                    if folders_active > 1 { "s" } else { "" },
+                    if rules_active > 1 { "s" } else { "" },
+                    if rules_active > 1 { "s" } else { "" },
+                ),
+            ),
         };
-        if run_now {
-            self.run_batch(false);
+        let avail = ui.available_width();
+        let (hero, _) = ui.allocate_exact_size(Vec2::new(avail, 214.0), egui::Sense::hover());
+        ui.painter().add(glass_shapes(hero));
+        {
+            let t = if self.animate_bg { ctx.input(|i| i.time) } else { 0.0 };
+            let p = ui.painter().with_clip_rect(hero.shrink(2.0));
+            let drift = (t * 0.3).sin() as f32 * 0.05;
+            halo(&p, Pos2::new(hero.left() + hero.width() * (0.30 + drift), hero.top() + 10.0), hero.width() * 0.42, accent, 14);
+            halo(&p, Pos2::new(hero.right() - hero.width() * 0.12, hero.bottom()), hero.width() * 0.36, SKY_DEEP, 18);
+        }
+        let mut go: Option<Tab> = None;
+        let mut organise = false;
+        let mut preview = false;
+        let mut new_rule = false;
+        let text_w = (avail - 250.0).max(260.0);
+        let inner = Rect::from_min_size(hero.min + Vec2::new(30.0, 26.0), Vec2::new(text_w, hero.height() - 52.0));
+        let mut c = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
+        c.label(RichText::new("APERÇU").size(12.5).family(semibold()).color(text_label()));
+        c.add_space(4.0);
+        c.label(RichText::new(&title).size(34.0).family(bold()).color(Color32::WHITE));
+        c.add_space(2.0);
+        c.label(RichText::new(&sub).size(16.0).color(text_dim()));
+        c.add_space(18.0);
+        c.horizontal(|ui| match state {
+            HeroState::NoFolder => {
+                if pill(ui, "Ajouter un dossier", accent, true, true).clicked() {
+                    go = Some(Tab::Folders);
+                }
+            }
+            HeroState::NoRule => {
+                if pill(ui, "Créer une règle", accent, true, true).clicked() {
+                    new_rule = true;
+                }
+            }
+            HeroState::Ready | HeroState::Done => {
+                let run = pill(ui, "Organiser maintenant", accent, true, true)
+                    .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).");
+                organise = run.clicked() && self.app_enabled;
+                ui.add_space(10.0);
+                preview = pill(ui, "Aperçu", accent, false, true)
+                    .on_hover_text("Simule, sans toucher aux fichiers.")
+                    .clicked();
+            }
+        });
+        // Anneau : part des fichiers concernés lors du dernier passage.
+        let center = Pos2::new(hero.right() - 100.0, hero.center().y - 4.0);
+        let (frac, pct_text, caption, kicker) = match self.last_run {
+            Some((matched, _, scanned)) if scanned > 0 => (
+                matched as f32 / scanned as f32,
+                format!("{}%", (100.0 * matched as f32 / scanned as f32 * ease).round() as u32),
+                format!("{matched} sur {scanned} fichiers"),
+                if self.last_run_dry { "DERNIER APERÇU" } else { "DERNIER LOT" },
+            ),
+            _ => (0.0, "—".to_string(), "Pas encore d'analyse".to_string(), "ANALYSE"),
+        };
+        ring(ui.painter(), center, 50.0, frac * ease, accent);
+        let p = ui.painter();
+        p.text(
+            Pos2::new(center.x, center.y - 78.0),
+            egui::Align2::CENTER_CENTER,
+            kicker,
+            egui::FontId::new(12.0, semibold()),
+            text_label(),
+        );
+        p.text(center, egui::Align2::CENTER_CENTER, pct_text, egui::FontId::new(26.0, bold()), Color32::WHITE);
+        p.text(
+            Pos2::new(center.x, center.y + 76.0),
+            egui::Align2::CENTER_CENTER,
+            caption,
+            egui::FontId::proportional(14.0),
+            text_dim(),
+        );
+        ui.add_space(16.0);
+
+        // ---------------------------------------------------------------- tuiles
+        let gap = 14.0;
+        let w = ((avail - 3.0 * gap) / 4.0).max(120.0);
+        let (matched_actions, actions_sub) = match self.last_run {
+            Some((_, actions, _)) => (count(actions).to_string(), "actions au dernier passage"),
+            None => ("—".to_string(), "aucun passage"),
+        };
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            if kpi_tile(ui, w, Icon::Folder, "DOSSIERS ACTIFS", &count(folders_active).to_string(), &format!("sur {folders_total} suivi{}", if folders_total > 1 { "s" } else { "" }), accent).clicked() {
+                go = Some(Tab::Folders);
+            }
+            if kpi_tile(ui, w, Icon::List, "RÈGLES ACTIVES", &count(rules_active).to_string(), &format!("sur {rules_total} règle{}", if rules_total > 1 { "s" } else { "" }), accent).clicked() {
+                go = Some(Tab::Rules);
+            }
+            if kpi_tile(ui, w, Icon::Clock, "FICHIERS CE MOIS", &count(self.monthly_used as usize).to_string(), "organisés", accent).clicked() {
+                go = Some(Tab::History);
+            }
+            if kpi_tile(ui, w, Icon::Bolt, "DERNIER LOT", &matched_actions, actions_sub, accent).clicked() {
+                go = Some(Tab::History);
+            }
+        });
+        ui.add_space(16.0);
+
+        // ---------------------------------------------------------- dossiers + activité
+        if avail >= 760.0 {
+            ui.columns(2, |cols| {
+                self.dash_folders(&mut cols[0], accent);
+                self.dash_activity(&mut cols[1], accent);
+            });
+        } else {
+            self.dash_folders(ui, accent);
+            ui.add_space(14.0);
+            self.dash_activity(ui, accent);
         }
 
-        ui.add_space(20.0);
-        let used = self.monthly_used;
-        card(ui, Vec2::new(756.0, 128.0), |ui| {
-            ui.label(RichText::new("Activité de ce mois").size(15.0).family(semibold()).color(text_primary()));
-            ui.add_space(8.0);
-            let frac: f32 = 0.08;
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(688.0, 14.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, Rounding::same(7.0), glass(32));
-            let mut fill = rect;
-            fill.set_width((rect.width() * frac.min(1.0)).max(8.0));
-            ui.painter().rect_filled(fill, Rounding::same(7.0), accent);
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(format!(
-                    "{used} fichier(s) traité(s) · mois {}. Simple statistique.",
-                    month_key(SystemTime::now())
-                ))
-                .size(14.0)
-                .color(text_dim()),
-            );
-        });
+        if let Some(tab) = go {
+            self.tab = tab;
+        }
+        if new_rule {
+            self.new_rule();
+        }
+        if preview {
+            self.run_batch(true);
+        }
+        if organise {
+            self.run_batch(false);
+        }
+    }
 
-        if let Some((matched, actions, scanned)) = self.last_run {
-            ui.add_space(20.0);
-            card(ui, Vec2::new(756.0, 96.0), |ui| {
-                ui.label(RichText::new("Dernier lot").size(15.0).family(semibold()).color(text_primary()));
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(format!(
-                        "{matched} concerné(s) sur {scanned} analysés · {actions} action(s)"
-                    ))
-                    .size(14.5)
-                    .color(text_dim()),
-                );
+    /// Carte « Dossiers suivis » de l'Aperçu : aperçu des 4 premiers, un clic ouvre l'écran Dossiers.
+    fn dash_folders(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        let folders = self.folders.clone();
+        let mut open = false;
+        panel_card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Dossiers suivis").size(17.0).family(semibold()).color(Color32::WHITE));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if link(ui, "Tout voir", accent) {
+                        open = true;
+                    }
+                });
             });
+            ui.add_space(8.0);
+            if folders.is_empty() {
+                ui.label(RichText::new("Aucun dossier suivi.").size(15.0).color(text_dim()));
+                ui.add_space(10.0);
+                if btn(ui, "Ajouter un dossier", Btn::Sky, accent, Some(Icon::Add)).clicked() {
+                    open = true;
+                }
+                return;
+            }
+            for f in folders.iter().take(4) {
+                let exists = f.path.is_dir();
+                let n_rules = self.rules.iter().filter(|r| r.folder_id == f.id).count();
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 54.0), egui::Sense::click());
+                if resp.hovered() {
+                    ui.painter().rect_filled(rect, Rounding::same(10.0), glass(14));
+                }
+                let tile = Rect::from_min_size(rect.min + Vec2::new(8.0, 10.0), Vec2::splat(34.0));
+                ui.painter().rect_filled(tile, Rounding::same(10.0), with_alpha(if exists { accent } else { RED }, 70));
+                draw_icon(&ui.painter().clone(), tile.center(), Icon::Folder, Color32::WHITE, 17.0);
+                let name = f.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let clip = Rect::from_min_max(rect.min, Pos2::new(rect.right() - 170.0, rect.bottom()));
+                let tp = ui.painter().with_clip_rect(clip);
+                tp.text(
+                    Pos2::new(tile.right() + 12.0, rect.center().y - 9.0),
+                    egui::Align2::LEFT_CENTER,
+                    name,
+                    egui::FontId::new(15.0, semibold()),
+                    text_primary(),
+                );
+                tp.text(
+                    Pos2::new(tile.right() + 12.0, rect.center().y + 11.0),
+                    egui::Align2::LEFT_CENTER,
+                    shorten(&f.path.display().to_string()),
+                    egui::FontId::proportional(13.0),
+                    text_dim(),
+                );
+                let mut right = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(rect.shrink2(Vec2::new(8.0, 0.0)))
+                        .layout(Layout::right_to_left(Align::Center)),
+                );
+                if !exists {
+                    chip(&mut right, "Introuvable", RED, with_alpha(RED, 38));
+                } else if f.enabled {
+                    chip(&mut right, "Actif", GREEN, with_alpha(GREEN, 38));
+                } else {
+                    chip(&mut right, "En pause", text_dim(), glass(30));
+                }
+                chip(
+                    &mut right,
+                    &match n_rules {
+                        0 => "0 règle".to_string(),
+                        1 => "1 règle".to_string(),
+                        n => format!("{n} règles"),
+                    },
+                    SKY,
+                    with_alpha(SKY, 38),
+                );
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    open = true;
+                }
+            }
+            if folders.len() > 4 {
+                ui.label(RichText::new(format!("+ {} autres", folders.len() - 4)).size(13.5).color(text_dim()));
+            }
+        });
+        if open {
+            self.tab = Tab::Folders;
+        }
+    }
+
+    /// Carte « Activité récente » : les 5 dernières actions, annulables quand c'est possible.
+    fn dash_activity(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        let now = SystemTime::now();
+        let items: Vec<(usize, HistoryEntry)> = self.history.iter().cloned().enumerate().rev().take(5).collect();
+        let mut open = false;
+        let mut undo_idx: Option<usize> = None;
+        panel_card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Activité récente").size(17.0).family(semibold()).color(Color32::WHITE));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if link(ui, "Tout l'historique", accent) {
+                        open = true;
+                    }
+                });
+            });
+            ui.add_space(8.0);
+            if items.is_empty() {
+                ui.label(RichText::new("Rien pour l'instant.").size(15.0).color(text_dim()));
+                ui.label(RichText::new("Lancez un aperçu ou un lot.").size(13.5).color(text_dim()));
+                return;
+            }
+            for (idx, e) in &items {
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 54.0), egui::Sense::hover());
+                ui.painter().circle_filled(Pos2::new(rect.left() + 14.0, rect.center().y), 5.0, status_color(e.status));
+                let can_undo = e.reversible && e.status == Status::Applied && e.undo.is_some();
+                let clip_right = if can_undo { 120.0 } else { 8.0 };
+                let tp = ui.painter().with_clip_rect(Rect::from_min_max(rect.min, Pos2::new(rect.right() - clip_right, rect.bottom())));
+                tp.text(
+                    Pos2::new(rect.left() + 32.0, rect.center().y - 9.0),
+                    egui::Align2::LEFT_CENTER,
+                    &e.rule_name,
+                    egui::FontId::new(15.0, semibold()),
+                    text_primary(),
+                );
+                tp.text(
+                    Pos2::new(rect.left() + 32.0, rect.center().y + 11.0),
+                    egui::Align2::LEFT_CENTER,
+                    format!("{} · {}", e.action_label, ago(e.created, now)),
+                    egui::FontId::proportional(13.0),
+                    text_dim(),
+                );
+                if can_undo {
+                    let mut right = ui.new_child(
+                        egui::UiBuilder::new().max_rect(rect).layout(Layout::right_to_left(Align::Center)),
+                    );
+                    if btn(&mut right, "Annuler", Btn::Ghost, accent, Some(Icon::Undo)).clicked() {
+                        undo_idx = Some(*idx);
+                    }
+                }
+            }
+        });
+        if open {
+            self.tab = Tab::History;
+        }
+        if let Some(i) = undo_idx {
+            self.undo(i);
         }
     }
 
@@ -2344,4 +2628,28 @@ fn save_png(path: &str, shot: &egui::ColorImage) {
     }
     let _ = image::save_buffer(path, &rgba, w, h, image::ColorType::Rgba8);
     eprintln!("screenshot saved to {path} ({w}x{h})");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn ago_formats_relative_time() {
+        let now = SystemTime::now();
+        assert_eq!(ago(now - Duration::from_secs(10), now), "à l'instant");
+        assert_eq!(ago(now - Duration::from_secs(5 * 60), now), "il y a 5 min");
+        assert_eq!(ago(now - Duration::from_secs(3 * 3600), now), "il y a 3 h");
+        assert_eq!(ago(now - Duration::from_secs(30 * 3600), now), "hier");
+        assert_eq!(ago(now - Duration::from_secs(5 * 86_400), now), "il y a 5 j");
+    }
+
+    #[test]
+    fn hero_state_follows_setup_progress() {
+        assert_eq!(hero_state(0, 0, false), HeroState::NoFolder);
+        assert_eq!(hero_state(2, 0, false), HeroState::NoRule);
+        assert_eq!(hero_state(2, 3, false), HeroState::Ready);
+        assert_eq!(hero_state(2, 3, true), HeroState::Done);
+    }
 }
