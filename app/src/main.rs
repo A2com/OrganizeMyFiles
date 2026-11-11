@@ -1,15 +1,18 @@
 //! Entry point: eframe/egui desktop app.
 //! `--tab rules` ouvre l'écran voulu (dashboard, folders, rules, history, settings).
+//! `--arriere-plan` : démarre fenêtre réduite (lancement à l'ouverture de session).
 //! `--bg-time <s>` : décale l'horloge du fond animé (captures à différents instants).
 //! `--empty` : avec --screenshot, capture l'appli sans données de démonstration.
 //! `--screenshot <file.png>` draws ~120 frames, saves a PNG of the window and
 //! exits (used for automated checks).
 
 mod engine;
+mod login;
 mod mechanics;
 mod store;
 mod system;
 mod ui;
+mod watcher;
 mod zipmini;
 
 fn main() -> eframe::Result {
@@ -17,6 +20,7 @@ fn main() -> eframe::Result {
     let mut screenshot: Option<String> = None;
     let mut tab: Option<String> = None;
     let mut empty = false;
+    let background = args.iter().any(|a| a == "--arriere-plan");
     let mut bg_time = 0.0f64;
     let mut i = 1;
     while i < args.len() {
@@ -52,6 +56,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "File Organizer",
         options,
-        Box::new(move |cc| Ok(Box::new(ui::App::new(cc, ui::Launch { screenshot, tab, empty, bg_time })))),
+        Box::new(move |cc| Ok(Box::new(ui::App::new(cc, ui::Launch { screenshot, tab, empty, bg_time, background })))),
     )
 }

@@ -848,6 +848,8 @@ pub struct Runner {
     pub batch_id: u64,
     pub dry_run: bool,
     pub commands: Box<dyn CommandRunner>,
+    /// `Some` : on ne traite que ces fichiers (surveillance automatique) ; `None` : tout le dossier.
+    pub only_paths: Option<std::collections::HashSet<PathBuf>>,
 }
 
 pub struct RunOutcome {
@@ -886,6 +888,11 @@ impl Runner {
             collect_files(&folder.path, max_depth, &mut files);
             files.sort();
             files.dedup();
+            if let Some(only) = &self.only_paths {
+                let only: std::collections::HashSet<PathBuf> =
+                    only.iter().map(|p| p.canonicalize().unwrap_or_else(|_| p.clone())).collect();
+                files.retain(|p| only.contains(&p.canonicalize().unwrap_or_else(|_| p.clone())));
+            }
             scanned += files.len();
 
             for path in &files {
@@ -1619,7 +1626,7 @@ mod tests {
     }
 
     fn system_action_entry(kind: ActionKind, key: &str, value: &str, fake: &std::rc::Rc<crate::system::fake::FakeCommands>) -> HistoryEntry {
-        let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(fake.clone()) };
+        let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(fake.clone()), only_paths: None };
         let rule = Rule {
             id: 1, folder_id: 1, name: "r".into(), enabled: true, match_all: true,
             recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
@@ -1664,7 +1671,7 @@ mod tests {
     #[test]
     fn dry_run_launches_nothing() {
         let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
-        let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: true, commands: Box::new(fake.clone()) };
+        let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: true, commands: Box::new(fake.clone()), only_paths: None };
         let rule = Rule {
             id: 1, folder_id: 1, name: "r".into(), enabled: true, match_all: true,
             recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
