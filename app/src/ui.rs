@@ -2883,15 +2883,22 @@ impl App {
 }
 
 fn shorten(p: &str) -> String {
-    let home = home_dir();
-    let p = p.strip_prefix(&home).unwrap_or(p);
-    let p = p.trim_start_matches('/');
-    if p.len() > 44 {
-        format!("…{}", &p[p.len() - 44..])
-    } else if p.is_empty() {
-        "~".into()
+    shorten_with_home(p, &home_dir())
+}
+
+/// Raccourcit un chemin : `~/…` sous le dossier personnel, chemin absolu sinon.
+fn shorten_with_home(p: &str, home: &str) -> String {
+    let full = match std::path::Path::new(p).strip_prefix(home) {
+        Ok(rel) if rel.as_os_str().is_empty() => "~".to_string(),
+        Ok(rel) => format!("~/{}", rel.to_string_lossy()),
+        Err(_) => p.to_string(),
+    };
+    let len = full.chars().count();
+    if len > 44 {
+        let tail: String = full.chars().skip(len - 44).collect();
+        format!("…{tail}")
     } else {
-        format!("~/{p}")
+        full
     }
 }
 
@@ -2913,6 +2920,14 @@ fn save_png(path: &str, shot: &egui::ColorImage) {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn shorten_handles_home_and_outside_home() {
+        assert_eq!(shorten_with_home("/Users/a/Downloads", "/Users/a"), "~/Downloads");
+        assert_eq!(shorten_with_home("/Users/a", "/Users/a"), "~");
+        assert_eq!(shorten_with_home("/tmp", "/Users/a"), "/tmp");
+        assert_eq!(shorten_with_home("/Users/ab/x", "/Users/a"), "/Users/ab/x");
+    }
 
     #[test]
     fn ago_formats_relative_time() {
