@@ -326,9 +326,9 @@ impl App {
                 reversible: i % 3 == 0,
                 status: if i == 5 { Status::BlockedByConflict } else { Status::Applied },
                 message: if i == 5 {
-                    "A file already exists at the destination.".into()
+                    "un fichier existe déjà à la destination".into()
                 } else {
-                    "moved to Archive/2026-11".into()
+                    "déplacé → Archive/2026-11".into()
                 },
                 created: now - std::time::Duration::from_secs(i as u64 * 1500),
             });
@@ -2782,7 +2782,7 @@ impl App {
                                 "{}  →  {}  ·  {}",
                                 shorten(&e.original_path.display().to_string()),
                                 shorten(&e.result_path.display().to_string()),
-                                e.message
+                                fr_message(&e.message)
                             ))
                             .size(13.5)
                             .color(text_dim()),
