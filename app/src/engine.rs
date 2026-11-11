@@ -581,6 +581,8 @@ fn glob_parts(hay: &str, parts: &[&str]) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionKind {
+    /// L'ancienne action d'import en médiathèque (retirée) est relue comme un déplacement sans destination.
+    #[serde(alias = "ImportToLibrary")]
     Move,
     Copy,
     Rename,
@@ -590,7 +592,6 @@ pub enum ActionKind {
     AddTag,
     RemoveTag,
     OpenApplication,
-    ImportToLibrary,
     RunShortcut,
 }
 
@@ -604,7 +605,6 @@ pub const ACTION_KINDS: &[ActionKind] = &[
     ActionKind::AddTag,
     ActionKind::RemoveTag,
     ActionKind::OpenApplication,
-    ActionKind::ImportToLibrary,
     ActionKind::RunShortcut,
 ];
 
@@ -620,7 +620,6 @@ impl ActionKind {
             ActionKind::AddTag => "Ajouter une étiquette",
             ActionKind::RemoveTag => "Retirer une étiquette",
             ActionKind::OpenApplication => "Ouvrir une application",
-            ActionKind::ImportToLibrary => "Importer dans une médiathèque",
             ActionKind::RunShortcut => "Lancer un raccourci",
         }
     }
@@ -635,7 +634,6 @@ impl ActionKind {
             ActionKind::AddTag => "addTag",
             ActionKind::RemoveTag => "removeTag",
             ActionKind::OpenApplication => "openApplication",
-            ActionKind::ImportToLibrary => "importToLibrary",
             ActionKind::RunShortcut => "runShortcut",
         }
     }
@@ -659,7 +657,6 @@ impl ActionKind {
             ],
             ActionKind::AddTag | ActionKind::RemoveTag => &[("tags", "Étiquettes (séparées par des virgules)")],
             ActionKind::OpenApplication => &[("application_path", "Chemin de l'application")],
-            ActionKind::ImportToLibrary => &[("library_type", "photos | music | tv")],
             ActionKind::RunShortcut => &[("shortcut_name", "Nom du raccourci")],
             ActionKind::Trash | ActionKind::Delete => &[],
         }
@@ -1166,22 +1163,6 @@ impl Runner {
                 let args = system::open_application_args(&p.to_string_lossy(), &current.to_string_lossy());
                 self.run_command("open", &args, |_| format!("ouvert avec {}", p.display()), &base, current)
             }
-            ActionKind::ImportToLibrary => {
-                let lib = action.param_real("library_type", "photos | music | tv");
-                if lib.is_empty() {
-                    return base(
-                        Status::Failed,
-                        "Import to Library requires a 'library_type' parameter".into(),
-                        current.to_path_buf(),
-                        None,
-                    );
-                }
-                let args = match system::import_args(&lib, &current.to_string_lossy()) {
-                    Ok(a) => a,
-                    Err(e) => return base(Status::Failed, e, current.to_path_buf(), None),
-                };
-                self.run_command("osascript", &args, |_| format!("importé dans la médiathèque {lib}"), &base, current)
-            }
             ActionKind::RunShortcut => {
                 let name = action.param_real("shortcut_name", "Shortcut name");
                 if name.is_empty() {
@@ -1211,7 +1192,7 @@ impl Runner {
         match self.commands.run(program, args, timeout) {
             Ok(out) if out.success => base(Status::Applied, ok_message(&out.stderr), current.to_path_buf(), None),
             Ok(out) => {
-                let why = if program == "osascript" { system::explain_import_error(&out.stderr) } else { out.stderr };
+                let why = out.stderr;
                 let why = if why.is_empty() { format!("« {program} » a échoué") } else { why };
                 base(Status::Failed, why, current.to_path_buf(), None)
             }
@@ -1283,10 +1264,6 @@ impl Runner {
             }
             ActionKind::OpenApplication => {
                 base(Status::DryRun, "ouvrirait l'application".into(), current.to_path_buf(), None)
-            }
-            ActionKind::ImportToLibrary => {
-                let lib = action.param_real("library_type", "photos | music | tv");
-                base(Status::DryRun, format!("importerait dans {lib}"), current.to_path_buf(), None)
             }
             ActionKind::RunShortcut => {
                 let name = action.param_real("shortcut_name", "Shortcut name");
@@ -1652,17 +1629,9 @@ mod tests {
         let mut f = crate::system::fake::FakeCommands::ok();
         f.reply = Err("Délai dépassé (60 s), commande arrêtée".into());
         let fake = std::rc::Rc::new(f);
-        let e = system_action_entry(ActionKind::ImportToLibrary, "library_type", "photos", &fake);
+        let e = system_action_entry(ActionKind::RunShortcut, "shortcut_name", "X", &fake);
         assert_eq!(e.status, Status::Failed);
         assert!(e.message.contains("Délai"));
-    }
-
-    #[test]
-    fn import_unknown_library_never_launches_anything() {
-        let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
-        let e = system_action_entry(ActionKind::ImportToLibrary, "library_type", "books", &fake);
-        assert_eq!(e.status, Status::Failed);
-        assert!(fake.calls.borrow().is_empty());
     }
 
     #[test]
@@ -1679,5 +1648,11 @@ mod tests {
         let e = runner.run_action(&rule, &action, 0, &file, &file.path, SystemTime::now());
         assert_eq!(e.status, Status::DryRun);
         assert!(fake.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn old_import_action_is_read_as_move() {
+        let k: ActionKind = serde_json::from_str("\"ImportToLibrary\"").unwrap();
+        assert_eq!(k, ActionKind::Move);
     }
 }

@@ -498,8 +498,9 @@ fn sample_rule(id: u64, folder_id: u64, name: &str, prio: i64) -> Rule {
         }
         _ => {
             r.conditions.push(Condition { field: Field::Kind, op: Op::Is, value: "audio".into() });
-            let mut a = Action::new(ActionKind::ImportToLibrary);
-            a.params.insert("library_type".into(), "music".into());
+            let mut a = Action::new(ActionKind::Move);
+            a.params.insert("destination".into(), "~/Music/Audio-Classés".into());
+            a.params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_NUMBER.into());
             r.actions.push(a);
         }
     }
@@ -2674,13 +2675,21 @@ impl App {
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
                             ui.add_space(22.0);
+                            let is_dest = *k == "destination";
+                            let reserve = if is_dest { 110.0 } else { 24.0 };
                             let entry = self.rules[idx].actions[ai].params.entry((*k).to_string()).or_default();
                             ui.add(
                                 egui::TextEdit::singleline(entry)
                                     .margin(egui::Margin::symmetric(8.0, 7.0))
-                                    .desired_width((ui.available_width() - 24.0).max(120.0))
+                                    .desired_width((ui.available_width() - reserve).max(120.0))
                                     .hint_text(*placeholder),
                             );
+                            if is_dest && ui.add(egui::Button::new(RichText::new("Choisir…").size(14.0)).fill(glass(34))).clicked() {
+                                if let Some(dir) = rfd::FileDialog::new().set_directory(home_dir()).pick_folder() {
+                                    entry.clear();
+                                    entry.push_str(&dir.to_string_lossy());
+                                }
+                            }
                         });
                     }
                     if matches!(kind, ActionKind::Move | ActionKind::Copy) {

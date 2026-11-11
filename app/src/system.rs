@@ -1,5 +1,4 @@
-//! Commandes système lancées par les actions « Ouvrir une application »,
-//! « Importer dans une médiathèque » et « Lancer un raccourci ».
+//! Commandes système lancées par les actions « Ouvrir une application » et « Lancer un raccourci ».
 //! Passe par `CommandRunner` pour pouvoir tester sans lancer de vraies applis.
 
 use std::io::Read;
@@ -65,27 +64,6 @@ pub fn run_shortcut_args(name: &str, file: &str) -> Vec<String> {
     vec!["run".into(), name.into(), "--input-path".into(), file.into()]
 }
 
-/// Arguments d'`osascript` pour importer `file` ; le chemin passe en argument du
-/// script (pas collé dans son texte), donc aucun risque de guillemet mal échappé.
-pub fn import_args(library: &str, file: &str) -> Result<Vec<String>, String> {
-    let line = match library {
-        "photos" => "tell application \"Photos\" to import {(POSIX file (item 1 of argv)) as alias}",
-        "music" => "tell application \"Music\" to add ((POSIX file (item 1 of argv)) as alias)",
-        "tv" => "tell application \"TV\" to add ((POSIX file (item 1 of argv)) as alias)",
-        other => return Err(format!("Médiathèque inconnue « {other} » (photos, music ou tv)")),
-    };
-    Ok(["-e", "on run argv", "-e", line, "-e", "end run", file].iter().map(|s| s.to_string()).collect())
-}
-
-/// Message d'aide quand macOS refuse l'accès à l'appli cible (Apple Events).
-pub fn explain_import_error(stderr: &str) -> String {
-    if stderr.contains("-1743") || stderr.contains("Not authorized") {
-        "macOS a refusé l'accès : autorisez Forel dans Réglages Système › Confidentialité et sécurité › Automatisation".into()
-    } else {
-        stderr.to_string()
-    }
-}
-
 #[cfg(test)]
 pub mod fake {
     use super::*;
@@ -125,16 +103,4 @@ impl CommandRunner for std::rc::Rc<fake::FakeCommands> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn import_rejects_unknown_library() {
-        assert!(import_args("books", "/a").is_err());
-        assert_eq!(import_args("photos", "/a b").unwrap().last().unwrap(), "/a b");
-    }
-
-    #[test]
-    fn permission_error_gets_help_text() {
-        assert!(explain_import_error("execution error: Not authorized to send Apple events (-1743)").contains("Automatisation"));
-        assert_eq!(explain_import_error("boom"), "boom");
-    }
 }
