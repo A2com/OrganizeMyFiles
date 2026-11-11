@@ -429,47 +429,68 @@ fn backdrop(ui: &mut egui::Ui, rect: Rect, accent: Color32) {
     halo(&p, rect.min + Vec2::new(w * 0.62, h * 0.55), big * 0.35, accent, 20);
 }
 
-/// Reflet clair très doux en haut d'une surface de verre (pas de contour).
-fn sheen(rect: Rect, r: f32) -> egui::Shape {
-    let h = (rect.height() * 0.5).min(64.0).max(r + 1.0);
+/// Rayon des cartes de verre.
+const CARD_RADIUS: f32 = 16.0;
+
+/// Ombre portée diffuse, dessinée **autour** de la carte seulement (anneau dégradé) :
+/// le verre étant translucide, une ombre posée dessous salirait l'intérieur de la carte.
+/// Le bord interne colle à la carte (opacité max) ; le bord externe, élargi de `blur` et décalé de `offset`, vaut 0.
+fn shadow_ring(rect: Rect, r: f32, blur: f32, offset: Vec2, alpha: u8) -> egui::Shape {
+    const ARC: usize = 8;
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let corners = [
+        (Pos2::new(rect.right() - r, rect.bottom() - r), 0.0),
+        (Pos2::new(rect.left() + r, rect.bottom() - r), quarter),
+        (Pos2::new(rect.left() + r, rect.top() + r), 2.0 * quarter),
+        (Pos2::new(rect.right() - r, rect.top() + r), 3.0 * quarter),
+    ];
+    let (mut inner, mut outer) = (Vec::new(), Vec::new());
+    for (center, start) in corners {
+        for k in 0..=ARC {
+            let dir = Vec2::angled(start + quarter * k as f32 / ARC as f32);
+            inner.push(center + dir * r);
+            outer.push(center + offset + dir * (r + blur));
+        }
+    }
+    let n = inner.len() as u32;
+    let stops = [(0.0f32, 1.0f32), (0.35, 0.55), (0.7, 0.2), (1.0, 0.0)];
     let mut mesh = egui::epaint::Mesh::default();
-    mesh.colored_vertex(Pos2::new(rect.left(), rect.top() + r), Color32::TRANSPARENT);
-    mesh.colored_vertex(Pos2::new(rect.left() + r, rect.top()), glass(10));
-    mesh.colored_vertex(Pos2::new(rect.right() - r, rect.top()), glass(10));
-    mesh.colored_vertex(Pos2::new(rect.right(), rect.top() + r), Color32::TRANSPARENT);
-    mesh.colored_vertex(Pos2::new(rect.right(), rect.top() + h), Color32::TRANSPARENT);
-    mesh.colored_vertex(Pos2::new(rect.left(), rect.top() + h), Color32::TRANSPARENT);
-    for i in 1..5 {
-        mesh.add_triangle(0, i, i + 1);
+    for (t, m) in stops {
+        let color = Color32::from_rgba_unmultiplied(0, 0, 0, (alpha as f32 * m) as u8);
+        for i in 0..inner.len() {
+            mesh.colored_vertex(inner[i].lerp(outer[i], t), color);
+        }
+    }
+    for ring in 0..(stops.len() as u32 - 1) {
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let (a0, a1) = (ring * n, (ring + 1) * n);
+            mesh.add_triangle(a0 + i, a1 + i, a1 + j);
+            mesh.add_triangle(a0 + i, a1 + j, a0 + j);
+        }
     }
     egui::Shape::mesh(mesh)
 }
 
-/// Surface de verre : ombre douce, voile blanc translucide et reflet.
-fn glass_shapes(rect: Rect, r: f32) -> egui::Shape {
-    let mut shapes = Vec::new();
-    for (off, alpha) in [(8.0f32, 36u8), (3.0, 24)] {
-        shapes.push(egui::Shape::rect_filled(
-            rect.translate(Vec2::new(0.0, off)),
-            Rounding::same(r),
-            Color32::from_rgba_unmultiplied(0x02, 0x04, 0x08, alpha),
-        ));
-    }
-    shapes.push(egui::Shape::rect_filled(rect, Rounding::same(r), glass(14)));
-    shapes.push(sheen(rect, r));
-    egui::Shape::Vec(shapes)
+/// Surface de verre : ombre diffuse autour + voile blanc translucide.
+fn glass_shapes(rect: Rect) -> egui::Shape {
+    let blur = (rect.height() * 0.25).clamp(20.0, 34.0);
+    egui::Shape::Vec(vec![
+        shadow_ring(rect, CARD_RADIUS, blur, Vec2::new(0.0, blur * 0.45), 64),
+        egui::Shape::rect_filled(rect, Rounding::same(CARD_RADIUS), glass(11)),
+    ])
 }
 
 /// Carte de verre de taille fixe.
 fn card(ui: &mut egui::Ui, size: Vec2, add: impl FnOnce(&mut egui::Ui)) {
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    ui.painter().add(glass_shapes(rect, 12.0));
+    ui.painter().add(glass_shapes(rect));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(Vec2::new(20.0, 16.0)))
+            .max_rect(rect.shrink2(Vec2::new(22.0, 18.0)))
             .layout(Layout::top_down(Align::Min)),
     );
-    child.set_min_size(size - Vec2::new(40.0, 32.0));
+    child.set_min_size(size - Vec2::new(44.0, 36.0));
     add(&mut child);
 }
 
@@ -779,9 +800,9 @@ fn panel_card_with<R>(ui: &mut egui::Ui, tint: Option<Color32>, margin: f32, add
         add(ui)
     });
     let rect = out.response.rect;
-    let mut shapes = vec![glass_shapes(rect, 12.0)];
+    let mut shapes = vec![glass_shapes(rect)];
     if let Some(t) = tint {
-        shapes.push(egui::Shape::rect_filled(rect, Rounding::same(12.0), t));
+        shapes.push(egui::Shape::rect_filled(rect, Rounding::same(CARD_RADIUS), t));
     }
     ui.painter().set(slot, egui::Shape::Vec(shapes));
     (out.inner, rect)
@@ -789,7 +810,7 @@ fn panel_card_with<R>(ui: &mut egui::Ui, tint: Option<Color32>, margin: f32, add
 
 /// Carte de section pleine largeur, en verre.
 fn panel_card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    panel_card_with(ui, None, 18.0, add).0
+    panel_card_with(ui, None, 20.0, add).0
 }
 
 /// Ligne imbriquée dans une carte (condition ou action).
@@ -1498,7 +1519,7 @@ impl App {
         };
         let mut picked: Vec<PathBuf> = Vec::new();
         let mut typed_submit = false;
-        panel_card_with(ui, hovering.then(|| with_alpha(accent, 46)), 18.0, |ui| {
+        panel_card_with(ui, hovering.then(|| with_alpha(accent, 46)), 20.0, |ui| {
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
                 ui.painter().rect_filled(r, Rounding::same(12.0), with_alpha(accent, 40));
@@ -1598,7 +1619,7 @@ impl App {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| f.path.display().to_string());
-            let (_, rect) = panel_card_with(ui, None, 14.0, |ui| {
+            let (_, rect) = panel_card_with(ui, None, 16.0, |ui| {
                 ui.horizontal(|ui| {
                     ui.dnd_drag_source(egui::Id::new(("fdrag", f.id)), DragRow { list: 2, idx: i }, |ui| {
                         let (r, _) = ui.allocate_exact_size(Vec2::new(14.0, 44.0), egui::Sense::hover());
