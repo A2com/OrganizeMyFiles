@@ -47,7 +47,7 @@ const TABS: &[(Tab, &str, Icon, &str)] = &[
     (Tab::Dashboard, "Aperçu", Icon::Chart, "Tout en un coup d'œil"),
     (Tab::Folders, "Dossiers suivis", Icon::Folder, "Les lieux à organiser"),
     (Tab::Rules, "Règles", Icon::List, "Si ceci, alors cela"),
-    (Tab::History, "Historique", Icon::Clock, "Ce qui s'est passé, annulable"),
+    (Tab::History, "Historique", Icon::Clock, "Passé, annulable"),
     (Tab::Settings, "Réglages", Icon::Sliders, "Ajuster l'application"),
 ];
 
@@ -81,11 +81,11 @@ fn text_primary() -> Color32 {
     Color32::from_rgb(0xf1, 0xf5, 0xf9)
 }
 fn text_dim() -> Color32 {
-    Color32::from_rgb(0xbc, 0xc6, 0xd6)
+    Color32::from_rgb(0xff, 0xea, 0xd9)
 }
-/// Petits libellés en majuscules (un cran plus discrets que le texte secondaire).
+/// Petits libellés en majuscules (orangé clair, un cran plus soutenu que le texte secondaire).
 fn text_label() -> Color32 {
-    Color32::from_rgb(0x9a, 0xa7, 0xbb)
+    Color32::from_rgb(0xff, 0xd8, 0xb8)
 }
 fn with_alpha(c: Color32, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
@@ -313,7 +313,7 @@ impl App {
 
     fn run_batch(&mut self, dry_run: bool) {
         if self.folders.is_empty() {
-            self.toast("Ajoutez d'abord un dossier suivi");
+            self.toast("Ajoutez d'abord un dossier");
             return;
         }
         let mut runner = Runner {
@@ -332,7 +332,7 @@ impl App {
             self.history.push(e);
         }
         if dry_run {
-            self.toast(format!("Aperçu seulement — {} fichier(s) correspondant(s)", outcome.matched));
+            self.toast(format!("Aperçu : {} fichier(s) concerné(s)", outcome.matched));
         } else {
             self.toast(format!("{} fichier(s) organisé(s)", outcome.matched));
         }
@@ -958,12 +958,12 @@ impl eframe::App for App {
                             ui.horizontal_centered(|ui| {
                                 ui.label(
                                     RichText::new(format!(
-                                        "Dossier retiré : {} — {} supprimée(s) avec lui",
+                                        "Dossier retiré : {} · {}",
                                         shorten(&path),
                                         match n_rules {
-                                            0 => "aucune règle".to_string(),
-                                            1 => "1 règle".to_string(),
-                                            n => format!("{n} règles"),
+                                            0 => "sans règle".to_string(),
+                                            1 => "1 règle supprimée".to_string(),
+                                            n => format!("{n} règles supprimées"),
                                         }
                                     ))
                                     .size(14.5)
@@ -1071,7 +1071,7 @@ impl App {
                 .id(search_id)
                 .frame(false)
                 .desired_width(search_w - 90.0)
-                .hint_text("Rechercher des règles, dossiers, actions..."),
+                .hint_text("Rechercher…"),
         );
         let key = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };
         ui.painter().text(
@@ -1114,13 +1114,13 @@ impl App {
         let run_label = if rect.width() >= 1300.0 { "Organiser maintenant" } else { "Organiser" };
         let run = rui.add_enabled_ui(enabled, |ui| btn(ui, run_label, Btn::Primary, accent, Some(Icon::Bolt))).inner;
         let run = run
-            .on_hover_text("Applique toutes les règles activées aux dossiers suivis, maintenant. Annulable depuis l'Historique.")
-            .on_disabled_hover_text("L'application est en veille : activez-la pour organiser.");
+            .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).")
+            .on_disabled_hover_text("Application en veille.");
         if run.clicked() {
             self.run_batch(false);
         }
         let preview = btn(&mut rui, "Aperçu simulation", Btn::Ghost, accent, None)
-            .on_hover_text("Montre ce qui serait fait, sans toucher aux fichiers.");
+            .on_hover_text("Simule, sans toucher aux fichiers.");
         if preview.clicked() {
             self.run_batch(true);
         }
@@ -1166,7 +1166,7 @@ impl App {
             .or_else(|| self.folders.first().map(|f| f.id));
         match folder_id {
             Some(id) => self.new_rule_in(id),
-            None => self.toast("Ajoutez d'abord un dossier suivi."),
+            None => self.toast("Ajoutez d'abord un dossier."),
         }
     }
 
@@ -1219,11 +1219,11 @@ impl App {
             }
         }
         let msg = match (added, refused.first()) {
-            (0, Some(first)) if refused.len() > 1 => format!("Non ajouté — {first} (+ {} autres)", refused.len() - 1),
-            (0, Some(first)) => format!("Non ajouté — {first}"),
+            (0, Some(first)) if refused.len() > 1 => format!("Refusé : {first} (+{} autres)", refused.len() - 1),
+            (0, Some(first)) => format!("Refusé : {first}"),
             (1, None) => "Dossier ajouté".to_string(),
             (n, None) => format!("{n} dossiers ajoutés"),
-            (n, Some(first)) => format!("{n} ajouté(s) — mais {first}"),
+            (n, Some(first)) => format!("{n} ajouté(s), refusé : {first}"),
         };
         if added > 0 || !refused.is_empty() {
             self.toast(msg);
@@ -1359,14 +1359,14 @@ impl App {
 
     fn dashboard(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
-        self.header(ui, "Bonjour", "Vos dossiers, rangés par des règles que vous maîtrisez.");
+        self.header(ui, "Bonjour", "Vos dossiers, rangés par vos règles.");
 
         ui.horizontal(|ui| {
             stat_tile(
                 ui,
                 "DOSSIERS SUIVIS",
                 &format!("{}", self.folders.iter().filter(|f| f.enabled).count()),
-                "tous traités, sans limite",
+                "tous traités",
                 accent,
             );
             ui.add_space(16.0);
@@ -1374,7 +1374,7 @@ impl App {
                 ui,
                 "FICHIERS CE MOIS-CI",
                 &format!("{}", self.monthly_used),
-                "traités (simple compteur)",
+                "simple compteur",
                 accent,
             );
             ui.add_space(16.0);
@@ -1382,7 +1382,7 @@ impl App {
                 ui,
                 "RÈGLES",
                 &format!("{}", self.rules.iter().filter(|r| r.enabled).count()),
-                "règles et actions sans limite",
+                "sans limite",
                 accent,
             );
         });
@@ -1398,7 +1398,7 @@ impl App {
                         ui.label(RichText::new("Prêt à organiser").size(18.0).family(semibold()).color(text_primary()));
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Les règles s'exécutent de haut en bas, les actions en ordre. L'aperçu (simulation) ne touche à aucun fichier.")
+                            RichText::new("Règles de haut en bas, actions dans l'ordre. L'aperçu ne touche à aucun fichier.")
                                 .size(14.5)
                                 .color(text_dim()),
                         );
@@ -1408,14 +1408,14 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.add_space(8.0);
                     if pill(ui, "Organiser maintenant", accent, true, true)
-                        .on_hover_text("Applique toutes les règles activées aux dossiers suivis, maintenant. Annulable depuis l'Historique.")
+                        .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).")
                         .clicked()
                     {
                         clicked = true;
                     }
                     ui.add_space(12.0);
                     if pill(ui, "Aperçu (simulation)", accent, false, true)
-                        .on_hover_text("Montre ce qui serait fait, sans toucher aux fichiers.")
+                        .on_hover_text("Simule, sans toucher aux fichiers.")
                         .clicked()
                     {
                         clicked = false;
@@ -1443,7 +1443,7 @@ impl App {
             ui.add_space(8.0);
             ui.label(
                 RichText::new(format!(
-                    "{used} fichier(s) traité(s) — clé de mois {}. Aucune limite : c'est une simple statistique.",
+                    "{used} fichier(s) traité(s) · mois {}. Simple statistique.",
                     month_key(SystemTime::now())
                 ))
                 .size(14.0)
@@ -1458,7 +1458,7 @@ impl App {
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(format!(
-                        "{matched} fichier(s) correspondant sur {scanned} analysés, {actions} action(s) enregistrée(s)"
+                        "{matched} concerné(s) sur {scanned} analysés · {actions} action(s)"
                     ))
                     .size(14.5)
                     .color(text_dim()),
@@ -1492,7 +1492,7 @@ impl App {
             }
         });
         ui.add_space(2.0);
-        ui.label(RichText::new("Les règles s'exécutent dans ces dossiers, du premier au dernier.").size(15.0).color(text_dim()));
+        ui.label(RichText::new("Les règles s'appliquent du premier dossier au dernier.").size(15.0).color(text_dim()));
         ui.add_space(16.0);
 
         self.folder_add_card(ui, accent, hovering);
@@ -1512,14 +1512,14 @@ impl App {
         ];
         let empty = self.folders.is_empty();
         let (title, sub) = if hovering {
-            ("Relâchez pour ajouter les dossiers", "Ils seront suivis dès maintenant.")
+            ("Relâchez pour ajouter", "Ils seront suivis aussitôt.")
         } else if empty {
             (
-                "Aucun dossier suivi pour l'instant",
-                "Glissez des dossiers depuis le Finder, choisissez-les, ou utilisez un raccourci.",
+                "Aucun dossier suivi",
+                "Glissez des dossiers du Finder, ou choisissez-les.",
             )
         } else {
-            ("Ajouter un dossier", "Glissez-déposez depuis le Finder, ou choisissez un dossier.")
+            ("Ajouter un dossier", "Glissez un dossier du Finder, ou choisissez-le.")
         };
         let mut picked: Vec<PathBuf> = Vec::new();
         let mut typed_submit = false;
@@ -1557,7 +1557,7 @@ impl App {
                 }
             });
             ui.add_space(10.0);
-            let toggle_label = if self.show_path_input { "Masquer la saisie du chemin" } else { "Saisir un chemin…" };
+            let toggle_label = if self.show_path_input { "Masquer la saisie" } else { "Saisir un chemin" };
             let link = ui.add(egui::Label::new(RichText::new(toggle_label).size(14.0).color(accent)).sense(egui::Sense::click()));
             if link.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 self.show_path_input = !self.show_path_input;
@@ -1569,7 +1569,7 @@ impl App {
                         egui::TextEdit::singleline(&mut self.add_folder_text)
                             .margin(egui::Margin::symmetric(8.0, 7.0))
                             .desired_width((ui.available_width() - 130.0).max(160.0))
-                            .hint_text("~/Downloads — chemin complet ou ~/…"),
+                            .hint_text("~/Downloads"),
                     );
                     let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     if btn(ui, "Ajouter", Btn::Sky, accent, None).clicked() || enter {
@@ -1604,9 +1604,9 @@ impl App {
         let mut refresh = false;
 
         ui.horizontal(|ui| {
-            ui.label(caps("PRIORITÉ : DU PREMIER AU DERNIER"));
+            ui.label(caps("PRIORITÉ"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icon_button(ui, Icon::Refresh, "Recalculer le nombre de fichiers", false) {
+                if icon_button(ui, Icon::Refresh, "Recompter les fichiers", false) {
                     refresh = true;
                 }
             });
@@ -1641,7 +1641,7 @@ impl App {
                     resp.on_hover_text(format!(
                         "Priorité {} : traité {}",
                         i + 1,
-                        if i == 0 { "en premier" } else { "après les dossiers précédents" }
+                        if i == 0 { "en premier" } else { "après les précédents" }
                     ));
                     let (t, _) = ui.allocate_exact_size(Vec2::splat(42.0), egui::Sense::hover());
                     let tile = if exists { accent } else { RED };
@@ -1661,7 +1661,7 @@ impl App {
                                 chip(ui, "En pause", text_dim(), glass(30));
                             }
                             let rules_text = match n_rules {
-                                0 => "Aucune règle — en créer une".to_string(),
+                                0 => "Aucune règle · créer".to_string(),
                                 1 => "1 règle".to_string(),
                                 n => format!("{n} règles"),
                             };
@@ -1691,14 +1691,14 @@ impl App {
                         if toggle(ui, &mut en, accent).on_hover_text("Suivre ce dossier").changed() {
                             self.folders[i].enabled = en;
                         }
-                        if icon_button(ui, Icon::Trash, "Retirer ce dossier de la liste", true) {
+                        if icon_button(ui, Icon::Trash, "Retirer ce dossier", true) {
                             remove = Some(i);
                         }
                         if exists {
                             if icon_button(ui, Icon::FolderOpen, "Ouvrir dans le Finder", false) {
                                 finder = Some(i);
                             }
-                        } else if btn(ui, "Choisir un autre emplacement", Btn::Sky, accent, None).clicked() {
+                        } else if btn(ui, "Changer d'emplacement", Btn::Sky, accent, None).clicked() {
                             replace = Some(i);
                         }
                     });
@@ -1720,7 +1720,7 @@ impl App {
         if let Some(i) = finder {
             let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
             if std::process::Command::new(program).arg(&self.folders[i].path).spawn().is_err() {
-                self.toast("Impossible d'ouvrir ce dossier.");
+                self.toast("Ouverture impossible.");
             }
         }
         if let Some(i) = replace {
@@ -1782,17 +1782,17 @@ impl App {
             );
         });
         ui.add_space(2.0);
-        ui.label(RichText::new("Si ces conditions correspondent, exécutez ces actions dans l'ordre.").size(15.0).color(text_dim()));
+        ui.label(RichText::new("Conditions remplies : actions dans l'ordre.").size(15.0).color(text_dim()));
         ui.add_space(16.0);
 
         if self.folders.is_empty() {
-            ui.label(RichText::new("Ajoutez d'abord un dossier suivi, puis créez-y des règles.").color(text_dim()));
+            ui.label(RichText::new("Ajoutez d'abord un dossier.").color(text_dim()));
             return;
         }
 
         let order = self.rule_order();
         if order.is_empty() {
-            ui.label(RichText::new("Aucune règle pour l'instant.").color(text_dim()));
+            ui.label(RichText::new("Aucune règle.").color(text_dim()));
             ui.add_space(8.0);
             if btn(ui, "+ Nouvelle règle", Btn::Sky, accent, None).clicked() {
                 self.new_rule();
@@ -1889,7 +1889,7 @@ impl App {
             });
             ui.add_space(4.0);
             ui.label(
-                RichText::new("0 = fichiers de premier niveau seulement ; n descend de n niveaux.")
+                RichText::new("0 = premier niveau seulement ; n = n niveaux de plus.")
                     .size(13.5)
                     .color(text_dim()),
             );
@@ -1956,7 +1956,7 @@ impl App {
                             Field::Size => "50 MB / 512 KB",
                             Field::DateAdded | Field::DateModified => "2024-01-31  ou  30 days",
                             Field::Kind => "document / image / video / audio / archive / folder",
-                            Field::Contents => "texte à chercher (documents ; images : OCR)",
+                            Field::Contents => "texte à chercher",
                             _ => "valeur",
                         };
                         let mut val = self.rules[idx].conditions[ci].value.clone();
@@ -1997,7 +1997,7 @@ impl App {
             ui.horizontal(|ui| {
                 section_title(ui, Icon::Bolt, "Actions");
                 ui.label(
-                    RichText::new("exécutées en ordre, chacune voit le fichier laissé par la précédente")
+                    RichText::new("exécutées dans l'ordre")
                         .size(14.0)
                         .color(text_dim()),
                 );
@@ -2088,10 +2088,10 @@ impl App {
 
     fn history_ui(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
-        self.header(ui, "Historique", "Chaque action d'un lot — celles réversibles peuvent être annulées.");
+        self.header(ui, "Historique", "Actions par lot, annulables si possible.");
 
         if self.history.is_empty() {
-            ui.label(RichText::new("Rien pour l'instant. Lancez un lot ou un aperçu pour le voir ici.").color(text_dim()));
+            ui.label(RichText::new("Rien pour l'instant. Lancez un lot ou un aperçu.").color(text_dim()));
             return;
         }
 
@@ -2160,7 +2160,7 @@ impl App {
         if total > HISTORY_PAGE_SIZE {
             ui.label(
                 RichText::new(format!(
-                    "Affichage des {HISTORY_PAGE_SIZE} dernières entrées sur {total}."
+                    "{HISTORY_PAGE_SIZE} dernières entrées sur {total}."
                 ))
                 .size(13.5)
                 .color(text_dim()),
@@ -2173,7 +2173,7 @@ impl App {
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
-        self.header(ui, "Réglages", "Petits réglages, appliqués immédiatement.");
+        self.header(ui, "Réglages", "Appliqués immédiatement.");
 
         card(ui, Vec2::new(756.0, 132.0), |ui| {
             ui.label(RichText::new("Couleur d'accent").size(15.0).family(semibold()).color(text_primary()));
@@ -2196,17 +2196,17 @@ impl App {
                 }
             });
             ui.add_space(8.0);
-            ui.label(RichText::new("Nommé d'après la palette d'origine : bleu, violet, rose, orange, jaune, vert, graphite.").size(13.5).color(text_dim()));
+            ui.label(RichText::new("Orange, bleu, violet, rose, jaune, vert, graphite.").size(13.5).color(text_dim()));
         });
 
         ui.add_space(16.0);
         card(ui, Vec2::new(756.0, 240.0), |ui| {
-            check_box(ui, &mut self.menu_bar, "Afficher l'application dans la barre des menus", accent);
+            check_box(ui, &mut self.menu_bar, "Afficher dans la barre des menus", accent);
             ui.add_space(8.0);
-            check_box(ui, &mut self.notify, "Prévenir quand le surveillant organise des fichiers", accent);
+            check_box(ui, &mut self.notify, "Prévenir après chaque organisation", accent);
             ui.add_space(12.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Conserver l'historique pendant").size(14.5).color(text_primary()));
+                ui.label(RichText::new("Garder l'historique").size(14.5).color(text_primary()));
                 ui.add_space(8.0);
                 slim_slider(ui, &mut self.retention_days, 1, 365, accent);
                 chip(ui, &format!("{} jours", self.retention_days), accent, with_alpha(accent, 38));
@@ -2214,13 +2214,13 @@ impl App {
             ui.add_space(4.0);
             ui.label(
                 RichText::new(format!(
-                    "Les entrées plus anciennes sont purgées automatiquement (réglage history_max_days).",
+                    "Les entrées plus anciennes sont purgées.",
                 ))
                 .size(13.5)
                 .color(text_dim()),
             );
             ui.label(
-                RichText::new(format!("Clé de réglage : {HISTORY_RETENTION_SETTING_KEY} — plage 1 à 365 jours"))
+                RichText::new(format!("{HISTORY_RETENTION_SETTING_KEY} · de 1 à 365 jours"))
                     .size(13.5)
                     .color(text_dim()),
             );
@@ -2228,7 +2228,7 @@ impl App {
             ui.horizontal(|ui| {
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("Purger l'historique plus ancien").size(14.0))
+                        egui::Button::new(RichText::new("Purger l'ancien historique").size(14.0))
                             .fill(glass(34)),
                     )
                     .clicked()
@@ -2245,7 +2245,7 @@ impl App {
             ui.add_space(8.0);
             ui.label(
                 RichText::new(format!(
-                    "Constantes documentées (application d'origine, non appliquées ici) : {} fichiers / mois et {} dossiers (limites du forfait), {} Mo d'extraction de texte, {} Mo d'OCR, noms de {} caractères. Adresses sources complètes dans MECHANICS.md.",
+                    "Limites de l'original, non appliquées ici : {} fichiers/mois, {} dossiers, {} Mo de texte, {} Mo d'OCR, noms de {} caractères. Détails : MECHANICS.md.",
                     MONTHLY_FILE_LIMIT,
                     FREE_FOLDER_LIMIT,
                     TEXT_LIMIT_BYTES / 1024 / 1024,
