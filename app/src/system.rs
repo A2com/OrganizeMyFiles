@@ -69,9 +69,9 @@ pub fn run_shortcut_args(name: &str, file: &str) -> Vec<String> {
 /// script (pas collé dans son texte), donc aucun risque de guillemet mal échappé.
 pub fn import_args(library: &str, file: &str) -> Result<Vec<String>, String> {
     let line = match library {
-        "photos" => "tell application \"Photos\" to import {POSIX file (item 1 of argv)}",
-        "music" => "tell application \"Music\" to add (POSIX file (item 1 of argv))",
-        "tv" => "tell application \"TV\" to add (POSIX file (item 1 of argv))",
+        "photos" => "tell application \"Photos\" to import {(POSIX file (item 1 of argv)) as alias}",
+        "music" => "tell application \"Music\" to add ((POSIX file (item 1 of argv)) as alias)",
+        "tv" => "tell application \"TV\" to add ((POSIX file (item 1 of argv)) as alias)",
         other => return Err(format!("Médiathèque inconnue « {other} » (photos, music ou tv)")),
     };
     Ok(["-e", "on run argv", "-e", line, "-e", "end run", file].iter().map(|s| s.to_string()).collect())
