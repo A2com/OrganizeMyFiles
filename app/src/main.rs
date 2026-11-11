@@ -1,5 +1,5 @@
 //! Entry point: eframe/egui desktop app.
-//! `--tab rules` ouvre l'écran voulu (dashboard, folders, rules, history, plan, settings).
+//! `--tab rules` ouvre l'écran voulu (dashboard, folders, rules, history, settings).
 //! `--empty` : avec --screenshot, capture l'appli sans données de démonstration.
 //! `--screenshot <file.png>` draws ~120 frames, saves a PNG of the window and
 //! exits (used for automated checks).

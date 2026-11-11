@@ -17,7 +17,6 @@ enum Tab {
     Folders,
     Rules,
     History,
-    Plan,
     Settings,
 }
 
@@ -28,7 +27,6 @@ enum Icon {
     Folder,
     List,
     Clock,
-    Check,
     Sliders,
     Funnel,
     Bolt,
@@ -50,7 +48,6 @@ const TABS: &[(Tab, &str, Icon, &str)] = &[
     (Tab::Folders, "Dossiers suivis", Icon::Folder, "Les lieux à organiser"),
     (Tab::Rules, "Règles", Icon::List, "Si ceci, alors cela"),
     (Tab::History, "Historique", Icon::Clock, "Ce qui s'est passé, annulable"),
-    (Tab::Plan, "Capacités", Icon::Check, "Tout est débloqué — sans compte"),
     (Tab::Settings, "Réglages", Icon::Sliders, "Ajuster l'application"),
 ];
 
@@ -178,7 +175,6 @@ pub struct App {
     history: Vec<HistoryEntry>,
     next_id: u64,
     next_batch: u64,
-    is_pro: bool,
     monthly_used: u32,
     accent: usize,
     menu_bar: bool,
@@ -209,7 +205,6 @@ impl App {
             history: Vec::new(),
             next_id: 1,
             next_batch: 1,
-            is_pro: true, // no account system: every capability is unlocked
             monthly_used: 0,
             accent: 0,
             menu_bar: true,
@@ -235,7 +230,6 @@ impl App {
             Some("folders") => Tab::Folders,
             Some("rules") => Tab::Rules,
             Some("history") => Tab::History,
-            Some("plan") => Tab::Plan,
             Some("settings") => Tab::Settings,
             _ => Tab::Dashboard,
         };
@@ -550,7 +544,6 @@ fn icon_char(icon: Icon) -> char {
         Icon::Folder => '\u{f775}',  // folder_managed
         Icon::List => '\u{f1c2}',    // rule
         Icon::Clock => '\u{e8b3}',   // history
-        Icon::Check => '\u{e322}',   // memory
         Icon::Sliders => '\u{e429}', // tune
         Icon::Funnel => '\u{ef4f}',  // filter_alt
         Icon::Bolt => '\u{ea0b}',    // bolt
@@ -854,19 +847,6 @@ fn section_title(ui: &mut egui::Ui, icon: Icon, title: &str) {
     ui.label(RichText::new(title).size(15.0).family(semibold()).color(Color32::WHITE));
 }
 
-fn icon_square(ui: &mut egui::Ui, icon: Icon, accent: Color32, active: bool) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), egui::Sense::hover());
-    let fill = if active { Color32::WHITE } else { glass(44) };
-    ui.painter().rect_filled(rect, Rounding::same(8.0), fill);
-    draw_icon(
-        &ui.painter().clone(),
-        rect.center(),
-        icon,
-        if active { accent } else { Color32::WHITE },
-        15.0,
-    );
-}
-
 fn stat_tile(ui: &mut egui::Ui, title: &str, big: &str, sub: &str, accent: Color32) {
     card(ui, Vec2::new(240.0, 128.0), |ui| {
         ui.label(RichText::new(title).size(12.5).color(text_dim()));
@@ -1005,7 +985,6 @@ impl eframe::App for App {
                             Tab::Folders => self.folders_ui(ui),
                             Tab::Rules => self.rules_ui(ui),
                             Tab::History => self.history_ui(ui),
-                            Tab::Plan => self.plan_ui(ui),
                             Tab::Settings => self.settings_ui(ui),
                         }
                         ui.add_space(32.0);
@@ -2169,69 +2148,6 @@ impl App {
         if let Some(i) = undo_idx {
             self.undo(i);
         }
-    }
-
-    fn plan_ui(&mut self, ui: &mut egui::Ui) {
-        let accent = self.accent();
-        self.header(ui, "Capacités", "Toutes les capacités sont disponibles — aucun compte ni forfait à activer.");
-
-        ui.horizontal(|ui| {
-            card(ui, Vec2::new(366.0, 300.0), |ui| {
-                ui.label(RichText::new("Organisation").size(20.0).family(semibold()).color(text_primary()));
-                ui.add_space(4.0);
-                ui.label(RichText::new("Toujours disponible").size(12.0).color(text_dim()));
-                ui.add_space(12.0);
-                for line in [
-                    "• dossiers suivis illimités (par ordre de priorité)",
-                    "• règles et actions illimitées",
-                    "• correspondance sur le texte des documents",
-                    "• aperçus (simulation)",
-                    "• historique avec annulation",
-                ] {
-                    ui.label(RichText::new(line).size(12.5).color(text_primary()));
-                    ui.add_space(3.0);
-                }
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new("Les limites documentées du plan gratuit de l'application d'origine (2 dossiers, 300 fichiers par mois) figurent dans MECHANICS.md mais ne sont pas appliquées ici.")
-                        .size(11.0)
-                        .color(text_dim()),
-                );
-            });
-            ui.add_space(16.0);
-            card(ui, Vec2::new(366.0, 300.0), |ui| {
-                ui.label(RichText::new("Avancé").size(20.0).family(semibold()).color(accent));
-                ui.add_space(4.0);
-                ui.label(RichText::new("Tout est débloqué :").size(12.0).color(text_dim()));
-                ui.add_space(12.0);
-                for (title, sub) in [
-                    ("Dossiers et fichiers illimités", "Aucun plafond mensuel, autant de dossiers suivis que souhaité."),
-                    ("Import vers les médiathèques", "Envoyez directement les fichiers correspondants dans vos médiathèques photos, musique et vidéos."),
-                    ("Reconnaissance de texte (OCR)", "Classez les PDF numérisés et les images selon les mots qu'ils contiennent — lu localement sur votre ordinateur."),
-                ] {
-                    ui.label(RichText::new(format!("• {title}")).size(12.5).family(semibold()).color(text_primary()));
-                    ui.label(RichText::new(sub).size(11.5).color(text_dim()));
-                    ui.add_space(8.0);
-                }
-                ui.add_space(8.0);
-                pill(ui, "Toutes les fonctions actives", accent, true, false);
-            });
-        });
-
-        ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 96.0), |ui| {
-            ui.label(RichText::new("Ce mois-ci").size(15.0).family(semibold()).color(text_primary()));
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(format!(
-                    "{} fichier(s) traité(s) jusqu'ici ({}). Statistique pure — aucune limite.",
-                    self.monthly_used,
-                    month_key(SystemTime::now())
-                ))
-                .size(12.5)
-                .color(text_dim()),
-            );
-        });
     }
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
