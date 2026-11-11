@@ -2646,6 +2646,20 @@ mod tests {
     }
 
     #[test]
+    fn background_drifts_over_time() {
+        let accent = ACCENTS[0].1;
+        let (mut moved, mut total) = (0, 0);
+        for (u, v) in [(0.2, 0.1), (0.5, 0.5), (0.9, 0.9), (0.3, 0.8)] {
+            let (a, b) = (bg_color(u, v, 0.0, 1.5, accent), bg_color(u, v, 20.0, 1.5, accent));
+            moved += (a.r() as i32 - b.r() as i32).abs() + (a.g() as i32 - b.g() as i32).abs() + (a.b() as i32 - b.b() as i32).abs();
+            total += 1;
+        }
+        assert!(moved / total >= 6, "le fond doit visiblement évoluer en 20 s (écart {moved})");
+        // Fond figé quand le temps ne change pas.
+        assert_eq!(bg_color(0.4, 0.4, 3.0, 1.5, accent), bg_color(0.4, 0.4, 3.0, 1.5, accent));
+    }
+
+    #[test]
     fn hero_state_follows_setup_progress() {
         assert_eq!(hero_state(0, 0, false), HeroState::NoFolder);
         assert_eq!(hero_state(2, 0, false), HeroState::NoRule);
