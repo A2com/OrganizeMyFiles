@@ -9,6 +9,7 @@ use eframe::egui::{self, Align, Color32, Layout, Pos2, Rect, RichText, Rounding,
 use crate::engine::*;
 use crate::mechanics::*;
 use crate::store::{self, Loaded, Settings, State};
+use crate::watcher::{self, WatchConfig, Watcher};
 
 // ------------------------------------------------------------------- theme
 
@@ -177,6 +178,8 @@ pub struct Launch {
     pub screenshot: Option<String>,
     pub tab: Option<String>,
     pub empty: bool,
+    /// Démarrage à l'ouverture de session : fenêtre réduite dans le Dock.
+    pub background: bool,
 }
 
 pub struct App {
@@ -196,6 +199,10 @@ pub struct App {
     add_folder_text: String,
     selected_rule: usize,
     app_enabled: bool,
+    launch_at_login: bool,
+    /// Surveillance automatique ; `None` en mode capture d'écran et dans les tests.
+    watcher: Option<Watcher>,
+    watch_key: String,
     search: String,
     toast: Option<String>,
     undo_folder: Option<UndoFolder>,
@@ -212,6 +219,7 @@ pub struct App {
     frame: u32,
     screenshot: Option<String>,
     shot_done: bool,
+    start_minimized: bool,
 }
 
 impl App {
@@ -230,6 +238,8 @@ impl App {
             }
         } else {
             app.load_saved_state();
+            let ctx = cc.egui_ctx.clone();
+            app.watcher = Some(Watcher::start(watcher::SETTLE, move || ctx.request_repaint()));
         }
         app.tab = match tab.as_deref() {
             Some("folders") => Tab::Folders,
@@ -243,7 +253,7 @@ impl App {
 
     /// État initial sans aucun contexte graphique (utilisable dans les tests).
     fn blank(launch: Launch) -> Self {
-        let Launch { screenshot, tab: _, empty: _, bg_time } = launch;
+        let Launch { screenshot, tab: _, empty: _, bg_time, background } = launch;
         App {
             tab: Tab::Dashboard,
             folders: Vec::new(),
@@ -261,6 +271,9 @@ impl App {
             add_folder_text: String::new(),
             selected_rule: 0,
             app_enabled: true,
+            launch_at_login: false,
+            watcher: None,
+            watch_key: String::new(),
             search: String::new(),
             toast: None,
             undo_folder: None,
@@ -276,6 +289,7 @@ impl App {
             frame: 0,
             screenshot,
             shot_done: false,
+            start_minimized: background,
         }
     }
 
@@ -360,6 +374,7 @@ impl App {
                 animate_bg: self.animate_bg,
                 retention_days: self.retention_days,
                 app_enabled: self.app_enabled,
+                launch_at_login: self.launch_at_login,
             },
             next_id: self.next_id,
             next_batch: self.next_batch,
@@ -386,6 +401,7 @@ impl App {
         self.animate_bg = state.settings.animate_bg;
         self.retention_days = state.settings.retention_days.clamp(1, 365);
         self.app_enabled = state.settings.app_enabled;
+        self.launch_at_login = state.settings.launch_at_login;
         self.next_id = state.next_id.max(max_id + 1);
         self.next_batch = state.next_batch.max(1);
         self.monthly_used = state.monthly_used;
@@ -432,11 +448,13 @@ impl App {
             batch_id: self.next_batch,
             dry_run,
             commands: Box::new(crate::system::SystemCommands),
+            only_paths: None,
         };
         let outcome = runner.run(&self.folders, &self.rules, SystemTime::now());
         self.next_batch += 1;
         if !dry_run {
             self.monthly_used = runner.monthly_used;
+            self.ignore_in_watcher(&outcome.history);
         }
         let actions = outcome.history.len();
         self.last_run = Some((outcome.matched, actions, outcome.scanned));
@@ -458,11 +476,53 @@ impl App {
                 Ok(()) => {
                     e.status = Status::Undone;
                     e.message = "restored".into();
+                    let paths = vec![e.original_path.clone(), e.result_path.clone()];
+                    if let Some(w) = &self.watcher {
+                        w.ignore(paths);
+                    }
                     self.toast("Annulé");
                 }
                 Err(msg) => self.toast(format!("Annulation impossible : {msg}")),
             }
         }
+    }
+
+    /// Les fichiers que l'appli vient de déplacer ne doivent pas être retraités par la surveillance.
+    fn ignore_in_watcher(&self, history: &[HistoryEntry]) {
+        if let Some(w) = &self.watcher {
+            w.ignore(history.iter().flat_map(|e| [e.original_path.clone(), e.result_path.clone()]).collect());
+        }
+    }
+
+    /// Envoie à la surveillance les dossiers et règles actuels, seulement s'ils ont changé.
+    fn sync_watcher(&mut self) {
+        let Some(w) = &self.watcher else { return };
+        let key = serde_json::to_string(&(&self.folders, &self.rules, self.app_enabled)).unwrap_or_default();
+        if key != self.watch_key {
+            self.watch_key = key;
+            w.set_config(WatchConfig { folders: self.folders.clone(), rules: self.rules.clone(), enabled: self.app_enabled });
+        }
+    }
+
+    /// Reprend les résultats des traitements automatiques et les ajoute à l'historique.
+    fn poll_watcher(&mut self) {
+        let Some(w) = &self.watcher else { return };
+        let mut results = Vec::new();
+        while let Some(r) = w.try_recv() {
+            results.push(r);
+        }
+        for mut r in results {
+            for e in &mut r.history {
+                e.batch_id = self.next_batch;
+            }
+            self.next_batch += 1;
+            self.monthly_used += r.monthly_delta;
+            self.last_run = Some((r.matched, r.history.len(), r.scanned));
+            self.last_run_dry = false;
+            self.toast(format!("{} fichier(s) organisé(s) automatiquement", r.matched));
+            self.history.extend(r.history);
+        }
+        purge_history(&mut self.history, self.retention_days, SystemTime::now());
     }
 }
 
@@ -1335,6 +1395,9 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame += 1;
+        if self.start_minimized && self.frame == 2 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
 
         // --screenshot: draw ~120 frames, save the window as PNG, exit.
         if self.screenshot.is_some() {
@@ -1367,8 +1430,10 @@ impl eframe::App for App {
         let clock = ctx.input(|i| i.time);
         if clock >= self.next_save_check {
             self.next_save_check = clock + 1.0;
+            self.sync_watcher();
             self.persist();
         }
+        self.poll_watcher();
         ctx.request_repaint_after(std::time::Duration::from_millis(1100));
 
         let screen = ctx.screen_rect();
@@ -1778,7 +1843,10 @@ impl App {
             });
         });
         c.add_space(4.0);
-        let (dot, txt) = if self.app_enabled {
+        let nothing_watched = self.watcher.as_ref().is_some_and(|w| w.watched_folders() == 0);
+        let (dot, txt) = if self.app_enabled && nothing_watched {
+            (text_dim(), "Aucun dossier surveillé • v0.1")
+        } else if self.app_enabled {
             (GREEN, "Surveillance active • v0.1")
         } else {
             (text_dim(), "v0.1")
@@ -2849,7 +2917,16 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 276.0), |ui| {
+        card(ui, Vec2::new(756.0, 314.0), |ui| {
+            let before = self.launch_at_login;
+            check_box(ui, &mut self.launch_at_login, "Lancer à l'ouverture de la session", accent);
+            if self.launch_at_login != before {
+                if let Err(e) = crate::login::set_enabled(self.launch_at_login) {
+                    self.launch_at_login = before;
+                    self.toast(format!("Lancement au démarrage impossible : {e}"));
+                }
+            }
+            ui.add_space(8.0);
             check_box(ui, &mut self.menu_bar, "Afficher dans la barre des menus", accent);
             ui.add_space(8.0);
             check_box(ui, &mut self.notify, "Prévenir après chaque organisation", accent);
@@ -2983,7 +3060,7 @@ mod tests {
 
     #[test]
     fn app_state_survives_snapshot_and_restore() {
-        let launch = || Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false };
+        let launch = || Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false };
         let mut a = App::blank(launch());
         a.seed_demo();
         a.accent = 3;
@@ -3002,13 +3079,13 @@ mod tests {
 
     #[test]
     fn restore_applies_history_retention() {
-        let mut a = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false });
+        let mut a = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
         a.seed_demo();
         let mut state = a.snapshot();
         state.settings.retention_days = 1;
         state.history[0].created = SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
         let before = state.history.len();
-        let mut b = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false });
+        let mut b = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
         b.restore(state);
         assert_eq!(b.history.len(), before - 1);
     }
