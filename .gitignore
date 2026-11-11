@@ -13,3 +13,6 @@ app/target/
 /reference/
 /transcript.json
 /usage.json
+
+# Sorties de l'emballage macOS
+/dist/

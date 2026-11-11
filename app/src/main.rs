@@ -46,6 +46,7 @@ fn main() -> eframe::Result {
             .with_inner_size([1180.0, 780.0])
             .with_min_inner_size([980.0, 640.0])
             .with_title("OrganizeFiles")
+            .with_icon(ui::app_icon())
             // macOS : barre de titre fondue dans le contenu, feux natifs conservés.
             .with_fullsize_content_view(cfg!(target_os = "macos"))
             .with_titlebar_shown(!cfg!(target_os = "macos"))
