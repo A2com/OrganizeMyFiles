@@ -7,6 +7,7 @@
 
 mod engine;
 mod mechanics;
+mod store;
 mod ui;
 mod zipmini;
 
