@@ -26,14 +26,7 @@ fi
 
 sed "s/@VERSION@/$VERSION/g" assets/Info.plist.in > "$APP/Contents/Info.plist"
 
-ICONSET="$DIST/AppIcon.iconset"
-mkdir -p "$ICONSET"
-for s in 16 32 128 256 512; do
-  sips -z $s $s assets/AppIcon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s * 2)) $((s * 2)) assets/AppIcon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-rm -rf "$ICONSET"
+cp assets/icons/macos/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"

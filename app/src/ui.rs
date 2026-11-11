@@ -172,6 +172,20 @@ struct UndoFolder {
 
 const UNDO_SECONDS: u64 = 8;
 
+const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/app-256.png");
+
+fn app_icon_image() -> egui::ColorImage {
+    let img = image::load_from_memory(APP_ICON_PNG).expect("icône embarquée valide").to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
+}
+
+/// Icône de la fenêtre (Dock, barre des tâches).
+pub fn app_icon() -> egui::IconData {
+    let img = image::load_from_memory(APP_ICON_PNG).expect("icône embarquée valide").to_rgba8();
+    egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() }
+}
+
 /// Options de lancement (ligne de commande).
 pub struct Launch {
     pub bg_time: f64,
@@ -203,6 +217,8 @@ pub struct App {
     /// Surveillance automatique ; `None` en mode capture d'écran et dans les tests.
     watcher: Option<Watcher>,
     watch_key: String,
+    /// Logo de la barre latérale (chargé au premier affichage).
+    logo: Option<egui::TextureHandle>,
     search: String,
     toast: Option<String>,
     undo_folder: Option<UndoFolder>,
@@ -274,6 +290,7 @@ impl App {
             launch_at_login: false,
             watcher: None,
             watch_key: String::new(),
+            logo: None,
             search: String::new(),
             toast: None,
             undo_folder: None,
@@ -1761,10 +1778,17 @@ impl App {
         ui.add_space(16.0);
         ui.horizontal(|ui| {
             ui.add_space(20.0);
-            let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::hover());
-            ui.painter().rect_filled(r.expand(3.0), Rounding::same(12.0), with_alpha(accent, 40));
-            ui.painter().rect_filled(r, Rounding::same(10.0), accent);
-            draw_icon(&ui.painter().clone(), r.center(), Icon::Folder, Color32::WHITE, 18.0);
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(36.0), egui::Sense::hover());
+            let logo = self.logo.get_or_insert_with(|| {
+                let img = app_icon_image();
+                ui.ctx().load_texture("app-logo", img, egui::TextureOptions::LINEAR)
+            });
+            ui.painter().image(
+                logo.id(),
+                r,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
             ui.add_space(8.0);
             ui.label(RichText::new("OrganizeFiles").size(17.0).family(semibold()).color(Color32::WHITE));
         });
