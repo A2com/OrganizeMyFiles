@@ -1,1 +1,15 @@
 app/target/
+
+# Fichiers de l'outil Craft Anything d'origine : ne jamais les versionner
+/attachments/
+/build-activity.log
+/capture/
+/checks/
+/craft.json
+/feed.json
+/inbox/
+/investigation.cany/
+/pinned/
+/reference/
+/transcript.json
+/usage.json
