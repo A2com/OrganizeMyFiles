@@ -1779,11 +1779,13 @@ impl App {
         let (dot, txt) = if self.app_enabled {
             (GREEN, "Surveillance active • v0.1")
         } else {
-            (text_dim(), "En veille • v0.1")
+            (text_dim(), "v0.1")
         };
         c.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
-            ui.painter().circle_filled(r.center(), 3.5, dot);
+            if self.app_enabled {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
+                ui.painter().circle_filled(r.center(), 3.5, dot);
+            }
             ui.label(RichText::new(txt).size(13.5).color(text_dim()));
         });
     }
@@ -2878,6 +2880,22 @@ impl App {
             });
         });
 
+        ui.add_space(16.0);
+        card(ui, Vec2::new(756.0, 110.0), |ui| {
+            ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new(format!("Forel · version {}", env!("CARGO_PKG_VERSION")))
+                    .size(14.5)
+                    .color(text_primary()),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("Outil libre et open source. Tout reste sur ton Mac : aucun envoi de données.")
+                    .size(13.5)
+                    .color(text_dim()),
+            );
+        });
         let _ = accent;
     }
 }
