@@ -404,33 +404,6 @@ fn sample_rule(id: u64, folder_id: u64, name: &str, prio: i64) -> Rule {
 
 // ------------------------------------------------------------ egui helpers
 
-/// Halo flou : disque dont l'opacité décroît jusqu'à 0 (maillage coloré par sommet).
-fn halo(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32, alpha: u8) {
-    const N: u32 = 48;
-    let stops = [(0.35f32, 0.55f32), (0.7, 0.2), (1.0, 0.0)];
-    let mut mesh = egui::epaint::Mesh::default();
-    let tint = |m: f32| Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (alpha as f32 * m) as u8);
-    mesh.colored_vertex(center, tint(1.0));
-    for (r, m) in stops {
-        for i in 0..N {
-            let a = i as f32 / N as f32 * std::f32::consts::TAU;
-            mesh.colored_vertex(center + Vec2::angled(a) * (radius * r), tint(m));
-        }
-    }
-    for i in 0..N {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % N);
-    }
-    for k in 0..(stops.len() as u32 - 1) {
-        let (a0, a1) = (1 + k * N, 1 + (k + 1) * N);
-        for i in 0..N {
-            let j = (i + 1) % N;
-            mesh.add_triangle(a0 + i, a1 + i, a1 + j);
-            mesh.add_triangle(a0 + i, a1 + j, a0 + j);
-        }
-    }
-    painter.add(egui::Shape::mesh(mesh));
-}
-
 /// Couleur du fond au point (u, v) ∈ [0,1]² à l'instant `t` (secondes).
 /// Trois champs de lumière (accent, bleu nuit, accent doux) qui dérivent lentement, vus à travers
 /// une déformation ondulante, plus un reflet discret qui traverse l'écran (esprit « NEAT »).
@@ -486,6 +459,41 @@ fn backdrop(ui: &mut egui::Ui, rect: Rect, accent: Color32, t: f64) {
     ui.painter().add(egui::Shape::mesh(mesh));
 }
 
+/// Fondu du bas : les sommets reprennent exactement la couleur du fond animé, avec une opacité
+/// qui monte de 0 à ~95 % ; les cartes s'effacent dans le fond au lieu d'être coupées net.
+fn bottom_fade(ui: &mut egui::Ui, area: Rect, screen: Rect, t: f64, accent: Color32) {
+    const COLS: u32 = 24;
+    const ROWS: u32 = 8;
+    let h = BOTTOM_FADE_H.min(area.height());
+    let top = area.bottom() - h;
+    let aspect = (screen.width() / screen.height().max(1.0)) as f64;
+    let mut mesh = egui::epaint::Mesh::default();
+    for j in 0..=ROWS {
+        let f = j as f32 / ROWS as f32;
+        let y = top + h * f;
+        let alpha = (f * f * (3.0 - 2.0 * f) * 0.95 * 255.0) as u8;
+        for i in 0..=COLS {
+            let x = area.left() + area.width() * i as f32 / COLS as f32;
+            let u = ((x - screen.left()) / screen.width()) as f64;
+            let v = ((y - screen.top()) / screen.height()) as f64;
+            let c = bg_color(u, v, t, aspect, accent);
+            mesh.colored_vertex(Pos2::new(x, y), Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), alpha));
+        }
+    }
+    let stride = COLS + 1;
+    for j in 0..ROWS {
+        for i in 0..COLS {
+            let a = j * stride + i;
+            mesh.add_triangle(a, a + 1, a + stride);
+            mesh.add_triangle(a + 1, a + stride + 1, a + stride);
+        }
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
+}
+
+/// Hauteur du fondu du bas d'écran et de la marge basse du défilement.
+const BOTTOM_FADE_H: f32 = 80.0;
+
 /// Écart unique entre les cartes (horizontal et vertical) sur l'écran Aperçu.
 const GAP: f32 = 20.0;
 /// Hauteur utile commune des deux cartes de listes (titre + 4 lignes) : elles restent alignées.
@@ -497,8 +505,8 @@ const CARD_RADIUS: f32 = 16.0;
 /// Ombre portée diffuse, dessinée **autour** de la carte seulement (anneau dégradé) :
 /// le verre étant translucide, une ombre posée dessous salirait l'intérieur de la carte.
 /// Le bord interne colle à la carte (opacité max) ; le bord externe, élargi de `blur` et décalé de `offset`, vaut 0.
-fn shadow_ring(rect: Rect, r: f32, blur: f32, offset: Vec2, alpha: u8) -> egui::Shape {
-    const ARC: usize = 8;
+/// Points (centre de coin, direction) qui décrivent un rectangle à coins arrondis, dans l'ordre.
+fn corner_dirs(rect: Rect, r: f32, arc: usize) -> Vec<(Pos2, Vec2)> {
     let quarter = std::f32::consts::FRAC_PI_2;
     let corners = [
         (Pos2::new(rect.right() - r, rect.bottom() - r), 0.0),
@@ -506,15 +514,33 @@ fn shadow_ring(rect: Rect, r: f32, blur: f32, offset: Vec2, alpha: u8) -> egui::
         (Pos2::new(rect.left() + r, rect.top() + r), 2.0 * quarter),
         (Pos2::new(rect.right() - r, rect.top() + r), 3.0 * quarter),
     ];
-    let (mut inner, mut outer) = (Vec::new(), Vec::new());
+    let mut out = Vec::new();
     for (center, start) in corners {
-        for k in 0..=ARC {
-            let dir = Vec2::angled(start + quarter * k as f32 / ARC as f32);
-            inner.push(center + dir * r);
-            outer.push(center + offset + dir * (r + blur));
+        for k in 0..=arc {
+            out.push((center, Vec2::angled(start + quarter * k as f32 / arc as f32)));
         }
     }
-    let n = inner.len() as u32;
+    out
+}
+
+fn ring_indices(mesh: &mut egui::epaint::Mesh, rings: u32, per_ring: u32) {
+    for ring in 0..rings {
+        for i in 0..per_ring {
+            let j = (i + 1) % per_ring;
+            let (a0, a1) = (ring * per_ring, (ring + 1) * per_ring);
+            mesh.add_triangle(a0 + i, a1 + i, a1 + j);
+            mesh.add_triangle(a0 + i, a1 + j, a0 + j);
+        }
+    }
+}
+
+/// Ombre portée diffuse, dessinée **autour** de la carte seulement (anneau dégradé) :
+/// le verre étant translucide, une ombre posée dessous salirait l'intérieur de la carte.
+/// Le bord interne colle à la carte (opacité max) ; le bord externe, élargi de `blur` et décalé de `offset`, vaut 0.
+fn shadow_ring(rect: Rect, r: f32, blur: f32, offset: Vec2, alpha: u8) -> egui::Shape {
+    let dirs = corner_dirs(rect, r, 8);
+    let inner: Vec<Pos2> = dirs.iter().map(|(c, d)| *c + *d * r).collect();
+    let outer: Vec<Pos2> = dirs.iter().map(|(c, d)| *c + offset + *d * (r + blur)).collect();
     let stops = [(0.0f32, 1.0f32), (0.35, 0.55), (0.7, 0.2), (1.0, 0.0)];
     let mut mesh = egui::epaint::Mesh::default();
     for (t, m) in stops {
@@ -523,15 +549,47 @@ fn shadow_ring(rect: Rect, r: f32, blur: f32, offset: Vec2, alpha: u8) -> egui::
             mesh.colored_vertex(inner[i].lerp(outer[i], t), color);
         }
     }
-    for ring in 0..(stops.len() as u32 - 1) {
-        for i in 0..n {
-            let j = (i + 1) % n;
-            let (a0, a1) = (ring * n, (ring + 1) * n);
-            mesh.add_triangle(a0 + i, a1 + i, a1 + j);
-            mesh.add_triangle(a0 + i, a1 + j, a0 + j);
+    ring_indices(&mut mesh, stops.len() as u32 - 1, inner.len() as u32);
+    egui::Shape::mesh(mesh)
+}
+
+/// Halos de couleur **contenus dans un rectangle à coins arrondis** (maillage qui suit le contour,
+/// du bord vers le centre) : aucun angle carré ne dépasse de la carte.
+/// `layers` : (centre, rayon, couleur, opacité max).
+fn glow_in_rounded(painter: &egui::Painter, rect: Rect, r: f32, layers: &[(Pos2, f32, Color32, u8)]) {
+    let outline: Vec<Pos2> = corner_dirs(rect, r, 8).iter().map(|(c, d)| *c + *d * r).collect();
+    let n = outline.len() as u32;
+    let center = rect.center();
+    let color_at = |p: Pos2| -> Color32 {
+        let (mut pr, mut pg, mut pb, mut pa) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for (c, radius, col, alpha) in layers {
+            let d = p.distance(*c) / radius;
+            let a = *alpha as f32 / 255.0 * (-d * d).exp();
+            pr += col.r() as f32 * a;
+            pg += col.g() as f32 * a;
+            pb += col.b() as f32 * a;
+            pa += a;
+        }
+        let pa = pa.min(1.0);
+        let cap = pa * 255.0;
+        Color32::from_rgba_premultiplied(pr.min(cap) as u8, pg.min(cap) as u8, pb.min(cap) as u8, cap as u8)
+    };
+    let scales = [1.0f32, 0.72, 0.44, 0.16];
+    let mut mesh = egui::epaint::Mesh::default();
+    for s in scales {
+        for p in &outline {
+            let q = center + (*p - center) * s;
+            mesh.colored_vertex(q, color_at(q));
         }
     }
-    egui::Shape::mesh(mesh)
+    let hub = mesh.vertices.len() as u32;
+    mesh.colored_vertex(center, color_at(center));
+    ring_indices(&mut mesh, scales.len() as u32 - 1, n);
+    let last = (scales.len() as u32 - 1) * n;
+    for i in 0..n {
+        mesh.add_triangle(hub, last + i, last + (i + 1) % n);
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 /// Liseré blanc fin des cartes (« 30 % » perçu : l'alpha brut est bien plus bas, le mélange étant linéaire).
@@ -1098,45 +1156,8 @@ impl eframe::App for App {
                     self.sidebar(ui);
                 });
 
-            egui::TopBottomPanel::bottom("toast")
-                .exact_height(48.0)
-                .frame(egui::Frame::none())
-                .show_inside(ui, |ui| {
-                    let pending = self.undo_folder.as_ref().map(|u| {
-                        (u.folder.path.display().to_string(), u.rules.len(), u.at.elapsed().as_secs())
-                    });
-                    match pending {
-                        Some((path, n_rules, secs)) if secs < UNDO_SECONDS => {
-                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
-                            ui.horizontal_centered(|ui| {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "Dossier retiré : {} · {}",
-                                        shorten(&path),
-                                        match n_rules {
-                                            0 => "sans règle".to_string(),
-                                            1 => "1 règle supprimée".to_string(),
-                                            n => format!("{n} règles supprimées"),
-                                        }
-                                    ))
-                                    .size(14.5)
-                                    .color(text_primary()),
-                                );
-                                if btn(ui, "Annuler", Btn::Primary, accent_now, Some(Icon::Undo)).clicked() {
-                                    self.restore_folder();
-                                }
-                            });
-                        }
-                        _ => {
-                            self.undo_folder = None;
-                            ui.add_space(8.0);
-                            if let Some(t) = &self.toast {
-                                ui.label(RichText::new(format!("•  {t}")).size(14.5).color(text_dim()));
-                            }
-                        }
-                    }
-                });
-
+            // Contenu : le défilement va jusqu'au bas de la fenêtre ; un fondu efface les cartes en bas.
+            let content = ui.available_rect_before_wrap();
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
                 .show(ui, |ui| {
@@ -1149,9 +1170,47 @@ impl eframe::App for App {
                             Tab::History => self.history_ui(ui),
                             Tab::Settings => self.settings_ui(ui),
                         }
-                        ui.add_space(32.0);
+                        ui.add_space(BOTTOM_FADE_H);
                     });
                 });
+            bottom_fade(ui, content, screen, bg_time, accent_now);
+
+            // Message / bandeau « Annuler » par-dessus le fondu.
+            let bar = Rect::from_min_max(
+                Pos2::new(content.left() + 28.0, content.bottom() - 52.0),
+                Pos2::new(content.right() - 28.0, content.bottom() - 4.0),
+            );
+            let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(Layout::left_to_right(Align::Center)));
+            let pending = self.undo_folder.as_ref().map(|u| {
+                (u.folder.path.display().to_string(), u.rules.len(), u.at.elapsed().as_secs())
+            });
+            match pending {
+                Some((path, n_rules, secs)) if secs < UNDO_SECONDS => {
+                    bar_ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+                    bar_ui.label(
+                        RichText::new(format!(
+                            "Dossier retiré : {} · {}",
+                            shorten(&path),
+                            match n_rules {
+                                0 => "sans règle".to_string(),
+                                1 => "1 règle supprimée".to_string(),
+                                n => format!("{n} règles supprimées"),
+                            }
+                        ))
+                        .size(14.5)
+                        .color(text_primary()),
+                    );
+                    if btn(&mut bar_ui, "Annuler", Btn::Primary, accent_now, Some(Icon::Undo)).clicked() {
+                        self.restore_folder();
+                    }
+                }
+                _ => {
+                    self.undo_folder = None;
+                    if let Some(t) = &self.toast {
+                        bar_ui.label(RichText::new(format!("•  {t}")).size(14.5).color(text_dim()));
+                    }
+                }
+            }
         });
     }
 }
@@ -1175,10 +1234,10 @@ impl App {
             ctx.memory_mut(|m| m.request_focus(search_id));
         }
 
-        // La recherche prend tout l'espace libre entre l'identité (gauche) et les boutons (droite).
-        let left_w = if wide { 370.0 } else { 260.0 };
+        // La recherche part du bord gauche du contenu (barre latérale 256 px + marge 28 px)
+        // et prend tout l'espace libre jusqu'aux boutons de droite.
         let right_w = if wide { 462.0 } else { 390.0 };
-        let search_left = rect.left() + 16.0 + left_w + 10.0;
+        let search_left = rect.left() + 256.0 + 28.0;
         let search_right = rect.right() - 16.0 - right_w - 12.0;
         let search_w = (search_right - search_left).clamp(220.0, 640.0);
         let search_rect = Rect::from_min_size(Pos2::new(search_left, rect.center().y - 17.0), Vec2::new(search_w, 34.0));
@@ -1198,21 +1257,6 @@ impl App {
                 lui.add_space(2.0);
             }
             lui.add_space(10.0);
-        }
-        lui.add_space(4.0);
-        let (logo, _) = lui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
-        draw_icon(&lui.painter().clone(), logo.center(), Icon::Folder, accent, 22.0);
-        lui.add_space(6.0);
-        lui.label(RichText::new("OrganizeMyFiles").size(15.0).family(semibold()).color(Color32::WHITE));
-        if wide {
-            lui.add_space(8.0);
-            let state = if self.app_enabled { "Actif" } else { "En veille" };
-            chip(
-                &mut lui,
-                &format!("V0.1 • {state}"),
-                text_dim(),
-                glass(14),
-            );
         }
 
         // --- centre : recherche
@@ -1403,7 +1447,18 @@ impl App {
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
-        ui.add_space(18.0);
+        // Identité de l'app, avant le menu.
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::hover());
+            ui.painter().rect_filled(r.expand(3.0), Rounding::same(12.0), with_alpha(accent, 40));
+            ui.painter().rect_filled(r, Rounding::same(10.0), accent);
+            draw_icon(&ui.painter().clone(), r.center(), Icon::Folder, Color32::WHITE, 18.0);
+            ui.add_space(8.0);
+            ui.label(RichText::new("OrganizeMyFiles").size(17.0).family(semibold()).color(Color32::WHITE));
+        });
+        ui.add_space(22.0);
         ui.horizontal(|ui| {
             ui.add_space(22.0);
             ui.label(RichText::new("MENU").size(13.5).family(semibold()).color(text_label()));
@@ -1458,24 +1513,6 @@ impl App {
             });
             ui.add_space(2.0);
         }
-
-        ui.add_space(14.0);
-        ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(232.0, 38.0), egui::Sense::click());
-            let fill = if resp.hovered() { with_alpha(accent, 40) } else { glass(12) };
-            ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "+  Nouvelle règle",
-                egui::FontId::proportional(15.0),
-                if resp.hovered() { accent } else { text_primary() },
-            );
-            if resp.clicked() {
-                self.new_rule();
-            }
-        });
 
         // Pied : état de l'application, collé en bas de la barre.
         let avail = ui.max_rect();
@@ -1552,10 +1589,16 @@ impl App {
         ui.painter().add(glass_shapes(hero));
         {
             let t = if self.animate_bg { ctx.input(|i| i.time) } else { 0.0 };
-            let p = ui.painter().with_clip_rect(hero.shrink(2.0));
             let drift = (t * 0.3).sin() as f32 * 0.05;
-            halo(&p, Pos2::new(hero.left() + hero.width() * (0.30 + drift), hero.top() + 10.0), hero.width() * 0.42, accent, 14);
-            halo(&p, Pos2::new(hero.right() - hero.width() * 0.12, hero.bottom()), hero.width() * 0.36, SKY_DEEP, 18);
+            glow_in_rounded(
+                ui.painter(),
+                hero.shrink(1.0),
+                CARD_RADIUS - 1.0,
+                &[
+                    (Pos2::new(hero.left() + hero.width() * (0.30 + drift), hero.top() + 10.0), hero.width() * 0.42, accent, 14),
+                    (Pos2::new(hero.right() - hero.width() * 0.12, hero.bottom()), hero.width() * 0.36, SKY_DEEP, 18),
+                ],
+            );
         }
         let mut go: Option<Tab> = None;
         let mut organise = false;
@@ -2129,6 +2172,11 @@ impl App {
                 SKY,
                 with_alpha(SKY, 38),
             );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if btn(ui, "Nouvelle règle", Btn::Sky, accent, Some(Icon::Add)).clicked() {
+                    self.new_rule();
+                }
+            });
         });
         ui.add_space(2.0);
         ui.label(RichText::new("Conditions remplies : actions dans l'ordre.").size(15.0).color(text_dim()));
@@ -2163,9 +2211,6 @@ impl App {
                 if rule_tab(ui, &format!("Règle {} : {}", i + 1, name), i == sel, r.enabled, accent).clicked() {
                     self.selected_rule = i;
                 }
-            }
-            if btn(ui, "+", Btn::Ghost, accent, None).on_hover_text("Nouvelle règle").clicked() {
-                self.new_rule();
             }
         });
         ui.add_space(14.0);
