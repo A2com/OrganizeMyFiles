@@ -489,7 +489,7 @@ fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
 }
 
 /// Vitesse du fond (secondes de « temps de bruit » par seconde réelle).
-const BG_SPEED: f64 = 0.11;
+const BG_SPEED: f64 = 0.055;
 /// Largeur du plan en unités de bruit (comme NEAT : 50), fréquence des vagues, amplitude, pression des couleurs.
 const BG_PLANE_W: f32 = 50.0;
 const BG_WAVE_FREQ: f32 = 0.055;
