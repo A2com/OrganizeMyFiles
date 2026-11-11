@@ -42,43 +42,74 @@ const TABS: &[(Tab, &str, Icon, &str)] = &[
     (Tab::Settings, "Réglages", Icon::Sliders, "Ajuster l'application"),
 ];
 
-// Accent swatches, retuned for the dark gradient theme (blue and teal sampled
-// from the supplied theme picture).
+// Accent swatches (Nocturne Studio): orange ambré en premier = accent par défaut.
 const ACCENTS: &[(&str, Color32)] = &[
-    ("blue", Color32::from_rgb(0x50, 0x87, 0xcc)),
+    ("orange", Color32::from_rgb(0xff, 0x78, 0x28)),
+    ("blue", Color32::from_rgb(0x38, 0xbd, 0xf8)),
     ("purple", Color32::from_rgb(0xa7, 0x8b, 0xfa)),
     ("pink", Color32::from_rgb(0xf4, 0x72, 0xb6)),
-    ("orange", Color32::from_rgb(0xf5, 0x9e, 0x5c)),
     ("yellow", Color32::from_rgb(0xed, 0xc1, 0x3f)),
-    ("green", Color32::from_rgb(0x35, 0xa7, 0x8f)),
+    ("green", Color32::from_rgb(0x27, 0xc9, 0x3f)),
     ("graphite", Color32::from_rgb(0x8d, 0x99, 0xaa)),
 ];
 
-// Supplied gradient theme: diagonal slate-blue, lighter at the top-left
-// (corner colours sampled from picture-1.jpg).
-fn bg_tl() -> Color32 {
-    Color32::from_rgb(0x50, 0x6e, 0x8a)
-}
-fn bg_tr() -> Color32 {
-    Color32::from_rgb(0x2e, 0x3e, 0x4f)
-}
-fn bg_bl() -> Color32 {
-    Color32::from_rgb(0x33, 0x44, 0x56)
-}
-fn bg_br() -> Color32 {
-    Color32::from_rgb(0x29, 0x35, 0x43)
-}
+// Palette « Nocturne Studio Amber & Deep Blue » (DESIGN.md de la maquette).
+const CANVAS: Color32 = Color32::from_rgb(0x0c, 0x0e, 0x15);
+const PANEL: Color32 = Color32::from_rgb(0x11, 0x13, 0x1a);
+const CONTENT: Color32 = Color32::from_rgb(0x16, 0x18, 0x21);
+const CARD: Color32 = Color32::from_rgb(0x19, 0x1b, 0x23);
+const CARD_HI: Color32 = Color32::from_rgb(0x1f, 0x22, 0x2d);
+const TAB_ACTIVE: Color32 = Color32::from_rgb(0x24, 0x28, 0x35);
+const SKY: Color32 = Color32::from_rgb(0x38, 0xbd, 0xf8);
+const SKY_DEEP: Color32 = Color32::from_rgb(0x02, 0x84, 0xc7);
+const GREEN: Color32 = Color32::from_rgb(0x27, 0xc9, 0x3f);
+
 fn card_fill() -> Color32 {
-    Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 26)
+    CARD
 }
 fn card_stroke() -> Color32 {
-    Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 56)
+    Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 15)
+}
+fn field_stroke() -> Color32 {
+    Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 26)
 }
 fn text_primary() -> Color32 {
-    Color32::from_rgb(0xff, 0xff, 0xff)
+    Color32::from_rgb(0xf1, 0xf5, 0xf9)
 }
 fn text_dim() -> Color32 {
-    Color32::from_rgb(0xb3, 0xc1, 0xd4)
+    Color32::from_rgb(0x94, 0xa3, 0xb8)
+}
+fn with_alpha(c: Color32, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
+}
+
+/// Applique le style sombre global : champs `#0c0e15`, focus orange, coins doux.
+fn apply_theme(ctx: &egui::Context) {
+    let mut v = egui::Visuals::dark();
+    v.panel_fill = CONTENT;
+    v.window_fill = CARD_HI;
+    v.extreme_bg_color = CANVAS; // fond des champs de saisie
+    v.faint_bg_color = CARD;
+    v.override_text_color = Some(text_primary());
+    v.selection.bg_fill = with_alpha(ACCENTS[0].1, 90);
+    v.selection.stroke = Stroke::new(1.0, ACCENTS[0].1);
+    let r = Rounding::same(8.0);
+    for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+        w.rounding = r;
+    }
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, card_stroke());
+    v.widgets.inactive.bg_fill = CANVAS;
+    v.widgets.inactive.weak_bg_fill = CANVAS;
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, field_stroke());
+    v.widgets.hovered.bg_fill = CARD_HI;
+    v.widgets.hovered.weak_bg_fill = CARD_HI;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, with_alpha(ACCENTS[0].1, 120));
+    v.widgets.active.bg_stroke = Stroke::new(1.0, ACCENTS[0].1);
+    ctx.set_visuals(v);
+    ctx.style_mut(|s| {
+        s.spacing.scroll = egui::style::ScrollStyle::thin();
+        s.spacing.item_spacing = Vec2::new(8.0, 6.0);
+    });
 }
 
 // --------------------------------------------------------------------- app
@@ -107,7 +138,8 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(_cc: &eframe::CreationContext<'_>, screenshot: Option<String>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, screenshot: Option<String>) -> Self {
+        apply_theme(&cc.egui_ctx);
         let mut app = App {
             tab: Tab::Dashboard,
             folders: Vec::new(),
@@ -299,33 +331,8 @@ fn sample_rule(id: u64, folder_id: u64, name: &str, prio: i64) -> Rule {
 
 // ------------------------------------------------------------ egui helpers
 
-fn gradient_bg(ui: &mut egui::Ui, rect: Rect) {
-    let painter = ui.painter().clone();
-    let (tl, tr, bl, br) = (bg_tl(), bg_tr(), bg_bl(), bg_br());
-    let lerp = |a: f32, b: f32, t: f32| a * (1.0 - t) + b * t;
-    // Bilinear 4-corner gradient: top-left light slate -> bottom-right deep slate.
-    let steps_x = 24;
-    let steps_y = 18;
-    for gy in 0..steps_y {
-        for gx in 0..steps_x {
-            let u = (gx as f32 + 0.5) / steps_x as f32;
-            let v = (gy as f32 + 0.5) / steps_y as f32;
-            let c = Color32::from_rgb(
-                lerp(lerp(tl.r() as f32, tr.r() as f32, u), lerp(bl.r() as f32, br.r() as f32, u), v) as u8,
-                lerp(lerp(tl.g() as f32, tr.g() as f32, u), lerp(bl.g() as f32, br.g() as f32, u), v) as u8,
-                lerp(lerp(tl.b() as f32, tr.b() as f32, u), lerp(bl.b() as f32, br.b() as f32, u), v) as u8,
-            );
-            let x0 = rect.left() + rect.width() * gx as f32 / steps_x as f32;
-            let x1 = rect.left() + rect.width() * (gx + 1) as f32 / steps_x as f32 + 1.0;
-            let y0 = rect.top() + rect.height() * gy as f32 / steps_y as f32;
-            let y1 = rect.top() + rect.height() * (gy + 1) as f32 / steps_y as f32 + 1.0;
-            painter.rect_filled(
-                Rect::from_min_max(Pos2::new(x0, y0), Pos2::new(x1, y1)),
-                Rounding::ZERO,
-                c,
-            );
-        }
-    }
+fn flat_bg(ui: &mut egui::Ui, rect: Rect) {
+    ui.painter().rect_filled(rect, Rounding::ZERO, CONTENT);
 }
 
 /// Soft shadow + white card with rounded corners.
@@ -335,12 +342,12 @@ fn card(ui: &mut egui::Ui, size: Vec2, add: impl FnOnce(&mut egui::Ui)) {
     for (off, alpha) in [(6.0f32, 46u8), (3.0, 28), (1.0, 16)] {
         painter.rect_filled(
             rect.translate(Vec2::new(0.0, off)),
-            Rounding::same(18.0),
+            Rounding::same(12.0),
             Color32::from_rgba_unmultiplied(0x02, 0x06, 0x0c, alpha),
         );
     }
-    painter.rect_filled(rect, Rounding::same(18.0), card_fill());
-    painter.rect_stroke(rect, Rounding::same(18.0), Stroke::new(1.0f32, card_stroke()));
+    painter.rect_filled(rect, Rounding::same(12.0), card_fill());
+    painter.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0f32, card_stroke()));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(Vec2::new(20.0, 16.0)))
@@ -556,7 +563,7 @@ impl eframe::App for App {
 
         let screen = ctx.screen_rect();
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
-            gradient_bg(ui, screen);
+            flat_bg(ui, screen);
 
             egui::SidePanel::left("sidebar")
                 .resizable(false)
