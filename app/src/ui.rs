@@ -30,7 +30,6 @@ enum Icon {
     Clock,
     Check,
     Sliders,
-    Sort,
     Funnel,
     Bolt,
     Grip,
@@ -62,23 +61,18 @@ const ACCENTS: &[(&str, Color32)] = &[
 
 // Palette « Nocturne Studio Amber & Deep Blue » (DESIGN.md de la maquette).
 const CANVAS: Color32 = Color32::from_rgb(0x0c, 0x0e, 0x15);
-const PANEL: Color32 = Color32::from_rgb(0x11, 0x13, 0x1a);
-const CONTENT: Color32 = Color32::from_rgb(0x16, 0x18, 0x21);
-const CARD: Color32 = Color32::from_rgb(0x19, 0x1b, 0x23);
-const CARD_HI: Color32 = Color32::from_rgb(0x1f, 0x22, 0x2d);
-const TAB_ACTIVE: Color32 = Color32::from_rgb(0x24, 0x28, 0x35);
+/// Barres du haut et latérale : sombres et translucides, les halos du fond transparaissent.
+const PANEL_GLASS: Color32 = Color32::from_rgba_premultiplied(0x0b, 0x0c, 0x11, 170);
+const RED: Color32 = Color32::from_rgb(0xf8, 0x71, 0x71);
 const SKY: Color32 = Color32::from_rgb(0x38, 0xbd, 0xf8);
 const SKY_DEEP: Color32 = Color32::from_rgb(0x02, 0x84, 0xc7);
 const GREEN: Color32 = Color32::from_rgb(0x27, 0xc9, 0x3f);
 
-fn card_fill() -> Color32 {
-    CARD
-}
-fn card_stroke() -> Color32 {
-    Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 15)
-}
-fn field_stroke() -> Color32 {
-    Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 26)
+/// Voile de verre : blanc translucide posé sur le fond à halos.
+/// Le mélange se fait en espace linéaire (framebuffer sRGB) : un blanc à 5 % y paraît ~25 % plus clair,
+/// d'où le facteur 0,16 pour que `alpha` corresponde à l'opacité perçue (sur 255).
+fn glass(alpha: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, (alpha as f32 * 0.16).round() as u8)
 }
 fn text_primary() -> Color32 {
     Color32::from_rgb(0xf1, 0xf5, 0xf9)
@@ -90,24 +84,42 @@ fn with_alpha(c: Color32, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
 }
 
-/// Police système macOS (SF Pro) en tête des familles, si elle est présente.
-fn load_system_font(ctx: &egui::Context) {
-    let Ok(bytes) = std::fs::read("/System/Library/Fonts/SFNS.ttf") else { return };
+fn semibold() -> egui::FontFamily {
+    egui::FontFamily::Name("semibold".into())
+}
+fn bold() -> egui::FontFamily {
+    egui::FontFamily::Name("bold".into())
+}
+fn icons_family() -> egui::FontFamily {
+    egui::FontFamily::Name("icons".into())
+}
+
+/// Polices embarquées de la maquette : Inter (3 graisses) + Material Symbols Outlined (sous-ensemble).
+fn load_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("sf-pro".into(), egui::FontData::from_owned(bytes));
-    for family in [egui::FontFamily::Proportional] {
-        fonts.families.entry(family).or_default().insert(0, "sf-pro".into());
+    let faces: [(&str, &'static [u8]); 4] = [
+        ("inter", include_bytes!("../assets/fonts/Inter-Regular.ttf")),
+        ("inter-semibold", include_bytes!("../assets/fonts/Inter-SemiBold.ttf")),
+        ("inter-bold", include_bytes!("../assets/fonts/Inter-Bold.ttf")),
+        ("icons", include_bytes!("../assets/fonts/MaterialSymbolsOutlined-subset.ttf")),
+    ];
+    for (name, bytes) in faces {
+        fonts.font_data.insert(name.into(), egui::FontData::from_static(bytes));
     }
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "inter".into());
+    fonts.families.insert(semibold(), vec!["inter-semibold".into(), "inter".into()]);
+    fonts.families.insert(bold(), vec!["inter-bold".into(), "inter".into()]);
+    fonts.families.insert(icons_family(), vec!["icons".into()]);
     ctx.set_fonts(fonts);
 }
 
 /// Applique le style sombre global : champs `#0c0e15`, focus orange, coins doux.
 fn apply_theme(ctx: &egui::Context) {
     let mut v = egui::Visuals::dark();
-    v.panel_fill = CONTENT;
-    v.window_fill = CARD_HI;
-    v.extreme_bg_color = CANVAS; // fond des champs de saisie
-    v.faint_bg_color = CARD;
+    v.panel_fill = Color32::TRANSPARENT;
+    v.window_fill = Color32::from_rgb(0x1a, 0x1d, 0x27);
+    v.extreme_bg_color = with_alpha(CANVAS, 150); // fond des champs de saisie
+    v.faint_bg_color = glass(10);
     v.override_text_color = Some(text_primary());
     v.selection.bg_fill = with_alpha(ACCENTS[0].1, 90);
     v.selection.stroke = Stroke::new(1.0, ACCENTS[0].1);
@@ -115,16 +127,17 @@ fn apply_theme(ctx: &egui::Context) {
     for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
         w.rounding = r;
     }
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, card_stroke());
-    v.widgets.inactive.bg_fill = CANVAS;
-    v.widgets.inactive.weak_bg_fill = CANVAS;
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, field_stroke());
-    v.widgets.hovered.bg_fill = CARD_HI;
-    v.widgets.hovered.weak_bg_fill = CARD_HI;
+    // Aucun contour décoratif : seuls le survol et le focus gardent un liseré orange.
+    v.widgets.noninteractive.bg_stroke = Stroke::NONE;
+    v.widgets.inactive.bg_stroke = Stroke::NONE;
+    v.widgets.inactive.bg_fill = glass(20);
+    v.widgets.inactive.weak_bg_fill = glass(16);
+    v.widgets.hovered.bg_fill = glass(30);
+    v.widgets.hovered.weak_bg_fill = glass(28);
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, with_alpha(ACCENTS[0].1, 120));
     v.widgets.active.bg_stroke = Stroke::new(1.0, ACCENTS[0].1);
     ctx.set_visuals(v);
-    load_system_font(ctx);
+    load_fonts(ctx);
     ctx.style_mut(|s| {
         s.spacing.scroll = egui::style::ScrollStyle::thin();
         s.spacing.item_spacing = Vec2::new(8.0, 6.0);
@@ -149,7 +162,6 @@ pub struct App {
     notify: bool,
     retention_days: u32,
     add_folder_text: String,
-    selected_folder: usize,
     selected_rule: usize,
     app_enabled: bool,
     search: String,
@@ -177,7 +189,6 @@ impl App {
             notify: true,
             retention_days: HISTORY_RETENTION_DEFAULT_DAYS,
             add_folder_text: String::new(),
-            selected_folder: 0,
             selected_rule: 0,
             app_enabled: true,
             search: String::new(),
@@ -343,23 +354,79 @@ fn sample_rule(id: u64, folder_id: u64, name: &str, prio: i64) -> Rule {
 
 // ------------------------------------------------------------ egui helpers
 
-fn flat_bg(ui: &mut egui::Ui, rect: Rect) {
-    ui.painter().rect_filled(rect, Rounding::ZERO, CONTENT);
+/// Halo flou : disque dont l'opacité décroît jusqu'à 0 (maillage coloré par sommet).
+fn halo(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32, alpha: u8) {
+    const N: u32 = 48;
+    let stops = [(0.35f32, 0.55f32), (0.7, 0.2), (1.0, 0.0)];
+    let mut mesh = egui::epaint::Mesh::default();
+    let tint = |m: f32| Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (alpha as f32 * m) as u8);
+    mesh.colored_vertex(center, tint(1.0));
+    for (r, m) in stops {
+        for i in 0..N {
+            let a = i as f32 / N as f32 * std::f32::consts::TAU;
+            mesh.colored_vertex(center + Vec2::angled(a) * (radius * r), tint(m));
+        }
+    }
+    for i in 0..N {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % N);
+    }
+    for k in 0..(stops.len() as u32 - 1) {
+        let (a0, a1) = (1 + k * N, 1 + (k + 1) * N);
+        for i in 0..N {
+            let j = (i + 1) % N;
+            mesh.add_triangle(a0 + i, a1 + i, a1 + j);
+            mesh.add_triangle(a0 + i, a1 + j, a0 + j);
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
-/// Soft shadow + white card with rounded corners.
+/// Fond « verre » : nuit profonde + trois halos (accent, azur, accent) vus à travers les panneaux.
+fn backdrop(ui: &mut egui::Ui, rect: Rect, accent: Color32) {
+    let p = ui.painter().clone();
+    p.rect_filled(rect, Rounding::ZERO, CANVAS);
+    let (w, h) = (rect.width(), rect.height());
+    let big = w.max(h);
+    halo(&p, rect.min + Vec2::new(w * 0.22, h * 0.02), big * 0.6, accent, 48);
+    halo(&p, rect.min + Vec2::new(w * 1.0, h * 1.0), big * 0.65, SKY_DEEP, 60);
+    halo(&p, rect.min + Vec2::new(w * 0.62, h * 0.55), big * 0.35, accent, 20);
+}
+
+/// Reflet clair très doux en haut d'une surface de verre (pas de contour).
+fn sheen(rect: Rect, r: f32) -> egui::Shape {
+    let h = (rect.height() * 0.5).min(64.0).max(r + 1.0);
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.colored_vertex(Pos2::new(rect.left(), rect.top() + r), Color32::TRANSPARENT);
+    mesh.colored_vertex(Pos2::new(rect.left() + r, rect.top()), glass(10));
+    mesh.colored_vertex(Pos2::new(rect.right() - r, rect.top()), glass(10));
+    mesh.colored_vertex(Pos2::new(rect.right(), rect.top() + r), Color32::TRANSPARENT);
+    mesh.colored_vertex(Pos2::new(rect.right(), rect.top() + h), Color32::TRANSPARENT);
+    mesh.colored_vertex(Pos2::new(rect.left(), rect.top() + h), Color32::TRANSPARENT);
+    for i in 1..5 {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    egui::Shape::mesh(mesh)
+}
+
+/// Surface de verre : ombre douce, voile blanc translucide et reflet.
+fn glass_shapes(rect: Rect, r: f32) -> egui::Shape {
+    let mut shapes = Vec::new();
+    for (off, alpha) in [(8.0f32, 36u8), (3.0, 24)] {
+        shapes.push(egui::Shape::rect_filled(
+            rect.translate(Vec2::new(0.0, off)),
+            Rounding::same(r),
+            Color32::from_rgba_unmultiplied(0x02, 0x04, 0x08, alpha),
+        ));
+    }
+    shapes.push(egui::Shape::rect_filled(rect, Rounding::same(r), glass(14)));
+    shapes.push(sheen(rect, r));
+    egui::Shape::Vec(shapes)
+}
+
+/// Carte de verre de taille fixe.
 fn card(ui: &mut egui::Ui, size: Vec2, add: impl FnOnce(&mut egui::Ui)) {
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    let painter = ui.painter().clone();
-    for (off, alpha) in [(6.0f32, 46u8), (3.0, 28), (1.0, 16)] {
-        painter.rect_filled(
-            rect.translate(Vec2::new(0.0, off)),
-            Rounding::same(12.0),
-            Color32::from_rgba_unmultiplied(0x02, 0x06, 0x0c, alpha),
-        );
-    }
-    painter.rect_filled(rect, Rounding::same(12.0), card_fill());
-    painter.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0f32, card_stroke()));
+    ui.painter().add(glass_shapes(rect, 12.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(Vec2::new(20.0, 16.0)))
@@ -377,15 +444,13 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
     let size = Vec2::new(galley.size().x + pad * 2.0, h);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     if !response.enabled() {
-        ui.painter().rect_filled(rect, Rounding::same(h / 2.0), Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 30));
+        ui.painter().rect_filled(rect, Rounding::same(h / 2.0), glass(30));
     } else {
         let hover = response.hovered();
         let fill = if primary {
             if hover { lighten(accent, 18) } else { accent }
-        } else if hover {
-            Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 34)
         } else {
-            card_fill()
+            with_alpha(accent, if hover { 56 } else { 34 })
         };
         if primary {
             for (off, alpha) in [(5.0f32, 26u8), (2.0, 40)] {
@@ -397,10 +462,7 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
             }
         }
         ui.painter().rect_filled(rect, Rounding::same(h / 2.0), fill);
-        if !primary {
-            ui.painter().rect_stroke(rect, Rounding::same(h / 2.0), Stroke::new(1.2f32, accent));
-        }
-        let tc = if primary { Color32::WHITE } else { accent };
+        let tc = Color32::WHITE;
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -420,120 +482,33 @@ fn lighten(c: Color32, d: u8) -> Color32 {
     )
 }
 
-/// Draw one icon glyph centred in `c`, in a `s` px box.
-fn draw_icon(painter: &egui::Painter, c: Pos2, icon: Icon, color: Color32, s: f32) {
-    let u = s / 26.0;
-    let seg = |a: (f32, f32), b: (f32, f32), w: f32| {
-        painter.line_segment(
-            [Pos2::new(c.x + a.0 * u, c.y + a.1 * u), Pos2::new(c.x + b.0 * u, c.y + b.1 * u)],
-            Stroke::new(w * u, color),
-        );
-    };
-    let rect = |min: (f32, f32), max: (f32, f32), r: f32| {
-        painter.rect_stroke(
-            Rect::from_min_max(
-                Pos2::new(c.x + min.0 * u, c.y + min.1 * u),
-                Pos2::new(c.x + max.0 * u, c.y + max.1 * u),
-            ),
-            Rounding::same(r * u),
-            Stroke::new(2.0 * u, color),
-        );
-    };
+fn icon_char(icon: Icon) -> char {
     match icon {
-        Icon::Chart => {
-            // three bars of growing height
-            seg((-7.0, 2.0), (-7.0, 7.0), 3.0);
-            seg((-1.5, -2.0), (-1.5, 7.0), 3.0);
-            seg((4.0, -7.0), (4.0, 7.0), 3.0);
-        }
-        Icon::Folder => {
-            // folder: tab + body
-            painter.rect_filled(
-                Rect::from_min_max(
-                    Pos2::new(c.x - 8.0 * u, c.y - 8.0 * u),
-                    Pos2::new(c.x - 1.0 * u, c.y - 4.5 * u),
-                ),
-                Rounding::same(1.5 * u),
-                color,
-            );
-            rect((-8.0, -5.0), (8.0, 7.0), 2.0);
-        }
-        Icon::List => {
-            seg((-7.0, -5.0), (7.0, -5.0), 2.2);
-            seg((-7.0, 0.5), (7.0, 0.5), 2.2);
-            seg((-7.0, 6.0), (2.0, 6.0), 2.2);
-        }
-        Icon::Clock => {
-            painter.circle_stroke(c, 8.0 * u, Stroke::new(2.0 * u, color));
-            seg((0.0, -4.5), (0.0, 0.0), 2.0);
-            seg((0.0, 0.0), (3.5, 2.5), 2.0);
-        }
-        Icon::Check => {
-            painter.circle_stroke(c, 8.0 * u, Stroke::new(2.0 * u, color));
-            seg((-3.5, 0.5), (-1.0, 3.5), 2.2);
-            seg((-1.0, 3.5), (4.0, -3.0), 2.2);
-        }
-        Icon::Sliders => {
-            for (y, kx) in [(-5.0f32, 3.0f32), (0.5, -3.0), (6.0, 1.5)] {
-                seg((-8.0, y), (8.0, y), 2.0);
-                painter.circle_filled(
-                    Pos2::new(c.x + kx * u, c.y + y * u),
-                    2.6 * u,
-                    color,
-                );
-            }
-        }
-        Icon::Funnel => {
-            for (a, b) in [
-                ((-8.0, -6.0), (8.0, -6.0)),
-                ((-8.0, -6.0), (-2.0, 1.0)),
-                ((8.0, -6.0), (2.0, 1.0)),
-                ((-2.0, 1.0), (-2.0, 7.0)),
-                ((2.0, 1.0), (2.0, 5.0)),
-                ((-2.0, 7.0), (2.0, 5.0)),
-            ] {
-                seg(a, b, 2.0);
-            }
-        }
-        Icon::Bolt => {
-            let pts = [(2.0, -8.0), (-4.0, 1.0), (1.0, 1.0), (-2.0, 8.0), (5.0, -2.0), (0.0, -2.0), (2.0, -8.0)];
-            for w in pts.windows(2) {
-                seg(w[0], w[1], 2.0);
-            }
-        }
-        Icon::Grip => {
-            for x in [-2.5f32, 2.5] {
-                for y in [-5.0f32, 0.0, 5.0] {
-                    painter.circle_filled(Pos2::new(c.x + x * u, c.y + y * u), 1.4 * u, color);
-                }
-            }
-        }
-        Icon::Bell => {
-            painter.circle_stroke(Pos2::new(c.x, c.y - 1.5 * u), 5.5 * u, Stroke::new(2.0 * u, color));
-            seg((-7.5, 4.0), (7.5, 4.0), 2.0);
-            painter.circle_filled(Pos2::new(c.x, c.y + 7.0 * u), 1.5 * u, color);
-        }
-        Icon::Gear => {
-            painter.circle_stroke(c, 3.0 * u, Stroke::new(2.0 * u, color));
-            painter.circle_stroke(c, 7.0 * u, Stroke::new(2.0 * u, color));
-            for (a, b) in [((0.0, -10.0), (0.0, -7.0)), ((0.0, 7.0), (0.0, 10.0)), ((-10.0, 0.0), (-7.0, 0.0)), ((7.0, 0.0), (10.0, 0.0))] {
-                seg(a, b, 2.4);
-            }
-        }
-        Icon::Search => {
-            painter.circle_stroke(Pos2::new(c.x - 2.0 * u, c.y - 2.0 * u), 5.5 * u, Stroke::new(2.0 * u, color));
-            seg((2.0, 2.0), (7.5, 7.5), 2.2);
-        }
-        Icon::Cross => {
-            seg((-5.0, -5.0), (5.0, 5.0), 2.0);
-            seg((-5.0, 5.0), (5.0, -5.0), 2.0);
-        }
-        Icon::Sort => {
-            seg((-8.0, -6.0), (8.0, -6.0), 2.4);
-            seg((-5.0, 0.0), (5.0, 0.0), 2.4);
-            seg((-2.0, 6.0), (2.0, 6.0), 2.4);
-        }
+        Icon::Chart => '\u{e871}',   // dashboard
+        Icon::Folder => '\u{f775}',  // folder_managed
+        Icon::List => '\u{f1c2}',    // rule
+        Icon::Clock => '\u{e8b3}',   // history
+        Icon::Check => '\u{e322}',   // memory
+        Icon::Sliders => '\u{e429}', // tune
+        Icon::Funnel => '\u{ef4f}',  // filter_alt
+        Icon::Bolt => '\u{ea0b}',    // bolt
+        Icon::Grip => '\u{e945}',    // drag_indicator
+        Icon::Bell => '\u{e7f5}',    // notifications
+        Icon::Gear => '\u{e8b8}',    // settings
+        Icon::Search => '\u{ef7a}',  // search
+        Icon::Cross => '\u{e5cd}',   // close
     }
+}
+
+/// Glyphe Material Symbols centré en `c` (`s` = taille de la boîte d'icône, en px).
+fn draw_icon(painter: &egui::Painter, c: Pos2, icon: Icon, color: Color32, s: f32) {
+    painter.text(
+        c,
+        egui::Align2::CENTER_CENTER,
+        icon_char(icon).to_string(),
+        egui::FontId::new(s * 1.25, icons_family()),
+        color,
+    );
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -546,36 +521,28 @@ enum Btn {
 
 /// Bouton 32 px de haut (rayon 8) : primaire orange, fantôme, bleu azur ou danger.
 fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<Icon>) -> egui::Response {
-    let font = egui::FontId::proportional(12.5);
+    let font = egui::FontId::new(12.5, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font.clone(), Color32::WHITE);
     let icon_w = if icon.is_some() { 20.0 } else { 0.0 };
     let size = Vec2::new(galley.size().x + 28.0 + icon_w, 32.0);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let enabled = resp.enabled();
     let hover = resp.hovered() && enabled;
-    let (fill, stroke, fg) = match kind {
-        Btn::Primary => (if hover { lighten(accent, 16) } else { accent }, Color32::TRANSPARENT, Color32::WHITE),
-        Btn::Ghost => (
-            if hover { Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 14) } else { Color32::TRANSPARENT },
-            field_stroke(),
-            text_primary(),
-        ),
-        Btn::Sky => (with_alpha(SKY, if hover { 40 } else { 22 }), with_alpha(SKY, 100), SKY),
-        Btn::Danger => (
-            with_alpha(Color32::from_rgb(0xf8, 0x71, 0x71), if hover { 36 } else { 0 }),
-            with_alpha(Color32::from_rgb(0xf8, 0x71, 0x71), 90),
-            Color32::from_rgb(0xf8, 0x71, 0x71),
-        ),
+    let (fill, fg) = match kind {
+        Btn::Primary => (if hover { lighten(accent, 16) } else { accent }, Color32::WHITE),
+        Btn::Ghost => (glass(if hover { 28 } else { 16 }), text_primary()),
+        Btn::Sky => (with_alpha(SKY, if hover { 60 } else { 36 }), SKY),
+        Btn::Danger => (with_alpha(RED, if hover { 60 } else { 34 }), RED),
     };
-    let (fill, fg) = if enabled { (fill, fg) } else { (with_alpha(Color32::WHITE, 12), with_alpha(Color32::WHITE, 70)) };
+    let (fill, fg) = if enabled { (fill, fg) } else { (glass(12), with_alpha(Color32::WHITE, 70)) };
     let p = ui.painter();
     if kind == Btn::Primary && enabled {
         p.rect_filled(rect.expand(3.0), Rounding::same(10.0), with_alpha(accent, 40));
     }
-    p.rect_filled(rect, Rounding::same(8.0), fill);
-    if stroke != Color32::TRANSPARENT {
-        p.rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0, stroke));
+    if matches!(kind, Btn::Sky | Btn::Danger) {
+        p.rect_filled(rect, Rounding::same(8.0), with_alpha(CANVAS, 140));
     }
+    p.rect_filled(rect, Rounding::same(8.0), fill);
     let mut x = rect.left() + 14.0;
     if let Some(ic) = icon {
         draw_icon(p, Pos2::new(x + 7.0, rect.center().y), ic, fg, 15.0);
@@ -586,18 +553,70 @@ fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<I
 }
 
 /// Pastille d'information (22 px) : badge compteur, version, statut.
-fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32, stroke: Color32) -> egui::Response {
-    let font = egui::FontId::proportional(11.5);
+fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Response {
+    let font = egui::FontId::new(11.5, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, fg);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 18.0, 22.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, Rounding::same(11.0), with_alpha(CANVAS, 140));
     ui.painter().rect_filled(rect, Rounding::same(11.0), bg);
-    ui.painter().rect_stroke(rect, Rounding::same(11.0), Stroke::new(1.0, stroke));
     let pos = Pos2::new(rect.left() + 9.0, rect.center().y - galley.size().y / 2.0);
     ui.painter().galley(pos, galley, fg);
     resp
 }
 
 /// Interrupteur façon macOS.
+fn check_box(ui: &mut egui::Ui, on: &mut bool, label: &str, accent: Color32) -> egui::Response {
+    let font = egui::FontId::proportional(13.0);
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), text_primary());
+    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(26.0 + galley.size().x, 22.0), egui::Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let b = Rect::from_min_size(Pos2::new(rect.left(), rect.center().y - 9.0), Vec2::splat(18.0));
+    let fill = if *on { accent } else { glass(if resp.hovered() { 36 } else { 24 }) };
+    ui.painter().rect_filled(b, Rounding::same(5.0), fill);
+    if *on {
+        let st = Stroke::new(2.0f32, Color32::WHITE);
+        let m = Pos2::new(b.left() + 8.0, b.bottom() - 5.0);
+        ui.painter().line_segment([Pos2::new(b.left() + 4.5, b.center().y), m], st);
+        ui.painter().line_segment([m, Pos2::new(b.right() - 4.0, b.top() + 5.0)], st);
+    }
+    ui.painter().text(
+        Pos2::new(rect.left() + 26.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font,
+        text_primary(),
+    );
+    resp
+}
+
+/// Curseur fin (rail + pastille blanche, sans contour) ; true si la valeur change.
+fn slim_slider(ui: &mut egui::Ui, value: &mut u32, min: u32, max: u32, accent: Color32) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(170.0, 22.0), egui::Sense::click_and_drag());
+    let (x0, x1) = (rect.left() + 8.0, rect.right() - 8.0);
+    let mut changed = false;
+    if resp.dragged() || resp.clicked() {
+        if let Some(p) = resp.interact_pointer_pos() {
+            let t = ((p.x - x0) / (x1 - x0)).clamp(0.0, 1.0);
+            let v = (min as f32 + t * (max - min) as f32).round() as u32;
+            if v != *value {
+                *value = v;
+                changed = true;
+            }
+        }
+    }
+    let t = (*value - min) as f32 / (max - min) as f32;
+    let y = rect.center().y;
+    let knob = Pos2::new(x0 + t * (x1 - x0), y);
+    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(x0, y - 2.0), Pos2::new(x1, y + 2.0)), Rounding::same(2.0), glass(36));
+    ui.painter().rect_filled(Rect::from_min_max(Pos2::new(x0, y - 2.0), Pos2::new(knob.x, y + 2.0)), Rounding::same(2.0), accent);
+    ui.painter().circle_filled(knob + Vec2::new(0.0, 1.0), 8.5, Color32::from_rgba_unmultiplied(0, 0, 0, 70));
+    ui.painter().circle_filled(knob, 8.0, Color32::WHITE);
+    changed
+}
+
 fn toggle(ui: &mut egui::Ui, on: &mut bool, accent: Color32) -> egui::Response {
     let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(38.0, 22.0), egui::Sense::click());
     if resp.clicked() {
@@ -617,15 +636,14 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool, accent: Color32) -> egui::Response {
 
 /// Contrôle segmenté ; renvoie l'index cliqué.
 fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, active: Color32) -> Option<usize> {
-    let font = egui::FontId::proportional(12.0);
+    let font = egui::FontId::new(12.0, semibold());
     let widths: Vec<f32> = labels
         .iter()
         .map(|l| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::WHITE).size().x + 28.0)
         .collect();
     let total = widths.iter().sum::<f32>() + 8.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(total, 34.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, Rounding::same(9.0), CANVAS);
-    ui.painter().rect_stroke(rect, Rounding::same(9.0), Stroke::new(1.0, field_stroke()));
+    ui.painter().rect_filled(rect, Rounding::same(9.0), with_alpha(CANVAS, 150));
     let mut x = rect.left() + 4.0;
     let mut out = None;
     for (i, label) in labels.iter().enumerate() {
@@ -635,7 +653,7 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
         if on {
             ui.painter().rect_filled(seg, Rounding::same(6.0), active);
         } else if resp.hovered() {
-            ui.painter().rect_filled(seg, Rounding::same(6.0), CARD_HI);
+            ui.painter().rect_filled(seg, Rounding::same(6.0), glass(18));
         }
         ui.painter().text(
             seg.center(),
@@ -693,26 +711,22 @@ fn reorder<T>(v: &mut Vec<T>, from: usize, insert: usize) {
     v.insert(at.min(v.len()), item);
 }
 
-/// Carte de section pleine largeur.
+/// Carte de section pleine largeur, en verre.
 fn panel_card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    egui::Frame::none()
-        .fill(CARD)
-        .rounding(Rounding::same(12.0))
-        .stroke(Stroke::new(1.0f32, card_stroke()))
-        .inner_margin(egui::Margin::same(18.0))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            add(ui)
-        })
-        .inner
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let out = egui::Frame::none().inner_margin(egui::Margin::same(18.0)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        add(ui)
+    });
+    ui.painter().set(slot, glass_shapes(out.response.rect, 12.0));
+    out.inner
 }
 
 /// Ligne imbriquée dans une carte (condition ou action).
 fn row_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
     egui::Frame::none()
-        .fill(CARD_HI)
+        .fill(glass(12))
         .rounding(Rounding::same(10.0))
-        .stroke(Stroke::new(1.0f32, card_stroke()))
         .inner_margin(egui::Margin::symmetric(12.0, 10.0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -721,19 +735,17 @@ fn row_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui
 }
 
 fn caps(text: &str) -> RichText {
-    RichText::new(text).size(10.0).strong().color(Color32::from_rgb(0x64, 0x74, 0x8b))
+    RichText::new(text).size(10.0).family(semibold()).color(text_dim())
 }
 
 fn rule_tab(ui: &mut egui::Ui, label: &str, active: bool, enabled: bool, accent: Color32) -> egui::Response {
-    let font = egui::FontId::proportional(12.5);
+    let font = egui::FontId::new(12.5, if active { semibold() } else { egui::FontFamily::Proportional });
     let fg = if active { Color32::WHITE } else if enabled { text_dim() } else { Color32::from_rgb(0x64, 0x74, 0x8b) };
     let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), fg);
     let lead = if active { 30.0 } else { 16.0 };
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + lead + 16.0, 34.0), egui::Sense::click());
-    let fill = if active { TAB_ACTIVE } else if resp.hovered() { CARD_HI } else { CARD };
-    let stroke = if active { with_alpha(accent, 77) } else { card_stroke() };
+    let fill = glass(if active { 30 } else if resp.hovered() { 20 } else { 11 });
     ui.painter().rect_filled(rect, Rounding::same(9.0), fill);
-    ui.painter().rect_stroke(rect, Rounding::same(9.0), Stroke::new(1.0f32, stroke));
     if active {
         ui.painter().circle_filled(Pos2::new(rect.left() + 16.0, rect.center().y), 3.5, accent);
     }
@@ -744,12 +756,12 @@ fn rule_tab(ui: &mut egui::Ui, label: &str, active: bool, enabled: bool, accent:
 fn section_title(ui: &mut egui::Ui, icon: Icon, title: &str) {
     let (r, _) = ui.allocate_exact_size(Vec2::splat(20.0), egui::Sense::hover());
     draw_icon(&ui.painter().clone(), r.center(), icon, SKY, 18.0);
-    ui.label(RichText::new(title).size(15.0).strong().color(Color32::WHITE));
+    ui.label(RichText::new(title).size(15.0).family(semibold()).color(Color32::WHITE));
 }
 
 fn icon_square(ui: &mut egui::Ui, icon: Icon, accent: Color32, active: bool) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), egui::Sense::hover());
-    let fill = if active { Color32::WHITE } else { Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 44) };
+    let fill = if active { Color32::WHITE } else { glass(44) };
     ui.painter().rect_filled(rect, Rounding::same(8.0), fill);
     draw_icon(
         &ui.painter().clone(),
@@ -764,7 +776,7 @@ fn stat_tile(ui: &mut egui::Ui, title: &str, big: &str, sub: &str, accent: Color
     card(ui, Vec2::new(240.0, 128.0), |ui| {
         ui.label(RichText::new(title).size(12.5).color(text_dim()));
         ui.add_space(8.0);
-        ui.label(RichText::new(big).size(30.0).color(accent).strong());
+        ui.label(RichText::new(big).size(30.0).color(accent).family(semibold()));
         ui.add_space(4.0);
         ui.label(RichText::new(sub).size(12.0).color(text_primary()));
     });
@@ -831,11 +843,11 @@ impl eframe::App for App {
 
         let screen = ctx.screen_rect();
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
-            flat_bg(ui, screen);
+            backdrop(ui, screen, self.accent());
 
             egui::TopBottomPanel::top("topbar")
                 .exact_height(56.0)
-                .frame(egui::Frame::none().fill(PANEL).stroke(Stroke::new(1.0f32, card_stroke())))
+                .frame(egui::Frame::none().fill(PANEL_GLASS))
                 .show_inside(ui, |ui| {
                     self.top_bar(ui);
                 });
@@ -843,7 +855,7 @@ impl eframe::App for App {
             egui::SidePanel::left("sidebar")
                 .resizable(false)
                 .exact_width(256.0)
-                .frame(egui::Frame::none().fill(PANEL).stroke(Stroke::new(1.0f32, card_stroke())))
+                .frame(egui::Frame::none().fill(PANEL_GLASS))
                 .show_inside(ui, |ui| {
                     self.sidebar(ui);
                 });
@@ -920,13 +932,11 @@ impl App {
             }
             lui.add_space(10.0);
         }
-        let (sep, _) = lui.allocate_exact_size(Vec2::new(1.0, 22.0), egui::Sense::hover());
-        lui.painter().rect_filled(sep, Rounding::ZERO, card_stroke());
-        lui.add_space(12.0);
+        lui.add_space(4.0);
         let (logo, _) = lui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
         draw_icon(&lui.painter().clone(), logo.center(), Icon::Folder, accent, 22.0);
         lui.add_space(6.0);
-        lui.label(RichText::new("OrganizeMyFiles").size(15.0).strong().color(Color32::WHITE));
+        lui.label(RichText::new("OrganizeMyFiles").size(15.0).family(semibold()).color(Color32::WHITE));
         if wide {
             lui.add_space(8.0);
             let state = if self.app_enabled { "Actif" } else { "En veille" };
@@ -934,14 +944,12 @@ impl App {
                 &mut lui,
                 &format!("V0.1 • {state}"),
                 text_dim(),
-                Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 12),
-                card_stroke(),
+                glass(14),
             );
         }
 
         // --- centre : recherche
         ui.painter().rect_filled(search_rect, Rounding::same(8.0), with_alpha(CANVAS, 180));
-        ui.painter().rect_stroke(search_rect, Rounding::same(8.0), Stroke::new(1.0f32, field_stroke()));
         let mut sui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(search_rect.shrink2(Vec2::new(10.0, 0.0)))
@@ -974,7 +982,7 @@ impl App {
         if wide {
             let (r, resp) = rui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::click());
             if resp.hovered() {
-                rui.painter().rect_filled(r, Rounding::same(8.0), with_alpha(Color32::WHITE, 14));
+                rui.painter().rect_filled(r, Rounding::same(8.0), glass(20));
             }
             draw_icon(&rui.painter().clone(), r.center(), Icon::Gear, text_dim(), 17.0);
             if resp.on_hover_text("Réglages").clicked() {
@@ -982,7 +990,7 @@ impl App {
             }
             let (r, resp) = rui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::click());
             if resp.hovered() {
-                rui.painter().rect_filled(r, Rounding::same(8.0), with_alpha(Color32::WHITE, 14));
+                rui.painter().rect_filled(r, Rounding::same(8.0), glass(20));
             }
             draw_icon(&rui.painter().clone(), r.center(), Icon::Bell, text_dim(), 17.0);
             if self.history.iter().any(|h| h.status == Status::BlockedByConflict) {
@@ -1006,7 +1014,6 @@ impl App {
         let dot = if self.app_enabled { GREEN } else { text_dim() };
         let (r, resp) = rui.allocate_exact_size(Vec2::new(82.0, 32.0), egui::Sense::click());
         rui.painter().rect_filled(r, Rounding::same(16.0), with_alpha(dot, if resp.hovered() { 36 } else { 22 }));
-        rui.painter().rect_stroke(r, Rounding::same(16.0), Stroke::new(1.0f32, with_alpha(dot, 80)));
         let dc = Pos2::new(r.left() + 16.0, r.center().y);
         if self.app_enabled {
             let t = (ctx.input(|i| i.time) as f32 * 1.4).fract();
@@ -1073,7 +1080,7 @@ impl App {
         ui.add_space(18.0);
         ui.horizontal(|ui| {
             ui.add_space(22.0);
-            ui.label(RichText::new("MENU").size(11.0).strong().color(Color32::from_rgb(0x64, 0x74, 0x8b)));
+            ui.label(RichText::new("MENU").size(11.0).family(semibold()).color(Color32::from_rgb(0x64, 0x74, 0x8b)));
         });
         ui.add_space(8.0);
 
@@ -1096,7 +1103,7 @@ impl App {
                         accent,
                     );
                 } else if response.hovered() {
-                    p.rect_filled(rect, Rounding::same(10.0), with_alpha(Color32::WHITE, 10));
+                    p.rect_filled(rect, Rounding::same(10.0), glass(12));
                 }
                 let fg = if active { accent } else { text_dim() };
                 draw_icon(p, Pos2::new(rect.left() + 26.0, rect.center().y), *icon, fg, 17.0);
@@ -1113,7 +1120,7 @@ impl App {
                     let g = p.layout_no_wrap(text.clone(), egui::FontId::proportional(11.0), badge_fg);
                     let w = (g.size().x + 14.0).max(22.0);
                     let b = Rect::from_center_size(Pos2::new(rect.right() - 12.0 - w / 2.0, rect.center().y), Vec2::new(w, 20.0));
-                    p.rect_filled(b, Rounding::same(10.0), if active { with_alpha(accent, 60) } else { with_alpha(Color32::WHITE, 16) });
+                    p.rect_filled(b, Rounding::same(10.0), if active { with_alpha(accent, 60) } else { glass(16) });
                     p.text(b.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(11.0), badge_fg);
                     if active && *tab == Tab::Rules {
                         p.circle_filled(Pos2::new(b.left() - 9.0, rect.center().y), 3.0, accent);
@@ -1130,20 +1137,8 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(12.0);
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(232.0, 38.0), egui::Sense::click());
-            let col = if resp.hovered() { with_alpha(accent, 130) } else { with_alpha(Color32::WHITE, 50) };
-            if resp.hovered() {
-                ui.painter().rect_filled(rect, Rounding::same(10.0), with_alpha(accent, 14));
-            }
-            let r = rect.shrink(0.5);
-            let st = Stroke::new(1.0f32, col);
-            for (a, b) in [
-                (r.left_top() + Vec2::new(10.0, 0.0), r.right_top() - Vec2::new(10.0, 0.0)),
-                (r.left_bottom() + Vec2::new(10.0, 0.0), r.right_bottom() - Vec2::new(10.0, 0.0)),
-                (r.left_top() + Vec2::new(0.0, 10.0), r.left_bottom() - Vec2::new(0.0, 10.0)),
-                (r.right_top() + Vec2::new(0.0, 10.0), r.right_bottom() - Vec2::new(0.0, 10.0)),
-            ] {
-                ui.painter().extend(egui::Shape::dashed_line(&[a, b], st, 4.0, 3.0));
-            }
+            let fill = if resp.hovered() { with_alpha(accent, 40) } else { glass(12) };
+            ui.painter().rect_filled(rect, Rounding::same(10.0), fill);
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
@@ -1160,7 +1155,6 @@ impl App {
         let avail = ui.max_rect();
         let rect = Rect::from_min_size(Pos2::new(avail.left() + 12.0, avail.bottom() - 16.0 - 84.0), Vec2::new(232.0, 84.0));
         ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(CANVAS, 150));
-        ui.painter().rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0f32, with_alpha(Color32::WHITE, 13)));
         let mut c = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(12.0)).layout(Layout::top_down(Align::Min)));
         c.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -1189,7 +1183,7 @@ impl App {
     }
 
     fn header(&mut self, ui: &mut egui::Ui, title: &str, desc: &str) {
-        ui.label(RichText::new(title).size(26.0).strong().color(text_primary()));
+        ui.label(RichText::new(title).size(26.0).family(bold()).color(text_primary()));
         ui.add_space(4.0);
         ui.label(RichText::new(desc).size(13.0).color(text_dim()));
         ui.add_space(16.0);
@@ -1233,7 +1227,7 @@ impl App {
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
                         ui.add_space(8.0);
-                        ui.label(RichText::new("Prêt à organiser").size(18.0).strong().color(text_primary()));
+                        ui.label(RichText::new("Prêt à organiser").size(18.0).family(semibold()).color(text_primary()));
                         ui.add_space(4.0);
                         ui.label(
                             RichText::new("Les règles s'exécutent de haut en bas, les actions en ordre. L'aperçu (simulation) ne touche à aucun fichier.")
@@ -1264,11 +1258,11 @@ impl App {
         ui.add_space(20.0);
         let used = self.monthly_used;
         card(ui, Vec2::new(756.0, 128.0), |ui| {
-            ui.label(RichText::new("Activité de ce mois").size(15.0).strong().color(text_primary()));
+            ui.label(RichText::new("Activité de ce mois").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             let frac: f32 = 0.08;
             let (rect, _) = ui.allocate_exact_size(Vec2::new(688.0, 14.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, Rounding::same(7.0), Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 32));
+            ui.painter().rect_filled(rect, Rounding::same(7.0), glass(32));
             let mut fill = rect;
             fill.set_width((rect.width() * frac.min(1.0)).max(8.0));
             ui.painter().rect_filled(fill, Rounding::same(7.0), accent);
@@ -1286,7 +1280,7 @@ impl App {
         if let Some((matched, actions, scanned)) = self.last_run {
             ui.add_space(20.0);
             card(ui, Vec2::new(756.0, 96.0), |ui| {
-                ui.label(RichText::new("Dernier lot").size(15.0).strong().color(text_primary()));
+                ui.label(RichText::new("Dernier lot").size(15.0).family(semibold()).color(text_primary()));
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(format!(
@@ -1317,7 +1311,7 @@ impl App {
                         ui.label(
                             RichText::new(f.path.display().to_string())
                                 .size(14.0)
-                                .strong()
+                                .family(semibold())
                                 .color(text_primary()),
                         );
                         ui.add_space(4.0);
@@ -1342,7 +1336,7 @@ impl App {
                             move_up = Some(i);
                         }
                         let mut en = f.enabled;
-                        if ui.checkbox(&mut en, "Suivi").changed() {
+                        if check_box(ui, &mut en, "Suivi", accent).changed() {
                             self.folders[i].enabled = en;
                         }
                     });
@@ -1373,7 +1367,7 @@ impl App {
 
         ui.add_space(8.0);
         card(ui, Vec2::new(756.0, 104.0), |ui| {
-            ui.label(RichText::new("Ajouter un dossier").size(15.0).strong().color(text_primary()));
+            ui.label(RichText::new("Ajouter un dossier").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.add(
@@ -1418,7 +1412,7 @@ impl App {
         let accent = self.accent();
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Règles").size(24.0).strong().color(Color32::WHITE));
+            ui.label(RichText::new("Règles").size(24.0).family(bold()).color(Color32::WHITE));
             ui.add_space(6.0);
             let n = self.rules.iter().filter(|r| r.enabled).count();
             chip(
@@ -1426,7 +1420,6 @@ impl App {
                 &format!("{n} {}", if n > 1 { "actives" } else { "active" }),
                 SKY,
                 with_alpha(SKY, 38),
-                with_alpha(SKY, 77),
             );
         });
         ui.add_space(2.0);
@@ -1510,7 +1503,7 @@ impl App {
                     }
                     ui.add_space(8.0);
                     let mut en = self.rules[idx].enabled;
-                    if ui.checkbox(&mut en, "Activée").changed() {
+                    if check_box(ui, &mut en, "Activée", accent).changed() {
                         self.rules[idx].enabled = en;
                     }
                 });
@@ -1529,12 +1522,11 @@ impl App {
                 }
                 ui.add_space(20.0);
                 ui.label(caps("RÉCURSION"));
-                ui.spacing_mut().slider_width = 150.0;
                 let mut depth = self.rules[idx].recursion_depth;
-                if ui.add(egui::Slider::new(&mut depth, 0..=8).show_value(false).trailing_fill(true)).changed() {
+                if slim_slider(ui, &mut depth, 0, 8, accent) {
                     self.rules[idx].recursion_depth = depth;
                 }
-                chip(ui, &depth.to_string(), accent, with_alpha(accent, 38), with_alpha(accent, 77));
+                chip(ui, &depth.to_string(), accent, with_alpha(accent, 38));
             });
             ui.add_space(4.0);
             ui.label(
@@ -1565,7 +1557,6 @@ impl App {
                     &format!("{n} {}", if n > 1 { "critères actifs" } else { "critère actif" }),
                     SKY,
                     with_alpha(SKY, 38),
-                    with_alpha(SKY, 77),
                 );
             });
             ui.add_space(10.0);
@@ -1761,7 +1752,7 @@ impl App {
                         time_str(e.created)
                     ))
                     .size(12.0)
-                    .strong()
+                    .family(semibold())
                     .color(text_dim()),
                 );
                 ui.add_space(8.0);
@@ -1775,7 +1766,7 @@ impl App {
                         ui.label(
                             RichText::new(format!("{} — {}", e.rule_name, e.action_label))
                                 .size(13.0)
-                                .strong()
+                                .family(semibold())
                                 .color(text_primary()),
                         );
                         ui.label(
@@ -1827,7 +1818,7 @@ impl App {
 
         ui.horizontal(|ui| {
             card(ui, Vec2::new(366.0, 300.0), |ui| {
-                ui.label(RichText::new("Organisation").size(20.0).strong().color(text_primary()));
+                ui.label(RichText::new("Organisation").size(20.0).family(semibold()).color(text_primary()));
                 ui.add_space(4.0);
                 ui.label(RichText::new("Toujours disponible").size(12.0).color(text_dim()));
                 ui.add_space(12.0);
@@ -1850,7 +1841,7 @@ impl App {
             });
             ui.add_space(16.0);
             card(ui, Vec2::new(366.0, 300.0), |ui| {
-                ui.label(RichText::new("Avancé").size(20.0).strong().color(accent));
+                ui.label(RichText::new("Avancé").size(20.0).family(semibold()).color(accent));
                 ui.add_space(4.0);
                 ui.label(RichText::new("Tout est débloqué :").size(12.0).color(text_dim()));
                 ui.add_space(12.0);
@@ -1859,7 +1850,7 @@ impl App {
                     ("Import vers les médiathèques", "Envoyez directement les fichiers correspondants dans vos médiathèques photos, musique et vidéos."),
                     ("Reconnaissance de texte (OCR)", "Classez les PDF numérisés et les images selon les mots qu'ils contiennent — lu localement sur votre ordinateur."),
                 ] {
-                    ui.label(RichText::new(format!("• {title}")).size(12.5).strong().color(text_primary()));
+                    ui.label(RichText::new(format!("• {title}")).size(12.5).family(semibold()).color(text_primary()));
                     ui.label(RichText::new(sub).size(11.5).color(text_dim()));
                     ui.add_space(8.0);
                 }
@@ -1870,7 +1861,7 @@ impl App {
 
         ui.add_space(16.0);
         card(ui, Vec2::new(756.0, 96.0), |ui| {
-            ui.label(RichText::new("Ce mois-ci").size(15.0).strong().color(text_primary()));
+            ui.label(RichText::new("Ce mois-ci").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             ui.label(
                 RichText::new(format!(
@@ -1889,19 +1880,14 @@ impl App {
         self.header(ui, "Réglages", "Petits réglages, appliqués immédiatement.");
 
         card(ui, Vec2::new(756.0, 132.0), |ui| {
-            ui.label(RichText::new("Couleur d'accent").size(15.0).strong().color(text_primary()));
+            ui.label(RichText::new("Couleur d'accent").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 for (i, (name, c)) in ACCENTS.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 34.0), egui::Sense::click());
                     ui.painter().rect_filled(rect, Rounding::same(11.0), *c);
                     if self.accent == i {
-                        ui.painter().rect_stroke(rect, Rounding::same(11.0), Stroke::new(2.5f32, Color32::WHITE));
-                        ui.painter().rect_stroke(
-                            rect.expand(3.0),
-                            Rounding::same(14.0),
-                            Stroke::new(1.5f32, *c),
-                        );
+                        ui.painter().circle_filled(rect.center(), 5.0, Color32::WHITE);
                     }
                     if resp.clicked() {
                         self.accent = i;
@@ -1918,15 +1904,16 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 168.0), |ui| {
-            ui.checkbox(&mut self.menu_bar, "Afficher l'application dans la barre des menus");
+        card(ui, Vec2::new(756.0, 214.0), |ui| {
+            check_box(ui, &mut self.menu_bar, "Afficher l'application dans la barre des menus", accent);
             ui.add_space(8.0);
-            ui.checkbox(&mut self.notify, "Prévenir quand le surveillant organise des fichiers");
+            check_box(ui, &mut self.notify, "Prévenir quand le surveillant organise des fichiers", accent);
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Conserver l'historique pendant").size(12.5).color(text_primary()));
                 ui.add_space(8.0);
-                ui.add(egui::Slider::new(&mut self.retention_days, 1..=365).suffix(" jours").logarithmic(true));
+                slim_slider(ui, &mut self.retention_days, 1, 365, accent);
+                chip(ui, &format!("{} jours", self.retention_days), accent, with_alpha(accent, 38));
             });
             ui.add_space(4.0);
             ui.label(
@@ -1946,7 +1933,7 @@ impl App {
                 if ui
                     .add(
                         egui::Button::new(RichText::new("Purger l'historique plus ancien").size(12.0))
-                            .fill(Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 34)),
+                            .fill(glass(34)),
                     )
                     .clicked()
                 {
@@ -1958,7 +1945,7 @@ impl App {
 
         ui.add_space(16.0);
         card(ui, Vec2::new(756.0, 92.0), |ui| {
-            ui.label(RichText::new("À propos des chiffres").size(15.0).strong().color(text_primary()));
+            ui.label(RichText::new("À propos des chiffres").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             ui.label(
                 RichText::new(format!(
