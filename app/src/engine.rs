@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::mechanics::*;
+use crate::system::{self, CommandRunner};
 use crate::zipmini;
 
 // ---------------------------------------------------------------- file meta
@@ -849,6 +850,7 @@ pub struct Runner {
     pub monthly_used: u32,
     pub batch_id: u64,
     pub dry_run: bool,
+    pub commands: Box<dyn CommandRunner>,
 }
 
 pub struct RunOutcome {
@@ -1161,7 +1163,8 @@ impl Runner {
                         None,
                     );
                 }
-                base(Status::Applied, format!("ouvert {}", p.display()), current.to_path_buf(), None)
+                let args = system::open_application_args(&p.to_string_lossy(), &current.to_string_lossy());
+                self.run_command("open", &args, |_| format!("ouvert avec {}", p.display()), &base, current)
             }
             ActionKind::ImportToLibrary => {
                 let lib = action.param_real("library_type", "photos | music | tv");
@@ -1173,12 +1176,11 @@ impl Runner {
                         None,
                     );
                 }
-                base(
-                    Status::Applied,
-                    format!("importé dans la médiathèque {lib}"),
-                    current.to_path_buf(),
-                    None,
-                )
+                let args = match system::import_args(&lib, &current.to_string_lossy()) {
+                    Ok(a) => a,
+                    Err(e) => return base(Status::Failed, e, current.to_path_buf(), None),
+                };
+                self.run_command("osascript", &args, |_| format!("importé dans la médiathèque {lib}"), &base, current)
             }
             ActionKind::RunShortcut => {
                 let name = action.param_real("shortcut_name", "Shortcut name");
@@ -1190,16 +1192,30 @@ impl Runner {
                         None,
                     );
                 }
-                base(
-                    Status::Applied,
-                    format!(
-                        "raccourci \"{name}\" exécuté (délai {} s)",
-                        SCRIPT_TIMEOUT_SECONDS
-                    ),
-                    current.to_path_buf(),
-                    None,
-                )
+                let args = system::run_shortcut_args(&name, &current.to_string_lossy());
+                self.run_command("shortcuts", &args, |_| format!("raccourci \"{name}\" exécuté"), &base, current)
             }
+        }
+    }
+
+    /// Lance une commande système et traduit le résultat en entrée d'historique honnête.
+    fn run_command(
+        &self,
+        program: &str,
+        args: &[String],
+        ok_message: impl Fn(&str) -> String,
+        base: &dyn Fn(Status, String, PathBuf, Option<Undo>) -> HistoryEntry,
+        current: &Path,
+    ) -> HistoryEntry {
+        let timeout = Duration::from_secs(SCRIPT_TIMEOUT_SECONDS);
+        match self.commands.run(program, args, timeout) {
+            Ok(out) if out.success => base(Status::Applied, ok_message(&out.stderr), current.to_path_buf(), None),
+            Ok(out) => {
+                let why = if program == "osascript" { system::explain_import_error(&out.stderr) } else { out.stderr };
+                let why = if why.is_empty() { format!("« {program} » a échoué") } else { why };
+                base(Status::Failed, why, current.to_path_buf(), None)
+            }
+            Err(e) => base(Status::Failed, e, current.to_path_buf(), None),
         }
     }
 
@@ -1596,5 +1612,72 @@ mod tests {
         assert!(validate_new_folder(&dir.join("absent"), &[]).is_err());
         assert_eq!(count_top_level_files(&dir), Some(1));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn system_action_entry(kind: ActionKind, key: &str, value: &str, fake: &std::rc::Rc<crate::system::fake::FakeCommands>) -> HistoryEntry {
+        let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(fake.clone()) };
+        let rule = Rule {
+            id: 1, folder_id: 1, name: "r".into(), enabled: true, match_all: true,
+            recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
+        };
+        let mut action = Action::new(kind);
+        action.params.insert(key.into(), value.into());
+        let file = meta("photo", "jpg", 10);
+        runner.run_action(&rule, &action, 0, &file, &file.path, SystemTime::now())
+    }
+
+    #[test]
+    fn shortcut_action_runs_the_command_and_reports_success() {
+        let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
+        let e = system_action_entry(ActionKind::RunShortcut, "shortcut_name", "Mon raccourci", &fake);
+        assert_eq!(e.status, Status::Applied);
+        let calls = fake.calls.borrow();
+        assert_eq!(calls[0].0, "shortcuts");
+        assert_eq!(calls[0].1, vec!["run", "Mon raccourci", "--input-path", "/t/photo"]);
+    }
+
+    #[test]
+    fn failing_command_is_reported_as_failed_not_applied() {
+        let mut f = crate::system::fake::FakeCommands::ok();
+        f.reply = Ok(false);
+        f.stderr = "Error: Couldn't find shortcut".into();
+        let fake = std::rc::Rc::new(f);
+        let e = system_action_entry(ActionKind::RunShortcut, "shortcut_name", "X", &fake);
+        assert_eq!(e.status, Status::Failed);
+        assert!(e.message.contains("Couldn't find shortcut"));
+    }
+
+    #[test]
+    fn timeout_or_missing_system_is_reported_as_failed() {
+        let mut f = crate::system::fake::FakeCommands::ok();
+        f.reply = Err("Délai dépassé (60 s), commande arrêtée".into());
+        let fake = std::rc::Rc::new(f);
+        let e = system_action_entry(ActionKind::ImportToLibrary, "library_type", "photos", &fake);
+        assert_eq!(e.status, Status::Failed);
+        assert!(e.message.contains("Délai"));
+    }
+
+    #[test]
+    fn import_unknown_library_never_launches_anything() {
+        let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
+        let e = system_action_entry(ActionKind::ImportToLibrary, "library_type", "books", &fake);
+        assert_eq!(e.status, Status::Failed);
+        assert!(fake.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn dry_run_launches_nothing() {
+        let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
+        let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: true, commands: Box::new(fake.clone()) };
+        let rule = Rule {
+            id: 1, folder_id: 1, name: "r".into(), enabled: true, match_all: true,
+            recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
+        };
+        let mut action = Action::new(ActionKind::RunShortcut);
+        action.params.insert("shortcut_name".into(), "X".into());
+        let file = meta("a", "jpg", 1);
+        let e = runner.run_action(&rule, &action, 0, &file, &file.path, SystemTime::now());
+        assert_eq!(e.status, Status::DryRun);
+        assert!(fake.calls.borrow().is_empty());
     }
 }

@@ -431,6 +431,7 @@ impl App {
             monthly_used: self.monthly_used,
             batch_id: self.next_batch,
             dry_run,
+            commands: Box::new(crate::system::SystemCommands),
         };
         let outcome = runner.run(&self.folders, &self.rules, SystemTime::now());
         self.next_batch += 1;
