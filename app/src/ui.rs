@@ -100,21 +100,21 @@ fn icons_family() -> egui::FontFamily {
     egui::FontFamily::Name("icons".into())
 }
 
-/// Polices embarquées de la maquette : Inter (3 graisses) + Material Symbols Outlined (sous-ensemble).
+/// Polices embarquées : Outfit (3 graisses) + Material Symbols Outlined (sous-ensemble).
 fn load_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     let faces: [(&str, &'static [u8]); 4] = [
-        ("inter", include_bytes!("../assets/fonts/Inter-Regular.ttf")),
-        ("inter-semibold", include_bytes!("../assets/fonts/Inter-SemiBold.ttf")),
-        ("inter-bold", include_bytes!("../assets/fonts/Inter-Bold.ttf")),
+        ("outfit", include_bytes!("../assets/fonts/Outfit-Regular.ttf")),
+        ("outfit-semibold", include_bytes!("../assets/fonts/Outfit-SemiBold.ttf")),
+        ("outfit-bold", include_bytes!("../assets/fonts/Outfit-Bold.ttf")),
         ("icons", include_bytes!("../assets/fonts/MaterialSymbolsOutlined-subset.ttf")),
     ];
     for (name, bytes) in faces {
         fonts.font_data.insert(name.into(), egui::FontData::from_static(bytes));
     }
-    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "inter".into());
-    fonts.families.insert(semibold(), vec!["inter-semibold".into(), "inter".into()]);
-    fonts.families.insert(bold(), vec!["inter-bold".into(), "inter".into()]);
+    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "outfit".into());
+    fonts.families.insert(semibold(), vec!["outfit-semibold".into(), "outfit".into()]);
+    fonts.families.insert(bold(), vec!["outfit-bold".into(), "outfit".into()]);
     fonts.families.insert(icons_family(), vec!["icons".into()]);
     ctx.set_fonts(fonts);
 }
