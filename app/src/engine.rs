@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::mechanics::*;
+use crate::system::{self, CommandRunner};
 use crate::zipmini;
 
 // ---------------------------------------------------------------- file meta
@@ -580,6 +581,8 @@ fn glob_parts(hay: &str, parts: &[&str]) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionKind {
+    /// L'ancienne action d'import en médiathèque (retirée) est relue comme un déplacement sans destination.
+    #[serde(alias = "ImportToLibrary")]
     Move,
     Copy,
     Rename,
@@ -589,7 +592,6 @@ pub enum ActionKind {
     AddTag,
     RemoveTag,
     OpenApplication,
-    ImportToLibrary,
     RunShortcut,
 }
 
@@ -603,7 +605,6 @@ pub const ACTION_KINDS: &[ActionKind] = &[
     ActionKind::AddTag,
     ActionKind::RemoveTag,
     ActionKind::OpenApplication,
-    ActionKind::ImportToLibrary,
     ActionKind::RunShortcut,
 ];
 
@@ -619,7 +620,6 @@ impl ActionKind {
             ActionKind::AddTag => "Ajouter une étiquette",
             ActionKind::RemoveTag => "Retirer une étiquette",
             ActionKind::OpenApplication => "Ouvrir une application",
-            ActionKind::ImportToLibrary => "Importer dans une médiathèque",
             ActionKind::RunShortcut => "Lancer un raccourci",
         }
     }
@@ -634,7 +634,6 @@ impl ActionKind {
             ActionKind::AddTag => "addTag",
             ActionKind::RemoveTag => "removeTag",
             ActionKind::OpenApplication => "openApplication",
-            ActionKind::ImportToLibrary => "importToLibrary",
             ActionKind::RunShortcut => "runShortcut",
         }
     }
@@ -658,7 +657,6 @@ impl ActionKind {
             ],
             ActionKind::AddTag | ActionKind::RemoveTag => &[("tags", "Étiquettes (séparées par des virgules)")],
             ActionKind::OpenApplication => &[("application_path", "Chemin de l'application")],
-            ActionKind::ImportToLibrary => &[("library_type", "photos | music | tv")],
             ActionKind::RunShortcut => &[("shortcut_name", "Nom du raccourci")],
             ActionKind::Trash | ActionKind::Delete => &[],
         }
@@ -849,6 +847,7 @@ pub struct Runner {
     pub monthly_used: u32,
     pub batch_id: u64,
     pub dry_run: bool,
+    pub commands: Box<dyn CommandRunner>,
 }
 
 pub struct RunOutcome {
@@ -1161,24 +1160,8 @@ impl Runner {
                         None,
                     );
                 }
-                base(Status::Applied, format!("ouvert {}", p.display()), current.to_path_buf(), None)
-            }
-            ActionKind::ImportToLibrary => {
-                let lib = action.param_real("library_type", "photos | music | tv");
-                if lib.is_empty() {
-                    return base(
-                        Status::Failed,
-                        "Import to Library requires a 'library_type' parameter".into(),
-                        current.to_path_buf(),
-                        None,
-                    );
-                }
-                base(
-                    Status::Applied,
-                    format!("importé dans la médiathèque {lib}"),
-                    current.to_path_buf(),
-                    None,
-                )
+                let args = system::open_application_args(&p.to_string_lossy(), &current.to_string_lossy());
+                self.run_command("open", &args, |_| format!("ouvert avec {}", p.display()), &base, current)
             }
             ActionKind::RunShortcut => {
                 let name = action.param_real("shortcut_name", "Shortcut name");
@@ -1190,16 +1173,30 @@ impl Runner {
                         None,
                     );
                 }
-                base(
-                    Status::Applied,
-                    format!(
-                        "raccourci \"{name}\" exécuté (délai {} s)",
-                        SCRIPT_TIMEOUT_SECONDS
-                    ),
-                    current.to_path_buf(),
-                    None,
-                )
+                let args = system::run_shortcut_args(&name, &current.to_string_lossy());
+                self.run_command("shortcuts", &args, |_| format!("raccourci \"{name}\" exécuté"), &base, current)
             }
+        }
+    }
+
+    /// Lance une commande système et traduit le résultat en entrée d'historique honnête.
+    fn run_command(
+        &self,
+        program: &str,
+        args: &[String],
+        ok_message: impl Fn(&str) -> String,
+        base: &dyn Fn(Status, String, PathBuf, Option<Undo>) -> HistoryEntry,
+        current: &Path,
+    ) -> HistoryEntry {
+        let timeout = Duration::from_secs(SCRIPT_TIMEOUT_SECONDS);
+        match self.commands.run(program, args, timeout) {
+            Ok(out) if out.success => base(Status::Applied, ok_message(&out.stderr), current.to_path_buf(), None),
+            Ok(out) => {
+                let why = out.stderr;
+                let why = if why.is_empty() { format!("« {program} » a échoué") } else { why };
+                base(Status::Failed, why, current.to_path_buf(), None)
+            }
+            Err(e) => base(Status::Failed, e, current.to_path_buf(), None),
         }
     }
 
@@ -1267,10 +1264,6 @@ impl Runner {
             }
             ActionKind::OpenApplication => {
                 base(Status::DryRun, "ouvrirait l'application".into(), current.to_path_buf(), None)
-            }
-            ActionKind::ImportToLibrary => {
-                let lib = action.param_real("library_type", "photos | music | tv");
-                base(Status::DryRun, format!("importerait dans {lib}"), current.to_path_buf(), None)
             }
             ActionKind::RunShortcut => {
                 let name = action.param_real("shortcut_name", "Shortcut name");
@@ -1596,5 +1589,70 @@ mod tests {
         assert!(validate_new_folder(&dir.join("absent"), &[]).is_err());
         assert_eq!(count_top_level_files(&dir), Some(1));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn system_action_entry(kind: ActionKind, key: &str, value: &str, fake: &std::rc::Rc<crate::system::fake::FakeCommands>) -> HistoryEntry {
+        let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(fake.clone()) };
+        let rule = Rule {
+            id: 1, folder_id: 1, name: "r".into(), enabled: true, match_all: true,
+            recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
+        };
+        let mut action = Action::new(kind);
+        action.params.insert(key.into(), value.into());
+        let file = meta("photo", "jpg", 10);
+        runner.run_action(&rule, &action, 0, &file, &file.path, SystemTime::now())
+    }
+
+    #[test]
+    fn shortcut_action_runs_the_command_and_reports_success() {
+        let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
+        let e = system_action_entry(ActionKind::RunShortcut, "shortcut_name", "Mon raccourci", &fake);
+        assert_eq!(e.status, Status::Applied);
+        let calls = fake.calls.borrow();
+        assert_eq!(calls[0].0, "shortcuts");
+        assert_eq!(calls[0].1, vec!["run", "Mon raccourci", "--input-path", "/t/photo"]);
+    }
+
+    #[test]
+    fn failing_command_is_reported_as_failed_not_applied() {
+        let mut f = crate::system::fake::FakeCommands::ok();
+        f.reply = Ok(false);
+        f.stderr = "Error: Couldn't find shortcut".into();
+        let fake = std::rc::Rc::new(f);
+        let e = system_action_entry(ActionKind::RunShortcut, "shortcut_name", "X", &fake);
+        assert_eq!(e.status, Status::Failed);
+        assert!(e.message.contains("Couldn't find shortcut"));
+    }
+
+    #[test]
+    fn timeout_or_missing_system_is_reported_as_failed() {
+        let mut f = crate::system::fake::FakeCommands::ok();
+        f.reply = Err("Délai dépassé (60 s), commande arrêtée".into());
+        let fake = std::rc::Rc::new(f);
+        let e = system_action_entry(ActionKind::RunShortcut, "shortcut_name", "X", &fake);
+        assert_eq!(e.status, Status::Failed);
+        assert!(e.message.contains("Délai"));
+    }
+
+    #[test]
+    fn dry_run_launches_nothing() {
+        let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
+        let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: true, commands: Box::new(fake.clone()) };
+        let rule = Rule {
+            id: 1, folder_id: 1, name: "r".into(), enabled: true, match_all: true,
+            recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
+        };
+        let mut action = Action::new(ActionKind::RunShortcut);
+        action.params.insert("shortcut_name".into(), "X".into());
+        let file = meta("a", "jpg", 1);
+        let e = runner.run_action(&rule, &action, 0, &file, &file.path, SystemTime::now());
+        assert_eq!(e.status, Status::DryRun);
+        assert!(fake.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn old_import_action_is_read_as_move() {
+        let k: ActionKind = serde_json::from_str("\"ImportToLibrary\"").unwrap();
+        assert_eq!(k, ActionKind::Move);
     }
 }
