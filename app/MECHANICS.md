@@ -102,3 +102,4 @@ Schéma SQL (relevé sur la base, fnd_3) inchangé : règles triées par `(prior
 
 - `on_conflict = "number"` : au lieu de bloquer, le fichier prend un suffixe « (n) » (`numbered_path`, inspiré de uniqueDest 0x100138560). Les valeurs d'origine `replace` / `skip` sont inchangées ; vide = `skip`.
 - Condition Extension : plusieurs extensions séparées par des virgules (`.png, .jpg`), avec ou sans point, casse ignorée. L'original ne documente qu'une seule valeur.
+- Écran Dossiers suivis : ajout par sélecteur natif, glisser-déposer, raccourcis ou saisie ; réordonnancement par glisser ; retrait annulable pendant 8 s (le dossier et ses règles sont rétablis). Pure ergonomie : aucune règle d'origine ni valeur décompilée n'est touchée.

@@ -1291,6 +1291,32 @@ pub fn shim_expand(p: &str) -> String {
     }
 }
 
+/// Valide un dossier à suivre : il doit exister, être un dossier et ne pas être déjà suivi.
+/// Renvoie le chemin nettoyé (sans « / » final) ou un message lisible.
+pub fn validate_new_folder(path: &Path, existing: &[Folder]) -> Result<PathBuf, String> {
+    let raw = path.to_string_lossy();
+    let trimmed = if raw.len() > 1 { raw.trim_end_matches('/') } else { &raw };
+    let clean = PathBuf::from(trimmed);
+    if !clean.is_dir() {
+        return Err("ce chemin n'est pas un dossier existant.".into());
+    }
+    if existing.iter().any(|f| f.path == clean) {
+        return Err("ce dossier est déjà suivi.".into());
+    }
+    Ok(clean)
+}
+
+/// Nombre de fichiers visibles à la racine du dossier (sans descendre), `None` s'il est illisible.
+pub fn count_top_level_files(path: &Path) -> Option<usize> {
+    let rd = fs::read_dir(path).ok()?;
+    Some(
+        rd.flatten()
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+            .count(),
+    )
+}
+
 pub fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| ".".into())
 }
@@ -1551,6 +1577,23 @@ mod tests {
         assert_eq!(numbered_path(&first), dir.join("photo (1).png"));
         fs::write(dir.join("photo (1).png"), b"x").unwrap();
         assert_eq!(numbered_path(&first), dir.join("photo (2).png"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn validate_new_folder_rejects_missing_and_duplicates() {
+        let dir = std::env::temp_dir().join(format!("forel-folders-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.txt"), b"x").unwrap();
+        fs::write(dir.join(".hidden"), b"x").unwrap();
+        let with_slash = PathBuf::from(format!("{}/", dir.display()));
+        let ok = validate_new_folder(&with_slash, &[]).unwrap();
+        assert_eq!(ok, dir);
+        let tracked = [Folder { id: 1, path: dir.clone(), enabled: true, priority: 0 }];
+        assert!(validate_new_folder(&dir, &tracked).unwrap_err().contains("déjà suivi"));
+        assert!(validate_new_folder(&dir.join("a.txt"), &[]).is_err());
+        assert!(validate_new_folder(&dir.join("absent"), &[]).is_err());
+        assert_eq!(count_top_level_files(&dir), Some(1));
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -1,5 +1,6 @@
 //! Entry point: eframe/egui desktop app.
 //! `--tab rules` ouvre l'écran voulu (dashboard, folders, rules, history, plan, settings).
+//! `--empty` : avec --screenshot, capture l'appli sans données de démonstration.
 //! `--screenshot <file.png>` draws ~120 frames, saves a PNG of the window and
 //! exits (used for automated checks).
 
@@ -12,11 +13,15 @@ fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
     let mut screenshot: Option<String> = None;
     let mut tab: Option<String> = None;
+    let mut empty = false;
     let mut i = 1;
     while i < args.len() {
         if args[i] == "--screenshot" {
             screenshot = args.get(i + 1).cloned();
             i += 2;
+        } else if args[i] == "--empty" {
+            empty = true;
+            i += 1;
         } else if args[i] == "--tab" {
             tab = args.get(i + 1).cloned();
             i += 2;
@@ -40,6 +45,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "File Organizer",
         options,
-        Box::new(move |cc| Ok(Box::new(ui::App::new(cc, screenshot, tab)))),
+        Box::new(move |cc| Ok(Box::new(ui::App::new(cc, ui::Launch { screenshot, tab, empty })))),
     )
 }

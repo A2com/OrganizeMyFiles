@@ -37,6 +37,12 @@ enum Icon {
     Gear,
     Search,
     Cross,
+    Add,
+    Trash,
+    FolderOpen,
+    Refresh,
+    Tick,
+    Undo,
 }
 
 const TABS: &[(Tab, &str, Icon, &str)] = &[
@@ -148,6 +154,23 @@ fn apply_theme(ctx: &egui::Context) {
 
 // --------------------------------------------------------------------- app
 
+/// Dossier retiré (avec ses règles), rétablissable pendant quelques secondes.
+struct UndoFolder {
+    folder: Folder,
+    rules: Vec<Rule>,
+    index: usize,
+    at: std::time::Instant,
+}
+
+const UNDO_SECONDS: u64 = 8;
+
+/// Options de lancement (ligne de commande).
+pub struct Launch {
+    pub screenshot: Option<String>,
+    pub tab: Option<String>,
+    pub empty: bool,
+}
+
 pub struct App {
     tab: Tab,
     folders: Vec<Folder>,
@@ -166,6 +189,9 @@ pub struct App {
     app_enabled: bool,
     search: String,
     toast: Option<String>,
+    undo_folder: Option<UndoFolder>,
+    show_path_input: bool,
+    folder_counts: std::collections::HashMap<u64, Option<usize>>,
     last_run: Option<(usize, usize, usize)>, // matched, actions, scanned
     frame: u32,
     screenshot: Option<String>,
@@ -173,7 +199,8 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, screenshot: Option<String>, tab: Option<String>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, launch: Launch) -> Self {
+        let Launch { screenshot, tab, empty } = launch;
         apply_theme(&cc.egui_ctx);
         let mut app = App {
             tab: Tab::Dashboard,
@@ -193,12 +220,15 @@ impl App {
             app_enabled: true,
             search: String::new(),
             toast: None,
+            undo_folder: None,
+            show_path_input: false,
+            folder_counts: std::collections::HashMap::new(),
             last_run: None,
             frame: 0,
             screenshot,
             shot_done: false,
         };
-        if app.screenshot.is_some() {
+        if app.screenshot.is_some() && !empty {
             app.seed_demo();
         }
         app.tab = match tab.as_deref() {
@@ -224,6 +254,13 @@ impl App {
             });
             self.next_id += 1;
         }
+        self.folders.push(Folder {
+            id: self.next_id,
+            path: PathBuf::from(format!("{home}/Projets-Clients")),
+            enabled: false,
+            priority: 3,
+        });
+        self.next_id += 1;
         let f0 = self.folders[0].id;
         self.rules.push(sample_rule(self.next_id, f0, "Tri Bureau & Téléchargements", 0));
         self.next_id += 1;
@@ -497,6 +534,12 @@ fn icon_char(icon: Icon) -> char {
         Icon::Gear => '\u{e8b8}',    // settings
         Icon::Search => '\u{ef7a}',  // search
         Icon::Cross => '\u{e5cd}',   // close
+        Icon::Add => '\u{e145}',     // add
+        Icon::Trash => '\u{e92e}',   // delete
+        Icon::FolderOpen => '\u{e2c8}', // folder_open
+        Icon::Refresh => '\u{e5d5}',  // refresh
+        Icon::Tick => '\u{e668}',     // check
+        Icon::Undo => '\u{e166}',     // undo
     }
 }
 
@@ -562,6 +605,18 @@ fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Respon
     let pos = Pos2::new(rect.left() + 9.0, rect.center().y - galley.size().y / 2.0);
     ui.painter().galley(pos, galley, fg);
     resp
+}
+
+/// Pastille cliquable (22 px) : même rendu que `chip`, avec survol.
+fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Response {
+    let font = egui::FontId::new(11.5, semibold());
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font, fg);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 18.0, 22.0), egui::Sense::click());
+    ui.painter().rect_filled(rect, Rounding::same(11.0), with_alpha(CANVAS, 140));
+    ui.painter().rect_filled(rect, Rounding::same(11.0), if resp.hovered() { with_alpha(fg, 70) } else { bg });
+    let pos = Pos2::new(rect.left() + 9.0, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, fg);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Interrupteur façon macOS.
@@ -670,16 +725,20 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
     out
 }
 
-/// Petite croix de suppression (22 px) ; true si cliquée.
-fn cross_button(ui: &mut egui::Ui, tip: &str) -> bool {
-    let (r, resp) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::click());
+/// Bouton-icône carré (28 px) ; `danger` = teinte rouge au survol. true si cliqué.
+fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, danger: bool) -> bool {
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(28.0), egui::Sense::click());
     let hot = resp.hovered();
     if hot {
-        ui.painter().rect_filled(r, Rounding::same(7.0), with_alpha(Color32::from_rgb(0xf8, 0x71, 0x71), 36));
+        ui.painter().rect_filled(r, Rounding::same(7.0), if danger { with_alpha(RED, 36) } else { glass(24) });
     }
-    let col = if hot { Color32::from_rgb(0xf8, 0x71, 0x71) } else { text_dim() };
-    draw_icon(&ui.painter().clone(), r.center(), Icon::Cross, col, 16.0);
+    let col = if hot && danger { RED } else if hot { text_primary() } else { text_dim() };
+    draw_icon(&ui.painter().clone(), r.center(), icon, col, 16.0);
     resp.on_hover_text(tip).clicked()
+}
+
+fn cross_button(ui: &mut egui::Ui, tip: &str) -> bool {
+    icon_button(ui, Icon::Cross, tip, true)
 }
 
 /// Ligne glissable d'une liste (conditions = 0, actions = 1).
@@ -711,15 +770,26 @@ fn reorder<T>(v: &mut Vec<T>, from: usize, insert: usize) {
     v.insert(at.min(v.len()), item);
 }
 
-/// Carte de section pleine largeur, en verre.
-fn panel_card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+/// Carte de verre pleine largeur ; `tint` ajoute un voile coloré (ex. zone de dépôt active).
+/// Renvoie le contenu et le rectangle occupé.
+fn panel_card_with<R>(ui: &mut egui::Ui, tint: Option<Color32>, margin: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> (R, Rect) {
     let slot = ui.painter().add(egui::Shape::Noop);
-    let out = egui::Frame::none().inner_margin(egui::Margin::same(18.0)).show(ui, |ui| {
+    let out = egui::Frame::none().inner_margin(egui::Margin::same(margin)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         add(ui)
     });
-    ui.painter().set(slot, glass_shapes(out.response.rect, 12.0));
-    out.inner
+    let rect = out.response.rect;
+    let mut shapes = vec![glass_shapes(rect, 12.0)];
+    if let Some(t) = tint {
+        shapes.push(egui::Shape::rect_filled(rect, Rounding::same(12.0), t));
+    }
+    ui.painter().set(slot, egui::Shape::Vec(shapes));
+    (out.inner, rect)
+}
+
+/// Carte de section pleine largeur, en verre.
+fn panel_card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    panel_card_with(ui, None, 18.0, add).0
 }
 
 /// Ligne imbriquée dans une carte (condition ou action).
@@ -842,6 +912,7 @@ impl eframe::App for App {
         }
 
         let screen = ctx.screen_rect();
+        let accent_now = self.accent();
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
             backdrop(ui, screen, self.accent());
 
@@ -861,16 +932,41 @@ impl eframe::App for App {
                 });
 
             egui::TopBottomPanel::bottom("toast")
-                .exact_height(44.0)
+                .exact_height(48.0)
                 .frame(egui::Frame::none())
                 .show_inside(ui, |ui| {
-                    ui.add_space(8.0);
-                    if let Some(t) = &self.toast {
-                        ui.label(
-                            RichText::new(format!("•  {t}"))
-                                .size(12.5)
-                                .color(text_dim()),
-                        );
+                    let pending = self.undo_folder.as_ref().map(|u| {
+                        (u.folder.path.display().to_string(), u.rules.len(), u.at.elapsed().as_secs())
+                    });
+                    match pending {
+                        Some((path, n_rules, secs)) if secs < UNDO_SECONDS => {
+                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+                            ui.horizontal_centered(|ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Dossier retiré : {} — {} supprimée(s) avec lui",
+                                        shorten(&path),
+                                        match n_rules {
+                                            0 => "aucune règle".to_string(),
+                                            1 => "1 règle".to_string(),
+                                            n => format!("{n} règles"),
+                                        }
+                                    ))
+                                    .size(12.5)
+                                    .color(text_primary()),
+                                );
+                                if btn(ui, "Annuler", Btn::Primary, accent_now, Some(Icon::Undo)).clicked() {
+                                    self.restore_folder();
+                                }
+                            });
+                        }
+                        _ => {
+                            self.undo_folder = None;
+                            ui.add_space(8.0);
+                            if let Some(t) = &self.toast {
+                                ui.label(RichText::new(format!("•  {t}")).size(12.5).color(text_dim()));
+                            }
+                        }
                     }
                 });
 
@@ -1049,10 +1145,13 @@ impl App {
             .and_then(|id| self.rules.iter().find(|r| r.id == id))
             .map(|r| r.folder_id)
             .or_else(|| self.folders.first().map(|f| f.id));
-        let Some(folder_id) = folder_id else {
-            self.toast("Ajoutez d'abord un dossier suivi.");
-            return;
-        };
+        match folder_id {
+            Some(id) => self.new_rule_in(id),
+            None => self.toast("Ajoutez d'abord un dossier suivi."),
+        }
+    }
+
+    fn new_rule_in(&mut self, folder_id: u64) {
         let count = self.rules.iter().filter(|r| r.folder_id == folder_id).count();
         let id = self.next_id;
         self.next_id += 1;
@@ -1073,6 +1172,56 @@ impl App {
         });
         self.selected_rule = self.rule_order().iter().position(|r| *r == id).unwrap_or(0);
         self.tab = Tab::Rules;
+    }
+
+    /// Ouvre l'écran Règles sur la première règle du dossier.
+    fn show_rules_of(&mut self, folder_id: u64) {
+        let first = self.rule_order().iter().position(|id| {
+            self.rules.iter().any(|r| r.id == *id && r.folder_id == folder_id)
+        });
+        if let Some(pos) = first {
+            self.selected_rule = pos;
+        }
+        self.tab = Tab::Rules;
+    }
+
+    /// Ajoute des dossiers (sélecteur, dépôt, raccourcis, saisie) ; explique ce qui a été refusé.
+    fn add_folders(&mut self, paths: Vec<PathBuf>) {
+        let mut added = 0;
+        let mut refused: Vec<String> = Vec::new();
+        for p in paths {
+            match validate_new_folder(&p, &self.folders) {
+                Ok(path) => {
+                    self.folders.push(Folder { id: self.next_id, path, enabled: true, priority: self.folders.len() as i64 });
+                    self.next_id += 1;
+                    added += 1;
+                }
+                Err(why) => refused.push(format!("{} : {why}", shorten(&p.display().to_string()))),
+            }
+        }
+        let msg = match (added, refused.first()) {
+            (0, Some(first)) if refused.len() > 1 => format!("Non ajouté — {first} (+ {} autres)", refused.len() - 1),
+            (0, Some(first)) => format!("Non ajouté — {first}"),
+            (1, None) => "Dossier ajouté".to_string(),
+            (n, None) => format!("{n} dossiers ajoutés"),
+            (n, Some(first)) => format!("{n} ajouté(s) — mais {first}"),
+        };
+        if added > 0 || !refused.is_empty() {
+            self.toast(msg);
+        }
+    }
+
+    fn restore_folder(&mut self) {
+        if let Some(u) = self.undo_folder.take() {
+            let at = u.index.min(self.folders.len());
+            self.folders.insert(at, u.folder);
+            self.rules.extend(u.rules);
+            self.toast("Dossier rétabli");
+        }
+    }
+
+    fn folder_count(&mut self, id: u64, path: &std::path::Path) -> Option<usize> {
+        *self.folder_counts.entry(id).or_insert_with(|| count_top_level_files(path))
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
@@ -1295,105 +1444,290 @@ impl App {
 
     fn folders_ui(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
-        self.header(ui, "Dossiers suivis", "Les lieux où les règles s'exécutent, par ordre de priorité.");
+        let ctx = ui.ctx().clone();
 
+        // Dossiers déposés depuis le Finder : survol (halo) puis ajout au relâchement.
+        let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|d| d.path.clone()).collect());
+        if !dropped.is_empty() {
+            self.add_folders(dropped);
+        }
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Dossiers suivis").size(24.0).family(bold()).color(Color32::WHITE));
+            ui.add_space(6.0);
+            if !self.folders.is_empty() {
+                let active = self.folders.iter().filter(|f| f.enabled).count();
+                chip(
+                    ui,
+                    &format!("{active} {} sur {}", if active > 1 { "actifs" } else { "actif" }, self.folders.len()),
+                    SKY,
+                    with_alpha(SKY, 38),
+                );
+            }
+        });
+        ui.add_space(2.0);
+        ui.label(RichText::new("Les règles s'exécutent dans ces dossiers, du premier au dernier.").size(13.0).color(text_dim()));
+        ui.add_space(16.0);
+
+        self.folder_add_card(ui, accent, hovering);
+        ui.add_space(14.0);
+        self.folder_list(ui, accent);
+    }
+
+    /// Carte d'ajout : dépôt, sélecteur natif, raccourcis, saisie du chemin (repliée).
+    fn folder_add_card(&mut self, ui: &mut egui::Ui, accent: Color32, hovering: bool) {
+        const SHORTCUTS: [(&str, &str); 6] = [
+            ("Bureau", "Desktop"),
+            ("Téléchargements", "Downloads"),
+            ("Documents", "Documents"),
+            ("Images", "Pictures"),
+            ("Musique", "Music"),
+            ("Vidéos", "Movies"),
+        ];
+        let empty = self.folders.is_empty();
+        let (title, sub) = if hovering {
+            ("Relâchez pour ajouter les dossiers", "Ils seront suivis dès maintenant.")
+        } else if empty {
+            (
+                "Aucun dossier suivi pour l'instant",
+                "Glissez des dossiers depuis le Finder, choisissez-les, ou utilisez un raccourci.",
+            )
+        } else {
+            ("Ajouter un dossier", "Glissez-déposez depuis le Finder, ou choisissez un dossier.")
+        };
+        let mut picked: Vec<PathBuf> = Vec::new();
+        let mut typed_submit = false;
+        panel_card_with(ui, hovering.then(|| with_alpha(accent, 46)), 18.0, |ui| {
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
+                ui.painter().rect_filled(r, Rounding::same(12.0), with_alpha(accent, 40));
+                draw_icon(&ui.painter().clone(), r.center(), if hovering { Icon::Add } else { Icon::Folder }, accent, 22.0);
+                ui.add_space(6.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(title).size(15.0).family(semibold()).color(if hovering { accent } else { Color32::WHITE }));
+                    ui.label(RichText::new(sub).size(12.0).color(text_dim()));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if btn(ui, "Choisir un dossier…", Btn::Primary, accent, Some(Icon::FolderOpen)).clicked() {
+                        if let Some(list) = rfd::FileDialog::new().set_directory(home_dir()).pick_folders() {
+                            picked = list;
+                        }
+                    }
+                });
+            });
+            ui.add_space(14.0);
+            ui.label(caps("RACCOURCIS"));
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                for (label, dir) in SHORTCUTS {
+                    let path = PathBuf::from(format!("{}/{}", home_dir(), dir));
+                    let tracked = self.folders.iter().any(|f| f.path == path);
+                    ui.add_enabled_ui(!tracked, |ui| {
+                        let icon = if tracked { Icon::Tick } else { Icon::Add };
+                        if btn(ui, label, Btn::Ghost, accent, Some(icon)).clicked() {
+                            picked.push(path.clone());
+                        }
+                    });
+                }
+            });
+            ui.add_space(10.0);
+            let toggle_label = if self.show_path_input { "Masquer la saisie du chemin" } else { "Saisir un chemin…" };
+            let link = ui.add(egui::Label::new(RichText::new(toggle_label).size(12.0).color(accent)).sense(egui::Sense::click()));
+            if link.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                self.show_path_input = !self.show_path_input;
+            }
+            if self.show_path_input {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut self.add_folder_text)
+                            .margin(egui::Margin::symmetric(8.0, 7.0))
+                            .desired_width((ui.available_width() - 130.0).max(160.0))
+                            .hint_text("~/Downloads — chemin complet ou ~/…"),
+                    );
+                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if btn(ui, "Ajouter", Btn::Sky, accent, None).clicked() || enter {
+                        let text = self.add_folder_text.trim().to_string();
+                        if !text.is_empty() {
+                            picked.push(PathBuf::from(shim_expand(&text)));
+                            typed_submit = true;
+                        }
+                    }
+                });
+            }
+        });
+        if !picked.is_empty() {
+            let before = self.folders.len();
+            self.add_folders(picked);
+            if typed_submit && self.folders.len() > before {
+                self.add_folder_text.clear();
+            }
+        }
+    }
+
+    /// Liste des dossiers suivis : priorité (glisser), état, règles, fichiers, actions.
+    fn folder_list(&mut self, ui: &mut egui::Ui, accent: Color32) {
+        if self.folders.is_empty() {
+            return;
+        }
         let mut remove: Option<usize> = None;
-        let mut move_up: Option<usize> = None;
-        let mut move_down: Option<usize> = None;
+        let mut replace: Option<usize> = None;
+        let mut finder: Option<usize> = None;
+        let mut rules_of: Option<u64> = None;
+        let mut reorder_f: Option<(usize, usize)> = None;
+        let mut refresh = false;
+
+        ui.horizontal(|ui| {
+            ui.label(caps("PRIORITÉ : DU PREMIER AU DERNIER"));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if icon_button(ui, Icon::Refresh, "Recalculer le nombre de fichiers", false) {
+                    refresh = true;
+                }
+            });
+        });
+        ui.add_space(6.0);
 
         for i in 0..self.folders.len() {
             let f = self.folders[i].clone();
-            card(ui, Vec2::new(756.0, 86.0), |ui| {
+            let exists = f.path.is_dir();
+            let n_rules = self.rules.iter().filter(|r| r.folder_id == f.id).count();
+            let files = if exists { self.folder_count(f.id, &f.path) } else { None };
+            let name = f
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| f.path.display().to_string());
+            let (_, rect) = panel_card_with(ui, None, 14.0, |ui| {
                 ui.horizontal(|ui| {
-                    icon_square(ui, Icon::Folder, accent, true);
-                    ui.add_space(12.0);
+                    ui.dnd_drag_source(egui::Id::new(("fdrag", f.id)), DragRow { list: 2, idx: i }, |ui| {
+                        let (r, _) = ui.allocate_exact_size(Vec2::new(14.0, 44.0), egui::Sense::hover());
+                        draw_icon(&ui.painter().clone(), r.center(), Icon::Grip, text_dim(), 16.0);
+                    });
+                    let (b, resp) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::hover());
+                    ui.painter().circle_filled(b.center(), 13.0, glass(34));
+                    ui.painter().text(
+                        b.center(),
+                        egui::Align2::CENTER_CENTER,
+                        (i + 1).to_string(),
+                        egui::FontId::new(12.0, semibold()),
+                        text_primary(),
+                    );
+                    resp.on_hover_text(format!(
+                        "Priorité {} : traité {}",
+                        i + 1,
+                        if i == 0 { "en premier" } else { "après les dossiers précédents" }
+                    ));
+                    let (t, _) = ui.allocate_exact_size(Vec2::splat(42.0), egui::Sense::hover());
+                    let tile = if exists { accent } else { RED };
+                    ui.painter().rect_filled(t, Rounding::same(11.0), with_alpha(tile, 40));
+                    draw_icon(&ui.painter().clone(), t.center(), Icon::Folder, tile, 20.0);
+                    ui.add_space(4.0);
                     ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new(f.path.display().to_string())
-                                .size(14.0)
-                                .family(semibold())
-                                .color(text_primary()),
-                        );
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(if f.enabled {
-                                "Active — rules run here"
+                        ui.label(RichText::new(&name).size(14.5).family(semibold()).color(text_primary()));
+                        ui.label(RichText::new(shorten(&f.path.display().to_string())).size(11.5).color(text_dim()));
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            if !exists {
+                                chip(ui, "Introuvable", RED, with_alpha(RED, 38));
+                            } else if f.enabled {
+                                chip(ui, "Actif", GREEN, with_alpha(GREEN, 38));
                             } else {
-                                "Paused"
-                            })
-                            .size(11.5)
-                            .color(text_dim()),
-                        );
+                                chip(ui, "En pause", text_dim(), glass(30));
+                            }
+                            let rules_text = match n_rules {
+                                0 => "Aucune règle — en créer une".to_string(),
+                                1 => "1 règle".to_string(),
+                                n => format!("{n} règles"),
+                            };
+                            if chip_button(ui, &rules_text, SKY, with_alpha(SKY, 38)).clicked() {
+                                if n_rules == 0 {
+                                    self.new_rule_in(f.id);
+                                } else {
+                                    rules_of = Some(f.id);
+                                }
+                            }
+                            match files {
+                                Some(0) => {
+                                    chip(ui, "Dossier vide", text_dim(), glass(30));
+                                }
+                                Some(1) => {
+                                    chip(ui, "1 fichier", text_dim(), glass(30));
+                                }
+                                Some(n) => {
+                                    chip(ui, &format!("{n} fichiers"), text_dim(), glass(30));
+                                }
+                                None => {}
+                            }
+                        });
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Retirer").clicked() {
+                        let mut en = f.enabled;
+                        if toggle(ui, &mut en, accent).on_hover_text("Suivre ce dossier").changed() {
+                            self.folders[i].enabled = en;
+                        }
+                        if icon_button(ui, Icon::Trash, "Retirer ce dossier de la liste", true) {
                             remove = Some(i);
                         }
-                        if ui.small_button("Descendre").clicked() {
-                            move_down = Some(i);
-                        }
-                        if ui.small_button("Monter").clicked() {
-                            move_up = Some(i);
-                        }
-                        let mut en = f.enabled;
-                        if check_box(ui, &mut en, "Suivi", accent).changed() {
-                            self.folders[i].enabled = en;
+                        if exists {
+                            if icon_button(ui, Icon::FolderOpen, "Ouvrir dans le Finder", false) {
+                                finder = Some(i);
+                            }
+                        } else if btn(ui, "Choisir un autre emplacement", Btn::Sky, accent, None).clicked() {
+                            replace = Some(i);
                         }
                     });
                 });
             });
-            ui.add_space(12.0);
+            let zone = ui.interact(rect, egui::Id::new(("fdrop", f.id)), egui::Sense::hover());
+            if let Some(m) = drop_target(ui, &zone, 2, i) {
+                reorder_f = Some(m);
+            }
+            ui.add_space(10.0);
         }
 
-        if let Some(i) = move_up {
-            if i > 0 {
-                self.folders.swap(i, i - 1);
+        if refresh {
+            self.folder_counts.clear();
+        }
+        if let Some(id) = rules_of {
+            self.show_rules_of(id);
+        }
+        if let Some(i) = finder {
+            let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+            if std::process::Command::new(program).arg(&self.folders[i].path).spawn().is_err() {
+                self.toast("Impossible d'ouvrir ce dossier.");
             }
         }
-        if let Some(i) = move_down {
-            if i + 1 < self.folders.len() {
-                self.folders.swap(i, i + 1);
+        if let Some(i) = replace {
+            if let Some(new_path) = rfd::FileDialog::new().set_directory(home_dir()).pick_folder() {
+                match validate_new_folder(&new_path, &self.folders) {
+                    Ok(path) => {
+                        let id = self.folders[i].id;
+                        self.folders[i].path = path;
+                        self.folder_counts.remove(&id);
+                        self.toast("Emplacement mis à jour");
+                    }
+                    Err(why) => self.toast(format!("Non modifié — {why}")),
+                }
+            }
+        }
+        if let Some((from, insert)) = reorder_f {
+            let keep = self.rule_order().get(self.selected_rule).copied();
+            reorder(&mut self.folders, from, insert);
+            if let Some(id) = keep {
+                self.selected_rule = self.rule_order().iter().position(|r| *r == id).unwrap_or(0);
             }
         }
         if let Some(i) = remove {
-            let id = self.folders[i].id;
-            self.rules.retain(|r| r.folder_id != id);
-            self.folders.remove(i);
-            self.toast("Dossier retiré");
+            let removed = self.folders.remove(i);
+            let (gone, kept): (Vec<Rule>, Vec<Rule>) =
+                std::mem::take(&mut self.rules).into_iter().partition(|r| r.folder_id == removed.id);
+            self.rules = kept;
+            self.undo_folder = Some(UndoFolder { folder: removed, rules: gone, index: i, at: std::time::Instant::now() });
         }
         for (i, f) in self.folders.iter_mut().enumerate() {
             f.priority = i as i64;
         }
-
-        ui.add_space(8.0);
-        card(ui, Vec2::new(756.0, 104.0), |ui| {
-            ui.label(RichText::new("Ajouter un dossier").size(15.0).family(semibold()).color(text_primary()));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.add_folder_text)
-                        .desired_width(520.0)
-                        .hint_text("~/Downloads — chemin complet ou ~/…"),
-                );
-                ui.add_space(12.0);
-                let add_clicked = pill(ui, "Ajouter", accent, true, false).clicked();
-                if add_clicked {
-                    let text = self.add_folder_text.trim().to_string();
-                    if !text.is_empty() {
-                        let path = PathBuf::from(shim_expand(&text));
-                        self.folders.push(Folder {
-                            id: self.next_id,
-                            path,
-                            enabled: true,
-                            priority: self.folders.len() as i64,
-                        });
-                        self.next_id += 1;
-                        self.add_folder_text.clear();
-                        self.toast("Dossier ajouté");
-                    }
-                }
-            });
-        });
     }
 
     fn rule_matches(&self, rule: &Rule, q: &str) -> bool {
