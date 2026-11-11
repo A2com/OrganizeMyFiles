@@ -646,6 +646,89 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
     out
 }
 
+/// Ligne glissable d'une liste (conditions = 0, actions = 1).
+#[derive(Clone, Copy, PartialEq)]
+struct DragRow {
+    list: u8,
+    idx: usize,
+}
+
+/// Indicateur de dépôt + détection du relâchement : renvoie (source, position d'insertion).
+fn drop_target(ui: &egui::Ui, resp: &egui::Response, list: u8, idx: usize) -> Option<(usize, usize)> {
+    let ptr = ui.input(|i| i.pointer.interact_pos())?;
+    let payload = resp.dnd_hover_payload::<DragRow>()?;
+    if payload.list != list {
+        return None;
+    }
+    let rect = resp.rect;
+    let (insert, y) = if ptr.y < rect.center().y { (idx, rect.top() - 3.0) } else { (idx + 1, rect.bottom() + 3.0) };
+    ui.painter().hline(rect.x_range(), y, Stroke::new(2.0f32, SKY));
+    resp.dnd_release_payload::<DragRow>().map(|p| (p.idx, insert))
+}
+
+fn reorder<T>(v: &mut Vec<T>, from: usize, insert: usize) {
+    if from >= v.len() {
+        return;
+    }
+    let item = v.remove(from);
+    let at = if insert > from { insert - 1 } else { insert };
+    v.insert(at.min(v.len()), item);
+}
+
+/// Carte de section pleine largeur.
+fn panel_card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::none()
+        .fill(CARD)
+        .rounding(Rounding::same(12.0))
+        .stroke(Stroke::new(1.0f32, card_stroke()))
+        .inner_margin(egui::Margin::same(18.0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        })
+        .inner
+}
+
+/// Ligne imbriquée dans une carte (condition ou action).
+fn row_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
+    egui::Frame::none()
+        .fill(CARD_HI)
+        .rounding(Rounding::same(10.0))
+        .stroke(Stroke::new(1.0f32, card_stroke()))
+        .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        })
+}
+
+fn caps(text: &str) -> RichText {
+    RichText::new(text).size(10.0).strong().color(Color32::from_rgb(0x64, 0x74, 0x8b))
+}
+
+fn rule_tab(ui: &mut egui::Ui, label: &str, active: bool, enabled: bool, accent: Color32) -> egui::Response {
+    let font = egui::FontId::proportional(12.5);
+    let fg = if active { Color32::WHITE } else if enabled { text_dim() } else { Color32::from_rgb(0x64, 0x74, 0x8b) };
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), fg);
+    let lead = if active { 30.0 } else { 16.0 };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + lead + 16.0, 34.0), egui::Sense::click());
+    let fill = if active { TAB_ACTIVE } else if resp.hovered() { CARD_HI } else { CARD };
+    let stroke = if active { with_alpha(accent, 77) } else { card_stroke() };
+    ui.painter().rect_filled(rect, Rounding::same(9.0), fill);
+    ui.painter().rect_stroke(rect, Rounding::same(9.0), Stroke::new(1.0f32, stroke));
+    if active {
+        ui.painter().circle_filled(Pos2::new(rect.left() + 16.0, rect.center().y), 3.5, accent);
+    }
+    ui.painter().text(Pos2::new(rect.left() + lead, rect.center().y), egui::Align2::LEFT_CENTER, label, font, fg);
+    resp
+}
+
+fn section_title(ui: &mut egui::Ui, icon: Icon, title: &str) {
+    let (r, _) = ui.allocate_exact_size(Vec2::splat(20.0), egui::Sense::hover());
+    draw_icon(&ui.painter().clone(), r.center(), icon, SKY, 18.0);
+    ui.label(RichText::new(title).size(15.0).strong().color(Color32::WHITE));
+}
+
 fn icon_square(ui: &mut egui::Ui, icon: Icon, accent: Color32, active: bool) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), egui::Sense::hover());
     let fill = if active { Color32::WHITE } else { Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 44) };
@@ -764,16 +847,18 @@ impl eframe::App for App {
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
                 .show(ui, |ui| {
-                    ui.add_space(24.0);
-                    match self.tab {
-                        Tab::Dashboard => self.dashboard(ui),
-                        Tab::Folders => self.folders_ui(ui),
-                        Tab::Rules => self.rules_ui(ui),
-                        Tab::History => self.history_ui(ui),
-                        Tab::Plan => self.plan_ui(ui),
-                        Tab::Settings => self.settings_ui(ui),
-                    }
-                    ui.add_space(32.0);
+                    egui::Frame::none().inner_margin(egui::Margin::symmetric(28.0, 0.0)).show(ui, |ui| {
+                        ui.add_space(24.0);
+                        match self.tab {
+                            Tab::Dashboard => self.dashboard(ui),
+                            Tab::Folders => self.folders_ui(ui),
+                            Tab::Rules => self.rules_ui(ui),
+                            Tab::History => self.history_ui(ui),
+                            Tab::Plan => self.plan_ui(ui),
+                            Tab::Settings => self.settings_ui(ui),
+                        }
+                        ui.add_space(32.0);
+                    });
                 });
         });
     }
@@ -923,19 +1008,33 @@ impl App {
         }
     }
 
+    /// Règles de tous les dossiers, dans l'ordre d'affichage (dossier, puis priorité).
+    fn rule_order(&self) -> Vec<u64> {
+        let mut order: Vec<&Rule> = self.rules.iter().collect();
+        order.sort_by_key(|r| {
+            let folder_pos = self.folders.iter().position(|f| f.id == r.folder_id).unwrap_or(usize::MAX);
+            (folder_pos, r.priority, r.id)
+        });
+        order.into_iter().map(|r| r.id).collect()
+    }
+
     fn new_rule(&mut self) {
-        let Some(folder) = self.folders.get(self.selected_folder.min(self.folders.len().saturating_sub(1))) else {
+        let current = self.rule_order().get(self.selected_rule).copied();
+        let folder_id = current
+            .and_then(|id| self.rules.iter().find(|r| r.id == id))
+            .map(|r| r.folder_id)
+            .or_else(|| self.folders.first().map(|f| f.id));
+        let Some(folder_id) = folder_id else {
             self.toast("Ajoutez d'abord un dossier suivi.");
             return;
         };
-        let folder_id = folder.id;
         let count = self.rules.iter().filter(|r| r.folder_id == folder_id).count();
         let id = self.next_id;
         self.next_id += 1;
         self.rules.push(Rule {
             id,
             folder_id,
-            name: format!("Règle {}", count + 1),
+            name: "Nouvelle règle".into(),
             enabled: true,
             match_all: true,
             recursion_depth: 0,
@@ -947,7 +1046,7 @@ impl App {
             }],
             actions: vec![Action::new(ActionKind::Move)],
         });
-        self.selected_rule = count;
+        self.selected_rule = self.rule_order().iter().position(|r| *r == id).unwrap_or(0);
         self.tab = Tab::Rules;
     }
 
@@ -1291,193 +1390,233 @@ impl App {
         });
     }
 
+    fn rule_matches(&self, rule: &Rule, q: &str) -> bool {
+        let folder = self
+            .folders
+            .iter()
+            .find(|f| f.id == rule.folder_id)
+            .map(|f| f.path.display().to_string().to_lowercase())
+            .unwrap_or_default();
+        rule.name.to_lowercase().contains(q)
+            || folder.contains(q)
+            || rule.actions.iter().any(|a| a.kind.label().to_lowercase().contains(q))
+    }
+
     fn rules_ui(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
-        self.header(ui, "Règles", "Si ces conditions correspondent, exécutez ces actions dans l'ordre.");
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Règles").size(24.0).strong().color(Color32::WHITE));
+            ui.add_space(6.0);
+            let n = self.rules.iter().filter(|r| r.enabled).count();
+            chip(
+                ui,
+                &format!("{n} {}", if n > 1 { "actives" } else { "active" }),
+                SKY,
+                with_alpha(SKY, 38),
+                with_alpha(SKY, 77),
+            );
+        });
+        ui.add_space(2.0);
+        ui.label(RichText::new("Si ces conditions correspondent, exécutez ces actions dans l'ordre.").size(13.0).color(text_dim()));
+        ui.add_space(16.0);
 
         if self.folders.is_empty() {
             ui.label(RichText::new("Ajoutez d'abord un dossier suivi, puis créez-y des règles.").color(text_dim()));
             return;
         }
 
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Dossier").size(12.0).color(text_dim()));
+        let order = self.rule_order();
+        if order.is_empty() {
+            ui.label(RichText::new("Aucune règle pour l'instant.").color(text_dim()));
             ui.add_space(8.0);
-            let names: Vec<String> = self
-                .folders
-                .iter()
-                .map(|f| f.path.display().to_string())
-                .collect();
-            let cur = names
-                .get(self.selected_folder.min(names.len() - 1))
-                .cloned()
-                .unwrap_or_default();
-            if let Some(pick) = combo(ui, "folder-pick", &shorten(&cur), &names.iter().map(|s| shorten(s)).collect::<Vec<_>>()) {
-                if let Some(idx) = names.iter().position(|s| shorten(s) == pick) {
-                    self.selected_folder = idx;
-                    self.selected_rule = 0;
-                }
+            if btn(ui, "+ Nouvelle règle", Btn::Sky, accent, None).clicked() {
+                self.new_rule();
             }
-        });
-        ui.add_space(16.0);
-
-        let folder_id = self.folders[self.selected_folder.min(self.folders.len() - 1)].id;
-        let mut rule_ids: Vec<u64> = self
-            .rules
-            .iter()
-            .filter(|r| r.folder_id == folder_id)
-            .map(|r| r.id)
-            .collect();
-        rule_ids.sort_by_key(|id| {
-            self.rules.iter().find(|r| r.id == *id).map(|r| (r.priority, r.id)).unwrap_or((0, 0))
-        });
-
-        ui.horizontal(|ui| {
-            for (i, rid) in rule_ids.iter().enumerate() {
-                let name = self.rules.iter().find(|r| r.id == *rid).map(|r| r.name.clone()).unwrap_or_default();
-                let active = self.selected_rule == i;
-                if pill(ui, &name, accent, active, false).clicked() {
-                    self.selected_rule = i;
-                }
-                ui.add_space(8.0);
-            }
-            if pill(ui, "+ Nouvelle règle", accent, false, false).clicked() {
-                let id = self.next_id;
-                self.next_id += 1;
-                self.rules.push(Rule {
-                    id,
-                    folder_id,
-                    name: format!("Rule {}", rule_ids.len() + 1),
-                    enabled: true,
-                    match_all: true,
-                    recursion_depth: 0,
-                    priority: rule_ids.len() as i64,
-                    conditions: vec![Condition {
-                        field: Field::Extension,
-                        op: Op::Equals,
-                        value: String::new(),
-                    }],
-                    actions: vec![Action::new(ActionKind::Move)],
-                });
-                self.selected_rule = rule_ids.len();
-            }
-        });
-        ui.add_space(16.0);
-
-        if rule_ids.is_empty() {
-            ui.label(RichText::new("Aucune règle pour l'instant — créez-en une ci-dessus.").color(text_dim()));
             return;
         }
+        let sel = self.selected_rule.min(order.len() - 1);
+        self.selected_rule = sel;
 
-        let sel = self.selected_rule.min(rule_ids.len() - 1);
-        let rid = rule_ids[sel];
-
-        // ---- rule header card
-        card(ui, Vec2::new(756.0, 122.0), |ui| {
-            let idx = self.rules.iter().position(|r| r.id == rid).unwrap();
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Nom").size(12.0).color(text_dim()));
-                ui.add_space(8.0);
-                let mut name = self.rules[idx].name.clone();
-                if ui.add(egui::TextEdit::singleline(&mut name).desired_width(320.0)).changed() {
-                    self.rules[idx].name = name;
+        // ---- onglets de règles (filtrés par la recherche globale)
+        let q = self.search.trim().to_lowercase();
+        ui.horizontal_wrapped(|ui| {
+            for (i, rid) in order.iter().enumerate() {
+                let Some(r) = self.rules.iter().find(|r| r.id == *rid) else { continue };
+                if !q.is_empty() && i != sel && !self.rule_matches(r, &q) {
+                    continue;
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("Supprimer la règle").clicked() {
-                        self.rules.retain(|r| r.id != rid);
-                        return;
+                let name: String = r.name.chars().take(32).collect();
+                if rule_tab(ui, &format!("Règle {} : {}", i + 1, name), i == sel, r.enabled, accent).clicked() {
+                    self.selected_rule = i;
+                }
+            }
+            if btn(ui, "+", Btn::Ghost, accent, None).on_hover_text("Nouvelle règle").clicked() {
+                self.new_rule();
+            }
+        });
+        ui.add_space(14.0);
+
+        let rid = order[sel];
+        let Some(idx) = self.rules.iter().position(|r| r.id == rid) else { return };
+        let mut deleted = false;
+        let mut moved = false;
+
+        // ---- configuration générale
+        panel_card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(caps("NOM DE LA RÈGLE"));
+                    let mut name = self.rules[idx].name.clone();
+                    if ui.add(egui::TextEdit::singleline(&mut name).desired_width(300.0)).changed() {
+                        self.rules[idx].name = name;
                     }
+                });
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    ui.label(caps("DOSSIER CIBLE"));
+                    let names: Vec<String> = self.folders.iter().map(|f| shorten(&f.path.display().to_string())).collect();
+                    let cur = self
+                        .folders
+                        .iter()
+                        .position(|f| f.id == self.rules[idx].folder_id)
+                        .and_then(|p| names.get(p).cloned())
+                        .unwrap_or_default();
+                    if let Some(pick) = combo(ui, "rule-folder", &cur, &names) {
+                        if let Some(p) = names.iter().position(|n| *n == pick) {
+                            let fid = self.folders[p].id;
+                            let count = self.rules.iter().filter(|r| r.folder_id == fid).count();
+                            self.rules[idx].folder_id = fid;
+                            self.rules[idx].priority = count as i64;
+                            moved = true;
+                        }
+                    }
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if btn(ui, "Supprimer la règle", Btn::Danger, accent, None).clicked() {
+                        deleted = true;
+                    }
+                    ui.add_space(8.0);
                     let mut en = self.rules[idx].enabled;
                     if ui.checkbox(&mut en, "Activée").changed() {
                         self.rules[idx].enabled = en;
                     }
                 });
             });
-            ui.add_space(8.0);
+            ui.add_space(14.0);
             ui.horizontal(|ui| {
-                let all = self.rules[idx].match_all;
-                if ui.selectable_label(all, "TOUTES les conditions").clicked() {
-                    self.rules[idx].match_all = true;
+                let current = if self.rules[idx].match_all { 0 } else { 1 };
+                if let Some(i) = segmented(
+                    ui,
+                    egui::Id::new(("match", rid)),
+                    &["TOUTES les conditions", "AU MOINS UNE condition"],
+                    current,
+                    SKY_DEEP,
+                ) {
+                    self.rules[idx].match_all = i == 0;
                 }
-                if ui.selectable_label(!all, "AU MOINS UNE condition").clicked() {
-                    self.rules[idx].match_all = false;
-                }
-                ui.add_space(16.0);
-                ui.label(RichText::new("Profondeur de récursion").size(12.0).color(text_dim()));
+                ui.add_space(20.0);
+                ui.label(caps("RÉCURSION"));
+                ui.spacing_mut().slider_width = 150.0;
                 let mut depth = self.rules[idx].recursion_depth;
-                if ui.add(egui::Slider::new(&mut depth, 0..=8).logarithmic(false)).changed() {
+                if ui.add(egui::Slider::new(&mut depth, 0..=8).show_value(false).trailing_fill(true)).changed() {
                     self.rules[idx].recursion_depth = depth;
                 }
+                chip(ui, &depth.to_string(), accent, with_alpha(accent, 38), with_alpha(accent, 77));
             });
+            ui.add_space(4.0);
             ui.label(
                 RichText::new("0 = fichiers de premier niveau seulement ; n descend de n niveaux.")
                     .size(11.0)
                     .color(text_dim()),
             );
         });
-        ui.add_space(16.0);
 
-        if self.rules.iter().all(|r| r.id != rid) {
+        if deleted {
+            self.rules.retain(|r| r.id != rid);
+            self.selected_rule = sel.saturating_sub(1);
             return;
         }
-        let idx = self.rules.iter().position(|r| r.id == rid).unwrap();
+        if moved {
+            self.selected_rule = self.rule_order().iter().position(|r| *r == rid).unwrap_or(0);
+        }
+        ui.add_space(14.0);
 
         // ---- conditions
-        card(ui, Vec2::new(756.0, 86.0 + 52.0 * self.rules[idx].conditions.len() as f32), |ui| {
-            ui.label(RichText::new("Conditions").size(15.0).strong().color(text_primary()));
-            ui.add_space(8.0);
+        let mut reorder_cond: Option<(usize, usize)> = None;
+        panel_card(ui, |ui| {
+            ui.horizontal(|ui| {
+                section_title(ui, Icon::Funnel, "Conditions");
+                let n = self.rules[idx].conditions.len();
+                chip(
+                    ui,
+                    &format!("{n} {}", if n > 1 { "critères actifs" } else { "critère actif" }),
+                    SKY,
+                    with_alpha(SKY, 38),
+                    with_alpha(SKY, 77),
+                );
+            });
+            ui.add_space(10.0);
             let mut drop: Option<usize> = None;
             for ci in 0..self.rules[idx].conditions.len() {
-                ui.horizontal(|ui| {
-                    let field = self.rules[idx].conditions[ci].field;
-                    let flabel = field.label();
-                    if let Some(pick) = combo(
-                        ui,
-                        &format!("cf-{idx}-{ci}"),
-                        flabel,
-                        &FIELDS.iter().map(|f| f.label()).collect::<Vec<_>>(),
-                    ) {
-                        if let Some(f) = FIELDS.iter().find(|f| f.label() == pick) {
-                            self.rules[idx].conditions[ci].field = *f;
-                            self.rules[idx].conditions[ci].op = f.ops()[0];
+                let row = row_frame(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.dnd_drag_source(egui::Id::new(("drag", rid, 0u8, ci)), DragRow { list: 0, idx: ci }, |ui| {
+                            let (r, _) = ui.allocate_exact_size(Vec2::new(14.0, 26.0), egui::Sense::hover());
+                            draw_icon(&ui.painter().clone(), r.center(), Icon::Grip, text_dim(), 16.0);
+                        });
+                        let field = self.rules[idx].conditions[ci].field;
+                        if let Some(pick) = combo(
+                            ui,
+                            &format!("cf-{idx}-{ci}"),
+                            field.label(),
+                            &FIELDS.iter().map(|f| f.label()).collect::<Vec<_>>(),
+                        ) {
+                            if let Some(f) = FIELDS.iter().find(|f| f.label() == pick) {
+                                self.rules[idx].conditions[ci].field = *f;
+                                self.rules[idx].conditions[ci].op = f.ops()[0];
+                            }
                         }
-                    }
-                    let op = self.rules[idx].conditions[ci].op;
-                    let ops = field.ops();
-                    if let Some(pick) = combo(
-                        ui,
-                        &format!("co-{idx}-{ci}"),
-                        op.label(),
-                        &ops.iter().map(|o| o.label()).collect::<Vec<_>>(),
-                    ) {
-                        if let Some(o) = ops.iter().find(|o| o.label() == pick) {
-                            self.rules[idx].conditions[ci].op = *o;
+                        let op = self.rules[idx].conditions[ci].op;
+                        let ops = field.ops();
+                        if let Some(pick) = combo(
+                            ui,
+                            &format!("co-{idx}-{ci}"),
+                            op.label(),
+                            &ops.iter().map(|o| o.label()).collect::<Vec<_>>(),
+                        ) {
+                            if let Some(o) = ops.iter().find(|o| o.label() == pick) {
+                                self.rules[idx].conditions[ci].op = *o;
+                            }
                         }
-                    }
-                    let hint = match field {
-                        Field::Size => "10 MB / 512 KB",
-                        Field::DateAdded | Field::DateModified => "2024-01-31  or  30 days",
-                        Field::Kind => "document / image / video / audio / archive / folder",
-                        Field::Contents => "text to find (documents; images need OCR)",
-                        _ => "value",
-                    };
-                    let mut val = self.rules[idx].conditions[ci].value.clone();
-                    if ui
-                        .add(egui::TextEdit::singleline(&mut val).desired_width(220.0).hint_text(hint))
-                        .changed()
-                    {
-                        self.rules[idx].conditions[ci].value = val;
-                    }
-                    if ui.small_button("✕").clicked() {
-                        drop = Some(ci);
-                    }
+                        let hint = match field {
+                            Field::Extension => ".png, .jpg",
+                            Field::Size => "50 MB / 512 KB",
+                            Field::DateAdded | Field::DateModified => "2024-01-31  ou  30 days",
+                            Field::Kind => "document / image / video / audio / archive / folder",
+                            Field::Contents => "texte à chercher (documents ; images : OCR)",
+                            _ => "valeur",
+                        };
+                        let mut val = self.rules[idx].conditions[ci].value.clone();
+                        let w = (ui.available_width() - 44.0).max(80.0);
+                        if ui.add(egui::TextEdit::singleline(&mut val).desired_width(w).hint_text(hint)).changed() {
+                            self.rules[idx].conditions[ci].value = val;
+                        }
+                        if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Supprimer").clicked() {
+                            drop = Some(ci);
+                        }
+                    });
                 });
-                ui.add_space(8.0);
+                let zone = ui.interact(row.response.rect, egui::Id::new(("drop", rid, 0u8, ci)), egui::Sense::hover());
+                if let Some(m) = drop_target(ui, &zone, 0, ci) {
+                    reorder_cond = Some(m);
+                }
+                ui.add_space(6.0);
             }
             if let Some(ci) = drop {
                 self.rules[idx].conditions.remove(ci);
             }
-            if pill(ui, "+ Ajouter une condition", accent, false, false).clicked() {
+            if btn(ui, "+ Ajouter une condition", Btn::Sky, accent, None).clicked() {
                 self.rules[idx].conditions.push(Condition {
                     field: Field::Name,
                     op: Op::Contains,
@@ -1485,71 +1624,103 @@ impl App {
                 });
             }
         });
-        ui.add_space(16.0);
+        if let Some((from, insert)) = reorder_cond {
+            reorder(&mut self.rules[idx].conditions, from, insert);
+        }
+        ui.add_space(14.0);
 
         // ---- actions
-        let extra = self.rules[idx]
-            .actions
-            .iter()
-            .map(|a| 30.0 + 34.0 * a.kind.params().len() as f32)
-            .sum::<f32>();
-        card(ui, Vec2::new(756.0, 86.0 + extra), |ui| {
-            ui.label(RichText::new("Actions — exécutées en ordre, chacune voit le fichier laissé par la précédente").size(15.0).strong().color(text_primary()));
-            ui.add_space(8.0);
+        let mut reorder_act: Option<(usize, usize)> = None;
+        panel_card(ui, |ui| {
+            ui.horizontal(|ui| {
+                section_title(ui, Icon::Bolt, "Actions");
+                ui.label(
+                    RichText::new("exécutées en ordre, chacune voit le fichier laissé par la précédente")
+                        .size(11.5)
+                        .color(text_dim()),
+                );
+            });
+            ui.add_space(10.0);
             let mut drop: Option<usize> = None;
             for ai in 0..self.rules[idx].actions.len() {
-                ui.horizontal(|ui| {
-                    let kind = self.rules[idx].actions[ai].kind.clone();
-                    if let Some(pick) = combo(
-                        ui,
-                        &format!("ak-{idx}-{ai}"),
-                        kind.label(),
-                        &ACTION_KINDS.iter().map(|k| k.label()).collect::<Vec<_>>(),
-                    ) {
-                        if let Some(k) = ACTION_KINDS.iter().find(|k| k.label() == pick) {
-                            self.rules[idx].actions[ai] = Action::new(k.clone());
-                        }
-                    }
-                    if kind.requires_pro() {
-                        ui.label(
-                            RichText::new("avancé")
-                                .size(10.5)
-                                .color(accent),
-                        );
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("✕").clicked() {
-                            drop = Some(ai);
-                        }
-                        if ui.small_button("▼").clicked() && ai + 1 < self.rules[idx].actions.len() {
-                            self.rules[idx].actions.swap(ai, ai + 1);
-                        }
-                        if ui.small_button("▲").clicked() && ai > 0 {
-                            self.rules[idx].actions.swap(ai, ai - 1);
-                        }
-                    });
-                });
-                for (k, placeholder) in self.rules[idx].actions[ai].kind.params() {
+                let row = row_frame(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.add_space(150.0);
-                        let entry = self.rules[idx].actions[ai].params.entry((*k).to_string()).or_default();
-                        ui.add(
-                            egui::TextEdit::singleline(entry)
-                                .desired_width(380.0)
-                                .hint_text(*placeholder),
-                        );
+                        ui.dnd_drag_source(egui::Id::new(("drag", rid, 1u8, ai)), DragRow { list: 1, idx: ai }, |ui| {
+                            let (r, _) = ui.allocate_exact_size(Vec2::new(14.0, 26.0), egui::Sense::hover());
+                            draw_icon(&ui.painter().clone(), r.center(), Icon::Grip, text_dim(), 16.0);
+                        });
+                        let kind = self.rules[idx].actions[ai].kind.clone();
+                        if let Some(pick) = combo(
+                            ui,
+                            &format!("ak-{idx}-{ai}"),
+                            kind.label(),
+                            &ACTION_KINDS.iter().map(|k| k.label()).collect::<Vec<_>>(),
+                        ) {
+                            if let Some(k) = ACTION_KINDS.iter().find(|k| k.label() == pick) {
+                                self.rules[idx].actions[ai] = Action::new(k.clone());
+                            }
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(egui::Button::new("✕").frame(false)).on_hover_text("Supprimer").clicked() {
+                                drop = Some(ai);
+                            }
+                        });
                     });
-                    ui.add_space(4.0);
+                    let kind = self.rules[idx].actions[ai].kind.clone();
+                    for (k, placeholder) in kind.params() {
+                        if *k == ON_CONFLICT_PARAM_KEY {
+                            continue;
+                        }
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(22.0);
+                            let entry = self.rules[idx].actions[ai].params.entry((*k).to_string()).or_default();
+                            ui.add(
+                                egui::TextEdit::singleline(entry)
+                                    .desired_width((ui.available_width() - 8.0).max(120.0))
+                                    .hint_text(*placeholder),
+                            );
+                        });
+                    }
+                    if matches!(kind, ActionKind::Move | ActionKind::Copy) {
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(22.0);
+                            ui.label(caps("EN CAS DE CONFLIT"));
+                            let current = match self.rules[idx].actions[ai].param(ON_CONFLICT_PARAM_KEY).as_str() {
+                                "replace" => 0,
+                                "number" => 2,
+                                _ => 1,
+                            };
+                            if let Some(i) = segmented(
+                                ui,
+                                egui::Id::new(("conflict", rid, ai)),
+                                &["remplacer", "ignorer", "numéroter"],
+                                current,
+                                accent,
+                            ) {
+                                let v = ["replace", "skip", "number"][i];
+                                self.rules[idx].actions[ai].params.insert(ON_CONFLICT_PARAM_KEY.into(), v.into());
+                            }
+                        });
+                    }
+                });
+                let zone = ui.interact(row.response.rect, egui::Id::new(("drop", rid, 1u8, ai)), egui::Sense::hover());
+                if let Some(m) = drop_target(ui, &zone, 1, ai) {
+                    reorder_act = Some(m);
                 }
-                ui.add_space(8.0);
+                ui.add_space(6.0);
             }
             if let Some(ai) = drop {
                 self.rules[idx].actions.remove(ai);
             }
-            if pill(ui, "+ Ajouter une action", accent, false, false).clicked() {
+            if btn(ui, "+ Ajouter une action", Btn::Sky, accent, None).clicked() {
                 self.rules[idx].actions.push(Action::new(ActionKind::Rename));
             }
         });
+        if let Some((from, insert)) = reorder_act {
+            reorder(&mut self.rules[idx].actions, from, insert);
+        }
     }
 
     fn history_ui(&mut self, ui: &mut egui::Ui) {
