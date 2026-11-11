@@ -188,6 +188,7 @@ pub struct App {
     accent: usize,
     menu_bar: bool,
     notify: bool,
+    animate_bg: bool,
     retention_days: u32,
     add_folder_text: String,
     selected_rule: usize,
@@ -218,6 +219,7 @@ impl App {
             accent: 0,
             menu_bar: true,
             notify: true,
+            animate_bg: true,
             retention_days: HISTORY_RETENTION_DEFAULT_DAYS,
             add_folder_text: String::new(),
             selected_rule: 0,
@@ -421,15 +423,59 @@ fn halo(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32, alph
     painter.add(egui::Shape::mesh(mesh));
 }
 
-/// Fond « verre » : nuit profonde + trois halos (accent, azur, accent) vus à travers les panneaux.
-fn backdrop(ui: &mut egui::Ui, rect: Rect, accent: Color32) {
-    let p = ui.painter().clone();
-    p.rect_filled(rect, Rounding::ZERO, CANVAS);
-    let (w, h) = (rect.width(), rect.height());
-    let big = w.max(h);
-    halo(&p, rect.min + Vec2::new(w * 0.22, h * 0.02), big * 0.6, accent, 48);
-    halo(&p, rect.min + Vec2::new(w * 1.0, h * 1.0), big * 0.65, SKY_DEEP, 60);
-    halo(&p, rect.min + Vec2::new(w * 0.62, h * 0.55), big * 0.35, accent, 20);
+/// Couleur du fond au point (u, v) ∈ [0,1]² à l'instant `t` (secondes).
+/// Trois champs de lumière (accent, bleu nuit, accent doux) qui dérivent lentement, vus à travers
+/// une déformation ondulante, plus un reflet discret qui traverse l'écran (esprit « NEAT »).
+fn bg_color(u: f64, v: f64, t: f64, aspect: f64, accent: Color32) -> Color32 {
+    let wu = u + 0.05 * (3.0 * v + t * 0.35).sin() + 0.035 * (5.0 * u - t * 0.25).sin();
+    let wv = v + 0.05 * (3.0 * u + t * 0.30).cos() + 0.035 * (4.0 * v + t * 0.20).sin();
+    // Distance en unités de la hauteur, corrigée du rapport largeur/hauteur.
+    let glow = |cx: f64, cy: f64, r: f64| {
+        let (dx, dy) = ((wu - cx) * aspect, wv - cy);
+        (-(dx * dx + dy * dy) / (r * r)).exp()
+    };
+    let g1 = glow(0.18 + 0.12 * (t * 0.18).sin(), 0.02 + 0.10 * (t * 0.15).cos(), 0.62);
+    let g2 = glow(0.98 - 0.10 * (t * 0.13 + 1.0).sin(), 1.0 - 0.10 * (t * 0.17).cos(), 0.70);
+    let g3 = glow(0.60 + 0.15 * (t * 0.21 + 2.0).sin(), 0.55 + 0.12 * (t * 0.19).cos(), 0.36);
+    let band = (((wu * aspect + wv) * 4.5) - t * 0.45).sin().max(0.0).powi(3) * 0.5;
+    let mut c = [CANVAS.r() as f64, CANVAS.g() as f64, CANVAS.b() as f64];
+    let layers = [(accent, 0.52 * g1 + 0.20 * g3), (SKY_DEEP, 0.48 * g2)];
+    for (col, k) in layers {
+        let target = [col.r() as f64, col.g() as f64, col.b() as f64];
+        for i in 0..3 {
+            c[i] += (target[i] - c[i]) * k;
+        }
+    }
+    let lift = band * 5.0 * (0.4 + g1 + g2);
+    Color32::from_rgb(
+        (c[0] + lift).clamp(0.0, 255.0) as u8,
+        (c[1] + lift).clamp(0.0, 255.0) as u8,
+        (c[2] + lift).clamp(0.0, 255.0) as u8,
+    )
+}
+
+/// Fond « verre » animé : maillage coloré par sommet (interpolé par le GPU), recalculé à chaque image.
+fn backdrop(ui: &mut egui::Ui, rect: Rect, accent: Color32, t: f64) {
+    const COLS: u32 = 40;
+    const ROWS: u32 = 26;
+    let aspect = (rect.width() / rect.height().max(1.0)) as f64;
+    let mut mesh = egui::epaint::Mesh::default();
+    for j in 0..=ROWS {
+        for i in 0..=COLS {
+            let (u, v) = (i as f32 / COLS as f32, j as f32 / ROWS as f32);
+            let pos = Pos2::new(rect.left() + rect.width() * u, rect.top() + rect.height() * v);
+            mesh.colored_vertex(pos, bg_color(u as f64, v as f64, t, aspect, accent));
+        }
+    }
+    let stride = COLS + 1;
+    for j in 0..ROWS {
+        for i in 0..COLS {
+            let a = j * stride + i;
+            mesh.add_triangle(a, a + 1, a + stride);
+            mesh.add_triangle(a + 1, a + stride + 1, a + stride);
+        }
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 /// Rayon des cartes de verre.
@@ -927,8 +973,14 @@ impl eframe::App for App {
 
         let screen = ctx.screen_rect();
         let accent_now = self.accent();
+        let bg_time = if self.animate_bg {
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+            ctx.input(|i| i.time)
+        } else {
+            0.0
+        };
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
-            backdrop(ui, screen, self.accent());
+            backdrop(ui, screen, self.accent(), bg_time);
 
             egui::TopBottomPanel::top("topbar")
                 .exact_height(56.0)
@@ -1022,8 +1074,13 @@ impl App {
             ctx.memory_mut(|m| m.request_focus(search_id));
         }
 
-        let search_w = (rect.width() * 0.2).clamp(190.0, 300.0);
-        let search_rect = Rect::from_center_size(rect.center(), Vec2::new(search_w, 34.0));
+        // La recherche prend tout l'espace libre entre l'identité (gauche) et les boutons (droite).
+        let left_w = if wide { 370.0 } else { 260.0 };
+        let right_w = if wide { 462.0 } else { 390.0 };
+        let search_left = rect.left() + 16.0 + left_w + 10.0;
+        let search_right = rect.right() - 16.0 - right_w - 12.0;
+        let search_w = (search_right - search_left).clamp(220.0, 640.0);
+        let search_rect = Rect::from_min_size(Pos2::new(search_left, rect.center().y - 17.0), Vec2::new(search_w, 34.0));
 
         // --- gauche
         let left = Rect::from_min_max(
@@ -1071,7 +1128,7 @@ impl App {
                 .id(search_id)
                 .frame(false)
                 .desired_width(search_w - 90.0)
-                .hint_text("Rechercher…"),
+                .hint_text("Rechercher règles, dossiers…"),
         );
         let key = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };
         ui.painter().text(
@@ -1527,7 +1584,7 @@ impl App {
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
                 ui.painter().rect_filled(r, Rounding::same(12.0), with_alpha(accent, 40));
-                draw_icon(&ui.painter().clone(), r.center(), if hovering { Icon::Add } else { Icon::Folder }, accent, 22.0);
+                draw_icon(&ui.painter().clone(), r.center(), if hovering { Icon::Add } else { Icon::Folder }, Color32::WHITE, 22.0);
                 ui.add_space(6.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new(title).size(15.0).family(semibold()).color(if hovering { accent } else { Color32::WHITE }));
@@ -1646,7 +1703,7 @@ impl App {
                     let (t, _) = ui.allocate_exact_size(Vec2::splat(42.0), egui::Sense::hover());
                     let tile = if exists { accent } else { RED };
                     ui.painter().rect_filled(t, Rounding::same(11.0), with_alpha(tile, 40));
-                    draw_icon(&ui.painter().clone(), t.center(), Icon::Folder, tile, 20.0);
+                    draw_icon(&ui.painter().clone(), t.center(), Icon::Folder, Color32::WHITE, 20.0);
                     ui.add_space(4.0);
                     ui.vertical(|ui| {
                         ui.label(RichText::new(&name).size(15.5).family(semibold()).color(text_primary()));
@@ -2200,10 +2257,12 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 240.0), |ui| {
+        card(ui, Vec2::new(756.0, 276.0), |ui| {
             check_box(ui, &mut self.menu_bar, "Afficher dans la barre des menus", accent);
             ui.add_space(8.0);
             check_box(ui, &mut self.notify, "Prévenir après chaque organisation", accent);
+            ui.add_space(8.0);
+            check_box(ui, &mut self.animate_bg, "Animer le fond", accent);
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Garder l'historique").size(14.5).color(text_primary()));
