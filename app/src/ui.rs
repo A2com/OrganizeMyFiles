@@ -1850,7 +1850,7 @@ impl App {
 
         // Pied : état de l'application, collé en bas de la barre.
         let avail = ui.max_rect();
-        let rect = Rect::from_min_size(Pos2::new(avail.left() + 12.0, avail.bottom() - 16.0 - 84.0), Vec2::new(232.0, 84.0));
+        let rect = Rect::from_min_size(Pos2::new(avail.left() + 12.0, avail.bottom() - 16.0 - 64.0), Vec2::new(232.0, 64.0));
         ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(CANVAS, 150));
         let mut c = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(12.0)).layout(Layout::top_down(Align::Min)));
         c.horizontal(|ui| {
@@ -1865,22 +1865,6 @@ impl App {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 toggle(ui, &mut self.app_enabled, accent);
             });
-        });
-        c.add_space(4.0);
-        let nothing_watched = self.watcher.as_ref().is_some_and(|w| w.watched_folders() == 0);
-        let (dot, txt) = if self.app_enabled && nothing_watched {
-            (text_dim(), "Aucun dossier surveillé • v0.1")
-        } else if self.app_enabled {
-            (GREEN, "Surveillance active • v0.1")
-        } else {
-            (text_dim(), "v0.1")
-        };
-        c.horizontal(|ui| {
-            if self.app_enabled {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
-                ui.painter().circle_filled(r.center(), 3.5, dot);
-            }
-            ui.label(RichText::new(txt).size(13.5).color(text_dim()));
         });
     }
 
@@ -2943,7 +2927,7 @@ impl App {
         ui.add_space(16.0);
         card(ui, Vec2::new(756.0, 314.0), |ui| {
             let before = self.launch_at_login;
-            check_box(ui, &mut self.launch_at_login, "Lancer à l'ouverture de la session", accent);
+            check_box(ui, &mut self.launch_at_login, "Lancement au démarrage", accent);
             if self.launch_at_login != before {
                 if let Err(e) = crate::login::set_enabled(self.launch_at_login) {
                     self.launch_at_login = before;
