@@ -148,6 +148,11 @@ fn apply_theme(ctx: &egui::Context) {
     ctx.style_mut(|s| {
         s.spacing.scroll = egui::style::ScrollStyle::thin();
         s.spacing.item_spacing = Vec2::new(8.0, 6.0);
+        for (style, size) in [(egui::TextStyle::Body, 15.0), (egui::TextStyle::Button, 15.0), (egui::TextStyle::Small, 12.0)] {
+            if let Some(font) = s.text_styles.get_mut(&style) {
+                font.size = size;
+            }
+        }
         s.spacing.interact_size.y = 30.0;
         s.spacing.button_padding = Vec2::new(10.0, 5.0);
     });
@@ -471,13 +476,13 @@ fn shadow_ring(rect: Rect, r: f32, blur: f32, offset: Vec2, alpha: u8) -> egui::
 }
 
 /// Liseré blanc fin des cartes (« 30 % » perçu : l'alpha brut est bien plus bas, le mélange étant linéaire).
-const CARD_BORDER: Color32 = Color32::from_rgba_premultiplied(26, 26, 26, 26);
+const CARD_BORDER: Color32 = Color32::from_rgba_premultiplied(60, 60, 60, 60);
 
 /// Surface de verre : ombre diffuse autour, voile blanc translucide et liseré fin.
 fn glass_shapes(rect: Rect) -> egui::Shape {
-    let blur = (rect.height() * 0.25).clamp(20.0, 34.0);
+    let blur = (rect.height() * 0.18).clamp(14.0, 24.0);
     egui::Shape::Vec(vec![
-        shadow_ring(rect, CARD_RADIUS, blur, Vec2::new(0.0, blur * 0.45), 64),
+        shadow_ring(rect, CARD_RADIUS, blur, Vec2::new(0.0, blur * 0.35), 34),
         egui::Shape::rect_filled(rect, Rounding::same(CARD_RADIUS), glass(11)),
         egui::Shape::rect_stroke(rect, Rounding::same(CARD_RADIUS), Stroke::new(1.0f32, CARD_BORDER)),
     ])
@@ -586,7 +591,7 @@ enum Btn {
 
 /// Bouton 32 px de haut (rayon 8) : primaire orange, fantôme, bleu azur ou danger.
 fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<Icon>) -> egui::Response {
-    let font = egui::FontId::new(13.5, semibold());
+    let font = egui::FontId::new(14.5, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font.clone(), Color32::WHITE);
     let icon_w = if icon.is_some() { 20.0 } else { 0.0 };
     let size = Vec2::new(galley.size().x + 28.0 + icon_w, 32.0);
@@ -619,7 +624,7 @@ fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<I
 
 /// Pastille d'information (22 px) : badge compteur, version, statut.
 fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Response {
-    let font = egui::FontId::new(13.0, semibold());
+    let font = egui::FontId::new(14.0, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, fg);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 18.0, 22.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, Rounding::same(11.0), with_alpha(CANVAS, 140));
@@ -631,7 +636,7 @@ fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Respon
 
 /// Pastille cliquable (22 px) : même rendu que `chip`, avec survol.
 fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Response {
-    let font = egui::FontId::new(13.0, semibold());
+    let font = egui::FontId::new(14.0, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, fg);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 18.0, 22.0), egui::Sense::click());
     ui.painter().rect_filled(rect, Rounding::same(11.0), with_alpha(CANVAS, 140));
@@ -643,7 +648,7 @@ fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui:
 
 /// Interrupteur façon macOS.
 fn check_box(ui: &mut egui::Ui, on: &mut bool, label: &str, accent: Color32) -> egui::Response {
-    let font = egui::FontId::proportional(14.0);
+    let font = egui::FontId::proportional(15.0);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), text_primary());
     let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(26.0 + galley.size().x, 22.0), egui::Sense::click());
     if resp.clicked() {
@@ -713,7 +718,7 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool, accent: Color32) -> egui::Response {
 
 /// Contrôle segmenté ; renvoie l'index cliqué.
 fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, active: Color32) -> Option<usize> {
-    let font = egui::FontId::new(13.0, semibold());
+    let font = egui::FontId::new(14.0, semibold());
     let widths: Vec<f32> = labels
         .iter()
         .map(|l| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::WHITE).size().x + 28.0)
@@ -827,11 +832,11 @@ fn row_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui
 }
 
 fn caps(text: &str) -> RichText {
-    RichText::new(text).size(11.5).family(semibold()).color(text_label())
+    RichText::new(text).size(12.5).family(semibold()).color(text_label())
 }
 
 fn rule_tab(ui: &mut egui::Ui, label: &str, active: bool, enabled: bool, accent: Color32) -> egui::Response {
-    let font = egui::FontId::new(13.5, if active { semibold() } else { egui::FontFamily::Proportional });
+    let font = egui::FontId::new(14.5, if active { semibold() } else { egui::FontFamily::Proportional });
     let fg = if active { Color32::WHITE } else if enabled { text_dim() } else { text_label() };
     let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), fg);
     let lead = if active { 30.0 } else { 16.0 };
@@ -853,11 +858,11 @@ fn section_title(ui: &mut egui::Ui, icon: Icon, title: &str) {
 
 fn stat_tile(ui: &mut egui::Ui, title: &str, big: &str, sub: &str, accent: Color32) {
     card(ui, Vec2::new(240.0, 128.0), |ui| {
-        ui.label(RichText::new(title).size(13.5).color(text_dim()));
+        ui.label(RichText::new(title).size(14.5).color(text_dim()));
         ui.add_space(8.0);
         ui.label(RichText::new(big).size(30.0).color(accent).family(semibold()));
         ui.add_space(4.0);
-        ui.label(RichText::new(sub).size(13.0).color(text_primary()));
+        ui.label(RichText::new(sub).size(14.0).color(text_primary()));
     });
 }
 
@@ -961,7 +966,7 @@ impl eframe::App for App {
                                             n => format!("{n} règles"),
                                         }
                                     ))
-                                    .size(13.5)
+                                    .size(14.5)
                                     .color(text_primary()),
                                 );
                                 if btn(ui, "Annuler", Btn::Primary, accent_now, Some(Icon::Undo)).clicked() {
@@ -973,7 +978,7 @@ impl eframe::App for App {
                             self.undo_folder = None;
                             ui.add_space(8.0);
                             if let Some(t) = &self.toast {
-                                ui.label(RichText::new(format!("•  {t}")).size(13.5).color(text_dim()));
+                                ui.label(RichText::new(format!("•  {t}")).size(14.5).color(text_dim()));
                             }
                         }
                     }
@@ -1073,7 +1078,7 @@ impl App {
             Pos2::new(search_rect.right() - 12.0, search_rect.center().y),
             egui::Align2::RIGHT_CENTER,
             key,
-            egui::FontId::proportional(12.5),
+            egui::FontId::proportional(13.5),
             text_dim(),
         );
 
@@ -1135,7 +1140,7 @@ impl App {
             Pos2::new(r.left() + 28.0, r.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(13.5),
+            egui::FontId::proportional(14.5),
             text_primary(),
         );
         if resp.on_hover_text("Activer / mettre en veille").clicked() {
@@ -1243,7 +1248,7 @@ impl App {
         ui.add_space(18.0);
         ui.horizontal(|ui| {
             ui.add_space(22.0);
-            ui.label(RichText::new("MENU").size(12.5).family(semibold()).color(text_label()));
+            ui.label(RichText::new("MENU").size(13.5).family(semibold()).color(text_label()));
         });
         ui.add_space(8.0);
 
@@ -1274,17 +1279,17 @@ impl App {
                     Pos2::new(rect.left() + 46.0, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     *label,
-                    egui::FontId::proportional(14.5),
+                    egui::FontId::proportional(15.5),
                     if active { accent } else { text_primary() },
                 );
                 if let Some(n) = badge {
                     let text = n.to_string();
                     let badge_fg = if active { Color32::WHITE } else { fg };
-                    let g = p.layout_no_wrap(text.clone(), egui::FontId::proportional(12.5), badge_fg);
+                    let g = p.layout_no_wrap(text.clone(), egui::FontId::proportional(13.5), badge_fg);
                     let w = (g.size().x + 14.0).max(22.0);
                     let b = Rect::from_center_size(Pos2::new(rect.right() - 12.0 - w / 2.0, rect.center().y), Vec2::new(w, 20.0));
                     p.rect_filled(b, Rounding::same(10.0), if active { with_alpha(accent, 60) } else { glass(16) });
-                    p.text(b.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(12.5), badge_fg);
+                    p.text(b.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(13.5), badge_fg);
                     if active && *tab == Tab::Rules {
                         p.circle_filled(Pos2::new(b.left() - 9.0, rect.center().y), 3.0, accent);
                     }
@@ -1306,7 +1311,7 @@ impl App {
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "+  Nouvelle règle",
-                egui::FontId::proportional(14.0),
+                egui::FontId::proportional(15.0),
                 if resp.hovered() { accent } else { text_primary() },
             );
             if resp.clicked() {
@@ -1324,7 +1329,7 @@ impl App {
                 ui.label(caps("APPLICATION"));
                 ui.label(
                     RichText::new(if self.app_enabled { "Activée" } else { "En veille" })
-                        .size(14.5)
+                        .size(15.5)
                         .color(Color32::WHITE),
                 );
             });
@@ -1341,14 +1346,14 @@ impl App {
         c.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
             ui.painter().circle_filled(r.center(), 3.5, dot);
-            ui.label(RichText::new(txt).size(12.5).color(text_dim()));
+            ui.label(RichText::new(txt).size(13.5).color(text_dim()));
         });
     }
 
     fn header(&mut self, ui: &mut egui::Ui, title: &str, desc: &str) {
         ui.label(RichText::new(title).size(26.0).family(bold()).color(text_primary()));
         ui.add_space(4.0);
-        ui.label(RichText::new(desc).size(14.0).color(text_dim()));
+        ui.label(RichText::new(desc).size(15.0).color(text_dim()));
         ui.add_space(16.0);
     }
 
@@ -1369,7 +1374,7 @@ impl App {
                 ui,
                 "FICHIERS CE MOIS-CI",
                 &format!("{}", self.monthly_used),
-                "traités jusqu'ici (simple compteur)",
+                "traités (simple compteur)",
                 accent,
             );
             ui.add_space(16.0);
@@ -1394,7 +1399,7 @@ impl App {
                         ui.add_space(4.0);
                         ui.label(
                             RichText::new("Les règles s'exécutent de haut en bas, les actions en ordre. L'aperçu (simulation) ne touche à aucun fichier.")
-                                .size(13.5)
+                                .size(14.5)
                                 .color(text_dim()),
                         );
                     });
@@ -1441,7 +1446,7 @@ impl App {
                     "{used} fichier(s) traité(s) — clé de mois {}. Aucune limite : c'est une simple statistique.",
                     month_key(SystemTime::now())
                 ))
-                .size(13.0)
+                .size(14.0)
                 .color(text_dim()),
             );
         });
@@ -1455,7 +1460,7 @@ impl App {
                     RichText::new(format!(
                         "{matched} fichier(s) correspondant sur {scanned} analysés, {actions} action(s) enregistrée(s)"
                     ))
-                    .size(13.5)
+                    .size(14.5)
                     .color(text_dim()),
                 );
             });
@@ -1487,7 +1492,7 @@ impl App {
             }
         });
         ui.add_space(2.0);
-        ui.label(RichText::new("Les règles s'exécutent dans ces dossiers, du premier au dernier.").size(14.0).color(text_dim()));
+        ui.label(RichText::new("Les règles s'exécutent dans ces dossiers, du premier au dernier.").size(15.0).color(text_dim()));
         ui.add_space(16.0);
 
         self.folder_add_card(ui, accent, hovering);
@@ -1526,7 +1531,7 @@ impl App {
                 ui.add_space(6.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new(title).size(15.0).family(semibold()).color(if hovering { accent } else { Color32::WHITE }));
-                    ui.label(RichText::new(sub).size(13.0).color(text_dim()));
+                    ui.label(RichText::new(sub).size(14.0).color(text_dim()));
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if btn(ui, "Choisir un dossier…", Btn::Primary, accent, Some(Icon::FolderOpen)).clicked() {
@@ -1553,7 +1558,7 @@ impl App {
             });
             ui.add_space(10.0);
             let toggle_label = if self.show_path_input { "Masquer la saisie du chemin" } else { "Saisir un chemin…" };
-            let link = ui.add(egui::Label::new(RichText::new(toggle_label).size(13.0).color(accent)).sense(egui::Sense::click()));
+            let link = ui.add(egui::Label::new(RichText::new(toggle_label).size(14.0).color(accent)).sense(egui::Sense::click()));
             if link.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 self.show_path_input = !self.show_path_input;
             }
@@ -1630,7 +1635,7 @@ impl App {
                         b.center(),
                         egui::Align2::CENTER_CENTER,
                         (i + 1).to_string(),
-                        egui::FontId::new(13.0, semibold()),
+                        egui::FontId::new(14.0, semibold()),
                         text_primary(),
                     );
                     resp.on_hover_text(format!(
@@ -1644,8 +1649,8 @@ impl App {
                     draw_icon(&ui.painter().clone(), t.center(), Icon::Folder, tile, 20.0);
                     ui.add_space(4.0);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&name).size(14.5).family(semibold()).color(text_primary()));
-                        ui.label(RichText::new(shorten(&f.path.display().to_string())).size(13.0).color(text_dim()));
+                        ui.label(RichText::new(&name).size(15.5).family(semibold()).color(text_primary()));
+                        ui.label(RichText::new(shorten(&f.path.display().to_string())).size(14.0).color(text_dim()));
                         ui.add_space(2.0);
                         ui.horizontal(|ui| {
                             if !exists {
@@ -1777,7 +1782,7 @@ impl App {
             );
         });
         ui.add_space(2.0);
-        ui.label(RichText::new("Si ces conditions correspondent, exécutez ces actions dans l'ordre.").size(14.0).color(text_dim()));
+        ui.label(RichText::new("Si ces conditions correspondent, exécutez ces actions dans l'ordre.").size(15.0).color(text_dim()));
         ui.add_space(16.0);
 
         if self.folders.is_empty() {
@@ -1885,7 +1890,7 @@ impl App {
             ui.add_space(4.0);
             ui.label(
                 RichText::new("0 = fichiers de premier niveau seulement ; n descend de n niveaux.")
-                    .size(12.5)
+                    .size(13.5)
                     .color(text_dim()),
             );
         });
@@ -1993,7 +1998,7 @@ impl App {
                 section_title(ui, Icon::Bolt, "Actions");
                 ui.label(
                     RichText::new("exécutées en ordre, chacune voit le fichier laissé par la précédente")
-                        .size(13.0)
+                        .size(14.0)
                         .color(text_dim()),
                 );
             });
@@ -2105,7 +2110,7 @@ impl App {
                         date_str(e.created),
                         time_str(e.created)
                     ))
-                    .size(13.0)
+                    .size(14.0)
                     .family(semibold())
                     .color(text_dim()),
                 );
@@ -2119,7 +2124,7 @@ impl App {
                     ui.vertical(|ui| {
                         ui.label(
                             RichText::new(format!("{} — {}", e.rule_name, e.action_label))
-                                .size(14.0)
+                                .size(15.0)
                                 .family(semibold())
                                 .color(text_primary()),
                         );
@@ -2130,7 +2135,7 @@ impl App {
                                 shorten(&e.result_path.display().to_string()),
                                 e.message
                             ))
-                            .size(12.5)
+                            .size(13.5)
                             .color(text_dim()),
                         );
                     });
@@ -2142,7 +2147,7 @@ impl App {
                         } else {
                             ui.label(
                                 RichText::new(e.status.label())
-                                    .size(12.5)
+                                    .size(13.5)
                                     .color(status_color(e.status)),
                             );
                         }
@@ -2157,7 +2162,7 @@ impl App {
                 RichText::new(format!(
                     "Affichage des {HISTORY_PAGE_SIZE} dernières entrées sur {total}."
                 ))
-                .size(12.5)
+                .size(13.5)
                 .color(text_dim()),
             );
         }
@@ -2191,7 +2196,7 @@ impl App {
                 }
             });
             ui.add_space(8.0);
-            ui.label(RichText::new("Nommé d'après la palette d'origine : bleu, violet, rose, orange, jaune, vert, graphite.").size(12.5).color(text_dim()));
+            ui.label(RichText::new("Nommé d'après la palette d'origine : bleu, violet, rose, orange, jaune, vert, graphite.").size(13.5).color(text_dim()));
         });
 
         ui.add_space(16.0);
@@ -2201,7 +2206,7 @@ impl App {
             check_box(ui, &mut self.notify, "Prévenir quand le surveillant organise des fichiers", accent);
             ui.add_space(12.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Conserver l'historique pendant").size(13.5).color(text_primary()));
+                ui.label(RichText::new("Conserver l'historique pendant").size(14.5).color(text_primary()));
                 ui.add_space(8.0);
                 slim_slider(ui, &mut self.retention_days, 1, 365, accent);
                 chip(ui, &format!("{} jours", self.retention_days), accent, with_alpha(accent, 38));
@@ -2211,19 +2216,19 @@ impl App {
                 RichText::new(format!(
                     "Les entrées plus anciennes sont purgées automatiquement (réglage history_max_days).",
                 ))
-                .size(12.5)
+                .size(13.5)
                 .color(text_dim()),
             );
             ui.label(
                 RichText::new(format!("Clé de réglage : {HISTORY_RETENTION_SETTING_KEY} — plage 1 à 365 jours"))
-                    .size(12.5)
+                    .size(13.5)
                     .color(text_dim()),
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("Purger l'historique plus ancien").size(13.0))
+                        egui::Button::new(RichText::new("Purger l'historique plus ancien").size(14.0))
                             .fill(glass(34)),
                     )
                     .clicked()
@@ -2235,7 +2240,7 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 104.0), |ui| {
+        card(ui, Vec2::new(756.0, 128.0), |ui| {
             ui.label(RichText::new("À propos des chiffres").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             ui.label(
@@ -2247,7 +2252,7 @@ impl App {
                     OCR_LIMIT_BYTES / 1024 / 1024,
                     FILENAME_MAX_LENGTH
                 ))
-                .size(13.0)
+                .size(14.0)
                 .color(text_dim()),
             );
         });
