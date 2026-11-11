@@ -1234,10 +1234,10 @@ impl App {
             ctx.memory_mut(|m| m.request_focus(search_id));
         }
 
-        // La recherche part du bord gauche du contenu (barre latérale 256 px + marge 28 px)
+        // La recherche part 25 px à gauche du début du contenu (barre latérale 256 px + marge 28 px)
         // et prend tout l'espace libre jusqu'aux boutons de droite.
-        let right_w = if wide { 462.0 } else { 390.0 };
-        let search_left = rect.left() + 256.0 + 28.0;
+        let right_w = if wide { 492.0 } else { 420.0 };
+        let search_left = rect.left() + 256.0 + 28.0 - 25.0;
         let search_right = rect.right() - 16.0 - right_w - 12.0;
         let search_w = (search_right - search_left).clamp(220.0, 640.0);
         let search_rect = Rect::from_min_size(Pos2::new(search_left, rect.center().y - 17.0), Vec2::new(search_w, 34.0));
@@ -1275,7 +1275,7 @@ impl App {
                 .desired_width(search_w - 90.0)
                 .hint_text("Rechercher règles, dossiers…"),
         );
-        let key = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };
+        let key = if cfg!(target_os = "macos") { "⌘ K" } else { "Ctrl K" };
         ui.painter().text(
             Pos2::new(search_rect.right() - 12.0, search_rect.center().y),
             egui::Align2::RIGHT_CENTER,
@@ -1329,7 +1329,7 @@ impl App {
         // Statut : pastille verte pulsée.
         let label = if self.app_enabled { "Actif" } else { "En veille" };
         let dot = if self.app_enabled { GREEN } else { text_dim() };
-        let (r, resp) = rui.allocate_exact_size(Vec2::new(82.0, 32.0), egui::Sense::click());
+        let (r, resp) = rui.allocate_exact_size(Vec2::new(112.0, 32.0), egui::Sense::click());
         rui.painter().rect_filled(r, Rounding::same(16.0), with_alpha(dot, if resp.hovered() { 36 } else { 22 }));
         let dc = Pos2::new(r.left() + 16.0, r.center().y);
         if self.app_enabled {
