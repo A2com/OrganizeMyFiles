@@ -696,7 +696,7 @@ impl App {
             Color32::from_white_alpha(alpha(f.icon_alpha)),
         );
 
-        // « Bienvenue » : tracé du stylo, ombre douce, bouts arrondis, pointe lumineuse.
+        // « Bienvenue » : tracé du stylo, bouts arrondis, pointe lumineuse (pas d'ombre).
         let word_left = cx - word_w / 2.0;
         let word_top = top + icon_size + gap;
         let to_screen = |p: intro::Point| Pos2::new(word_left + p[0] * k, word_top + p[1] * k);
@@ -704,10 +704,6 @@ impl App {
         let (drawn, tip) = strokes.drawn(f.write);
         for stroke in &drawn {
             let pts: Vec<Pos2> = stroke.iter().map(|p| to_screen(*p)).collect();
-            painter.add(egui::Shape::line(
-                pts.iter().map(|p| *p + Vec2::new(0.0, 2.5)).collect(),
-                Stroke::new(pen * 2.4, Color32::from_black_alpha(alpha(0.16))),
-            ));
             painter.add(egui::Shape::line(pts.clone(), Stroke::new(pen, Color32::from_white_alpha(alpha(1.0)))));
             for end in [pts.first(), pts.last()].into_iter().flatten() {
                 painter.circle_filled(*end, pen / 2.0, Color32::from_white_alpha(alpha(1.0)));
@@ -769,7 +765,7 @@ impl App {
             let slot = child.painter().add(egui::Shape::Noop);
             let run = pill(&mut child, "Commencer", accent, true, true);
             let phase = if animated && state_is_live(&self.intro) { (now / 1.8).fract() as f32 } else { 0.3 };
-            child.painter().set(slot, pulse_glow(run.rect, accent, phase, 0.5 * f.button));
+            child.painter().set(slot, pulse_glow(run.rect, accent, phase, 0.22 * f.button));
             if run.clicked() {
                 start_app = true;
             }
