@@ -61,13 +61,19 @@ Version testée : 0.1.0 · Mac : ____________ · macOS : ____________ · Date : 
 ## 6. Barre des menus, notifications, démarrage
 | | Contrôle | État |
 |---|---|---|
-| [ ] | L'icône « Dossiers suivis » apparaît dans la barre des menus (lisible en mode clair **et** sombre) | À faire |
-| [ ] | Menu : Ouvrir, Organiser maintenant, Surveillance active (case), Quitter | À faire |
-| [ ] | Bouton rouge de la fenêtre : la fenêtre se réduit, l'appli et la surveillance continuent ; « Ouvrir » la ramène | À faire |
-| [ ] | « Quitter » arrête vraiment l'appli (plus de processus, plus d'icône) | À faire |
+| [ ] | L'icône « Dossiers suivis » apparaît dans la barre des menus (lisible en mode clair **et** sombre ; atténuée en veille) | À faire |
+| [ ] | Le menu : titre, état « Surveillance active », « N dossiers suivis · M règles actives », dernier rangement, icônes cohérentes et teintées selon le mode | À faire |
+| [ ] | Entrées : Ouvrir (⌘O), Organiser maintenant (⌘R), Aperçu (⌘P), Mettre en veille / Reprendre, Dossiers suivis ▸ (clic = afficher dans le Finder, « Gérer les dossiers… »), Règles, Historique, Réglages… (⌘,) | À faire |
+| [ ] | Les compteurs se mettent à jour quand on ajoute un dossier ou une règle, ou qu'on en met un en pause | À faire |
+| [ ] | Bouton rouge : la fenêtre **se ferme** (pas dans le Dock), l'icône du Dock disparaît, l'icône de la barre reste et la surveillance continue | À faire |
+| [x] | Fenêtre fermée : processus vivant, fichier déposé rangé, historique enregistré ; « Ouvrir » ramène l'appli au premier plan (politique d'activation vérifiée sur le `.app`) | Auto (2026-11-12) |
+| [ ] | « Ouvrir » (menu de l'icône) ramène la fenêtre et l'icône du Dock | À faire |
+| [ ] | « Quitter » du menu de l'icône, et « Quitter OrganizeMyFiles » / ⌘Q du menu de l'appli : le processus se termine | À faire |
+| [x] | « Quitter » termine le processus proprement et l'état est sauvegardé | Auto (2026-11-12) |
+| [ ] | Réglage « Afficher dans la barre des menus » décoché : plus d'icône, et le bouton rouge quitte l'appli | À faire |
 | [ ] | Une notification apparaît après un rangement (macOS demande l'autorisation la première fois) | À faire |
 | [ ] | Décocher « Prévenir après chaque organisation » : plus de notification | À faire |
-| [ ] | « Lancement au démarrage » coché : l'appli démarre à la prochaine ouverture de session, fenêtre réduite | À faire |
+| [ ] | « Lancement au démarrage » coché : l'appli démarre à la prochaine ouverture de session, fenêtre fermée (icône de la barre des menus seulement) | À faire |
 | [ ] | « Lancement au démarrage » décoché : le fichier `~/Library/LaunchAgents/com.a2com.organizemyfiles.plist` disparaît | À faire |
 
 ## 7. Permissions macOS

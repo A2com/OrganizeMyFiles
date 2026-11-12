@@ -13,6 +13,7 @@ mod history_view;
 mod login;
 mod mechanics;
 mod menubar;
+mod menubar_info;
 mod store;
 mod system;
 mod tags;
