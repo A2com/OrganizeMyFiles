@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>OrganizeFiles</string>
+    <string>OrganizeMyFiles</string>
     <key>CFBundleDisplayName</key>
-    <string>OrganizeFiles</string>
+    <string>OrganizeMyFiles</string>
     <key>CFBundleIdentifier</key>
     <string>com.a2com.organizemyfiles</string>
     <key>CFBundleExecutable</key>
-    <string>file-organizer</string>
+    <string>OrganizeMyFiles</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
@@ -25,10 +25,10 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSDesktopFolderUsageDescription</key>
-    <string>OrganizeFiles range les fichiers de votre Bureau selon vos règles.</string>
+    <string>OrganizeMyFiles range les fichiers de votre Bureau selon vos règles.</string>
     <key>NSDocumentsFolderUsageDescription</key>
-    <string>OrganizeFiles range les fichiers de vos Documents selon vos règles.</string>
+    <string>OrganizeMyFiles range les fichiers de vos Documents selon vos règles.</string>
     <key>NSDownloadsFolderUsageDescription</key>
-    <string>OrganizeFiles range les fichiers de vos Téléchargements selon vos règles.</string>
+    <string>OrganizeMyFiles range les fichiers de vos Téléchargements selon vos règles.</string>
 </dict>
 </plist>

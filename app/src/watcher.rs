@@ -329,7 +329,7 @@ mod tests {
 
     fn test_dir(tag: &str) -> PathBuf {
         let nanos = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
-        let dir = std::env::temp_dir().join(format!("organizefiles-watch-{tag}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("organizemyfiles-watch-{tag}-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.canonicalize().unwrap()
     }

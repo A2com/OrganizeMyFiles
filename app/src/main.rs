@@ -45,7 +45,7 @@ fn main() -> eframe::Result {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 780.0])
             .with_min_inner_size([980.0, 640.0])
-            .with_title("OrganizeFiles")
+            .with_title("OrganizeMyFiles")
             .with_icon(ui::app_icon())
             // macOS : barre de titre fondue dans le contenu, feux natifs conservés.
             .with_fullsize_content_view(cfg!(target_os = "macos"))
@@ -55,7 +55,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "File Organizer",
+        "OrganizeMyFiles",
         options,
         Box::new(move |cc| Ok(Box::new(ui::App::new(cc, ui::Launch { screenshot, tab, empty, bg_time, background })))),
     )
