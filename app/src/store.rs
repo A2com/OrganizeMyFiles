@@ -145,7 +145,7 @@ mod tests {
             folders: vec![Folder { id: 1, path: PathBuf::from("/tmp/Téléchargements"), enabled: true, priority: 0 }],
             rules: vec![Rule {
                 id: 2,
-                folder_id: 1,
+                folder_ids: vec![1],
                 name: "Tri des images".into(),
                 enabled: true,
                 match_all: false,

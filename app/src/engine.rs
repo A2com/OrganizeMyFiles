@@ -694,10 +694,26 @@ impl Action {
     }
 }
 
+/// Relit un identifiant seul (ancien format) ou une liste d'identifiants.
+fn one_or_many_ids<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<u64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(u64),
+        Many(Vec<u64>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(id) => vec![id],
+        OneOrMany::Many(ids) => ids,
+    })
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rule {
     pub id: u64,
-    pub folder_id: u64,
+    /// Dossiers suivis auxquels la règle s'applique (les anciennes sauvegardes n'en avaient qu'un : `folder_id`).
+    #[serde(alias = "folder_id", deserialize_with = "one_or_many_ids")]
+    pub folder_ids: Vec<u64>,
     pub name: String,
     pub enabled: bool,
     pub match_all: bool, // condition_match 'all' | 'any'
@@ -878,7 +894,7 @@ impl Runner {
         allowed.sort_by_key(|f| (f.priority, f.id));
 
         for folder in &allowed {
-            let mut rule_list: Vec<&Rule> = rules.iter().filter(|r| r.folder_id == folder.id && r.enabled).collect();
+            let mut rule_list: Vec<&Rule> = rules.iter().filter(|r| r.folder_ids.contains(&folder.id) && r.enabled).collect();
             rule_list.sort_by_key(|r| (r.priority, r.id));
 
             // Scan at the deepest recursion any rule asks for; each rule then
@@ -1628,7 +1644,7 @@ mod tests {
     fn system_action_entry(kind: ActionKind, key: &str, value: &str, fake: &std::rc::Rc<crate::system::fake::FakeCommands>) -> HistoryEntry {
         let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(fake.clone()), only_paths: None };
         let rule = Rule {
-            id: 1, folder_id: 1, name: "r".into(), enabled: true, match_all: true,
+            id: 1, folder_ids: vec![1], name: "r".into(), enabled: true, match_all: true,
             recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
         };
         let mut action = Action::new(kind);
@@ -1673,7 +1689,7 @@ mod tests {
         let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
         let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: true, commands: Box::new(fake.clone()), only_paths: None };
         let rule = Rule {
-            id: 1, folder_id: 1, name: "r".into(), enabled: true, match_all: true,
+            id: 1, folder_ids: vec![1], name: "r".into(), enabled: true, match_all: true,
             recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
         };
         let mut action = Action::new(ActionKind::RunShortcut);
@@ -1698,5 +1714,42 @@ mod tests {
         assert_eq!(fr_message("serait copy vers /x"), "serait copié vers /x");
         assert_eq!(fr_message("serait addTag [a]"), "ajouterait les étiquettes [a]");
         assert_eq!(fr_message("Permission denied (os error 13)"), "Permission denied (os error 13)");
+    }
+
+    #[test]
+    fn old_rule_with_single_folder_id_is_still_readable() {
+        let old = r#"{"id":1,"folder_id":7,"name":"x","enabled":true,"match_all":true,"recursion_depth":0,"priority":0,"conditions":[],"actions":[]}"#;
+        let r: Rule = serde_json::from_str(old).unwrap();
+        assert_eq!(r.folder_ids, vec![7]);
+        let new = serde_json::to_string(&r).unwrap();
+        assert!(new.contains("\"folder_ids\":[7]"));
+        assert_eq!(serde_json::from_str::<Rule>(&new).unwrap().folder_ids, vec![7]);
+    }
+
+    #[test]
+    fn one_rule_applies_to_every_folder_it_targets() {
+        let (a, b) = (std::env::temp_dir().join(format!("organizemyfiles-multi-a-{}", std::process::id())),
+                      std::env::temp_dir().join(format!("organizemyfiles-multi-b-{}", std::process::id())));
+        for d in [&a, &b] {
+            fs::create_dir_all(d).unwrap();
+            fs::write(d.join("x.png"), b"x").unwrap();
+        }
+        let dest = std::env::temp_dir().join(format!("organizemyfiles-multi-out-{}", std::process::id()));
+        let mut act = Action::new(ActionKind::Copy);
+        act.params.insert("destination".into(), dest.to_string_lossy().into_owned());
+        act.params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_NUMBER.into());
+        let rule = Rule {
+            id: 1, folder_ids: vec![1, 2], name: "r".into(), enabled: true, match_all: true, recursion_depth: 0, priority: 0,
+            conditions: vec![Condition { field: Field::Extension, op: Op::Equals, value: ".png".into() }],
+            actions: vec![act],
+        };
+        let folders = vec![
+            Folder { id: 1, path: a.clone(), enabled: true, priority: 0 },
+            Folder { id: 2, path: b.clone(), enabled: true, priority: 1 },
+        ];
+        let mut runner = Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(crate::system::SystemCommands), only_paths: None };
+        let out = runner.run(&folders, &[rule], SystemTime::now());
+        assert_eq!(out.matched, 2, "un fichier par dossier ciblé");
+        assert_eq!(fs::read_dir(&dest).unwrap().count(), 2);
     }
 }
