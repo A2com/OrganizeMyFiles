@@ -16,6 +16,7 @@ mod login;
 mod mechanics;
 mod menubar;
 mod menubar_info;
+mod sound;
 mod store;
 mod system;
 mod tags;

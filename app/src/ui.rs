@@ -13,6 +13,7 @@ use crate::intro::{self, IntroFrame};
 use crate::mechanics::*;
 use crate::menubar::{self, MenuBar, MenuCommand, MenuScreen};
 use crate::menubar_info::{self, MenuFolder, MenuInfo};
+use crate::sound::{Sound, Sounds};
 use crate::store::{self, Loaded, Settings, State};
 use crate::system;
 use crate::tags;
@@ -253,6 +254,12 @@ pub struct App {
     /// Écran d'introduction en cours (premier lancement, ou « Revoir l'introduction »).
     intro: Option<IntroState>,
     intro_seen: bool,
+    /// Réglage « Jouer les sons ».
+    sounds_on: bool,
+    /// Lecteur de sons ; `None` en capture d'écran et dans les tests.
+    sounds: Option<Sounds>,
+    /// Le son d'ouverture de l'Aperçu a déjà été traité pour ce lancement.
+    launch_sound_done: bool,
     intro_icon: Option<egui::TextureHandle>,
     /// Dossiers suivis que macOS ne laisse pas lire (rafraîchi régulièrement).
     denied_folders: Vec<PathBuf>,
@@ -314,6 +321,9 @@ impl App {
         if show_intro {
             app.intro = Some(IntroState::new(intro_time.map(|t| t as f32)));
         }
+        if app.screenshot.is_none() {
+            app.sounds = Some(Sounds::new());
+        }
         if app.screenshot.is_some() && std::env::var_os("ORGANIZEMYFILES_SHOW_WELCOME").is_none() {
             app.welcome_seen = true;
         }
@@ -351,6 +361,9 @@ impl App {
             welcome_seen: false,
             intro: None,
             intro_seen: true,
+            sounds_on: true,
+            sounds: None,
+            launch_sound_done: false,
             intro_icon: None,
             denied_folders: Vec::new(),
             next_access_check: 0.0,
@@ -465,6 +478,7 @@ impl App {
                 launch_at_login: self.launch_at_login,
                 welcome_seen: self.welcome_seen,
                 intro_seen: self.intro_seen,
+                sounds: self.sounds_on,
             },
             next_id: self.next_id,
             next_batch: self.next_batch,
@@ -488,6 +502,7 @@ impl App {
         self.launch_at_login = state.settings.launch_at_login;
         self.welcome_seen = state.settings.welcome_seen;
         self.intro_seen = state.settings.intro_seen;
+        self.sounds_on = state.settings.sounds;
         if !self.intro_seen && !self.start_hidden {
             self.intro = Some(IntroState::new(None));
         }
@@ -625,8 +640,11 @@ impl App {
         let Some(state) = self.intro.as_mut() else { return };
 
         // Temps de l'animation : figé (captures), final (mouvement réduit ou passée) ou horloge.
+        let first_frame = state.started.is_none();
         let started = *state.started.get_or_insert(now);
         let reduced = !animated && state.frozen.is_none();
+        // Le son d'introduction part avec l'animation (pas pour une capture figée, ni en mouvement réduit).
+        let play_intro = first_frame && state.frozen.is_none() && !reduced;
         let t = match state.frozen {
             Some(t) => t,
             None if state.skipped || reduced => intro::END_TIME,
@@ -709,10 +727,12 @@ impl App {
         let anywhere = ui.interact(screen, ui.id().with("intro-skip-anywhere"), egui::Sense::click());
         let key = ctx.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::Escape));
         let mut start_app = false;
+        let mut fade_intro_sound = false;
         if !finished && (anywhere.clicked() || key) {
             if let Some(state) = self.intro.as_mut() {
                 state.skipped = true;
             }
+            fade_intro_sound = true;
         } else if finished && key {
             start_app = true;
         }
@@ -732,6 +752,7 @@ impl App {
                 if let Some(state) = self.intro.as_mut() {
                     state.skipped = true;
                 }
+                fade_intro_sound = true;
             }
         }
 
@@ -749,10 +770,58 @@ impl App {
                 start_app = true;
             }
         }
+        let mut play_dashboard = false;
         if start_app && state_is_live(&self.intro) {
             if let Some(state) = self.intro.as_mut() {
-                state.leaving.get_or_insert(now);
+                if state.leaving.is_none() {
+                    state.leaving = Some(now);
+                    // Entrée dans l'appli : le son de l'Aperçu part avec le fondu.
+                    play_dashboard = true;
+                    fade_intro_sound = true;
+                }
             }
+        }
+        if play_intro {
+            self.launch_sound_done = true;
+            self.play_sound(Sound::Intro);
+        }
+        if fade_intro_sound {
+            if let Some(sounds) = &mut self.sounds {
+                sounds.fade_out_intro();
+            }
+        }
+        if play_dashboard {
+            self.play_sound(Sound::Dashboard);
+        }
+    }
+
+    /// Joue un son si le réglage « Jouer les sons » est activé (jamais en test ni en capture : pas de lecteur).
+    fn play_sound(&mut self, sound: Sound) {
+        if !self.sounds_on {
+            return;
+        }
+        if let Some(sounds) = &mut self.sounds {
+            sounds.play(sound);
+        }
+    }
+
+    /// Son d'ouverture de l'Aperçu au lancement de l'appli, et avancement du fondu du son d'introduction.
+    fn sound_tick(&mut self, ctx: &egui::Context) {
+        if let Some(sounds) = &mut self.sounds {
+            sounds.tick();
+            if sounds.is_fading() {
+                ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            }
+        }
+        if self.launch_sound_done || self.frame < 3 {
+            return;
+        }
+        // Une seule fois par lancement : jamais pendant l'introduction (elle a le sien), ni fenêtre cachée.
+        if self.intro.is_some() || self.start_hidden || self.window_hidden {
+            self.launch_sound_done = true;
+        } else if self.tab == Tab::Dashboard {
+            self.launch_sound_done = true;
+            self.play_sound(Sound::Dashboard);
         }
     }
 
@@ -1971,6 +2040,7 @@ impl eframe::App for App {
         }
         self.poll_watcher();
         self.handle_menubar(ctx);
+        self.sound_tick(ctx);
         // Démarrage à l'ouverture de session : fenêtre fermée d'emblée, l'appli vit dans la barre des menus.
         if self.start_hidden && self.frame >= 2 {
             if self.menubar.is_some() {
@@ -3648,7 +3718,7 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 314.0), |ui| {
+        card(ui, Vec2::new(756.0, 352.0), |ui| {
             let before = self.launch_at_login;
             check_box(ui, &mut self.launch_at_login, "Lancement au démarrage", accent);
             if self.launch_at_login != before {
@@ -3663,6 +3733,8 @@ impl App {
             check_box(ui, &mut self.notify, "Prévenir après chaque organisation", accent);
             ui.add_space(8.0);
             check_box(ui, &mut self.animate_bg, "Animer le fond", accent);
+            ui.add_space(8.0);
+            check_box(ui, &mut self.sounds_on, "Jouer les sons", accent);
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Garder l'historique").size(14.5).color(text_primary()));
