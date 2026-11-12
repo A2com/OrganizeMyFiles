@@ -1,6 +1,7 @@
 //! Entry point: eframe/egui desktop app.
 //! `--tab rules` ouvre l'écran voulu (dashboard, folders, rules, history, settings).
 //! `--arriere-plan` : démarre fenêtre réduite (lancement à l'ouverture de session).
+//! `--intro` : montre l'écran d'introduction ; `--intro-time <s>` le fige à cet instant (captures).
 //! `--bg-time <s>` : décale l'horloge du fond animé (captures à différents instants).
 //! `--empty` : avec --screenshot, capture l'appli sans données de démonstration.
 //! `--screenshot <file.png>` draws ~120 frames, saves a PNG of the window and
@@ -10,6 +11,7 @@ mod alerts;
 mod engine;
 mod extract;
 mod history_view;
+mod intro;
 mod login;
 mod mechanics;
 mod menubar;
@@ -29,10 +31,15 @@ fn main() -> eframe::Result {
     let mut empty = false;
     let background = args.iter().any(|a| a == "--arriere-plan");
     let mut bg_time = 0.0f64;
+    let show_intro = args.iter().any(|a| a == "--intro");
+    let mut intro_time: Option<f64> = None;
     let mut i = 1;
     while i < args.len() {
         if args[i] == "--screenshot" {
             screenshot = args.get(i + 1).cloned();
+            i += 2;
+        } else if args[i] == "--intro-time" {
+            intro_time = args.get(i + 1).and_then(|v| v.parse().ok());
             i += 2;
         } else if args[i] == "--bg-time" {
             bg_time = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(0.0);
@@ -64,6 +71,8 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "OrganizeMyFiles",
         options,
-        Box::new(move |cc| Ok(Box::new(ui::App::new(cc, ui::Launch { screenshot, tab, empty, bg_time, background })))),
+        Box::new(move |cc| {
+            Ok(Box::new(ui::App::new(cc, ui::Launch { screenshot, tab, empty, bg_time, background, show_intro, intro_time })))
+        }),
     )
 }

@@ -9,6 +9,7 @@ use eframe::egui::{self, Align, Color32, Layout, Pos2, Rect, RichText, Rounding,
 use crate::alerts;
 use crate::engine::*;
 use crate::history_view::{self, ago};
+use crate::intro::{self, IntroFrame};
 use crate::mechanics::*;
 use crate::menubar::{self, MenuBar, MenuCommand, MenuScreen};
 use crate::menubar_info::{self, MenuFolder, MenuInfo};
@@ -204,7 +205,31 @@ pub struct Launch {
     pub empty: bool,
     /// Démarrage à l'ouverture de session : fenêtre réduite dans le Dock.
     pub background: bool,
+    /// Montre l'écran d'introduction (option `--intro`).
+    pub show_intro: bool,
+    /// Fige l'introduction à cet instant, en secondes (captures d'écran).
+    pub intro_time: Option<f64>,
 }
+
+/// Écran d'introduction : avancement de l'animation.
+struct IntroState {
+    /// Instant (horloge egui) du premier affichage.
+    started: Option<f64>,
+    /// Passée : on saute à l'état final.
+    skipped: bool,
+    /// Instant du clic sur « Commencer » (début du fondu de sortie).
+    leaving: Option<f64>,
+    /// Instant figé (captures d'écran) : pas d'avancement automatique, pas de sortie.
+    frozen: Option<f32>,
+}
+
+impl IntroState {
+    fn new(frozen: Option<f32>) -> Self {
+        IntroState { started: None, skipped: false, leaving: None, frozen }
+    }
+}
+
+const INTRO_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/intro-600.png");
 
 pub struct App {
     tab: Tab,
@@ -225,6 +250,10 @@ pub struct App {
     app_enabled: bool,
     launch_at_login: bool,
     welcome_seen: bool,
+    /// Écran d'introduction en cours (premier lancement, ou « Revoir l'introduction »).
+    intro: Option<IntroState>,
+    intro_seen: bool,
+    intro_icon: Option<egui::TextureHandle>,
     /// Dossiers suivis que macOS ne laisse pas lire (rafraîchi régulièrement).
     denied_folders: Vec<PathBuf>,
     next_access_check: f64,
@@ -267,6 +296,7 @@ impl App {
         apply_theme(&cc.egui_ctx);
         let empty = launch.empty;
         let tab = launch.tab.clone();
+        let (show_intro, intro_time) = (launch.show_intro, launch.intro_time);
         let mut app = Self::blank(launch);
         if app.screenshot.is_some() {
             // Capture d'écran : jamais d'écriture. Avec ORGANIZEMYFILES_STATE_DIR, on charge ce dossier (contrôle de la restauration).
@@ -280,6 +310,9 @@ impl App {
             app.load_saved_state();
             let ctx = cc.egui_ctx.clone();
             app.watcher = Some(Watcher::start(watcher::SETTLE, move || ctx.request_repaint()));
+        }
+        if show_intro {
+            app.intro = Some(IntroState::new(intro_time.map(|t| t as f32)));
         }
         if app.screenshot.is_some() && std::env::var_os("ORGANIZEMYFILES_SHOW_WELCOME").is_none() {
             app.welcome_seen = true;
@@ -296,7 +329,7 @@ impl App {
 
     /// État initial sans aucun contexte graphique (utilisable dans les tests).
     fn blank(launch: Launch) -> Self {
-        let Launch { screenshot, tab: _, empty: _, bg_time, background } = launch;
+        let Launch { screenshot, tab: _, empty: _, bg_time, background, show_intro: _, intro_time: _ } = launch;
         App {
             tab: Tab::Dashboard,
             folders: Vec::new(),
@@ -316,6 +349,9 @@ impl App {
             app_enabled: true,
             launch_at_login: false,
             welcome_seen: false,
+            intro: None,
+            intro_seen: true,
+            intro_icon: None,
             denied_folders: Vec::new(),
             next_access_check: 0.0,
             watcher: None,
@@ -428,6 +464,7 @@ impl App {
                 app_enabled: self.app_enabled,
                 launch_at_login: self.launch_at_login,
                 welcome_seen: self.welcome_seen,
+                intro_seen: self.intro_seen,
             },
             next_id: self.next_id,
             next_batch: self.next_batch,
@@ -450,6 +487,10 @@ impl App {
         self.app_enabled = state.settings.app_enabled;
         self.launch_at_login = state.settings.launch_at_login;
         self.welcome_seen = state.settings.welcome_seen;
+        self.intro_seen = state.settings.intro_seen;
+        if !self.intro_seen && !self.start_hidden {
+            self.intro = Some(IntroState::new(None));
+        }
         self.next_id = state.next_id.max(max_id + 1);
         self.next_batch = state.next_batch.max(1);
         self.monthly_used = state.monthly_used;
@@ -463,7 +504,13 @@ impl App {
     fn load_saved_state(&mut self) {
         let path = store::state_path();
         match store::load(&path) {
-            Loaded::Fresh => {}
+            Loaded::Fresh => {
+                // Tout premier lancement : on commence par l'écran d'introduction (sauf démarrage en arrière-plan).
+                if !self.start_hidden {
+                    self.intro_seen = false;
+                    self.intro = Some(IntroState::new(None));
+                }
+            }
             Loaded::Restored(state) => self.restore(*state),
             Loaded::Unreadable { backup, reason } => {
                 self.toast_error(format!("Données illisibles ({reason}) : copie gardée dans {}", backup.display()));
@@ -554,6 +601,162 @@ impl App {
             (d, 0) => self.toast(format!("{d} action(s) annulée(s)")),
             (0, f) => self.toast_error(format!("Annulation impossible pour {f} action(s)")),
             (d, f) => self.toast_error(format!("{d} action(s) annulée(s), {f} impossible(s)")),
+        }
+    }
+
+    fn intro_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
+        self.intro_icon
+            .get_or_insert_with(|| {
+                let img = image::load_from_memory(INTRO_ICON_PNG).expect("icône d'introduction valide").to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                ctx.load_texture("intro-icon", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
+            })
+            .clone()
+    }
+
+    /// Écran d'introduction : icône, « Bienvenue » écrit à la main, présentation et bouton « Commencer »,
+    /// sur le fond animé. Remplace toute l'interface tant qu'il est affiché.
+    fn intro_ui(&mut self, ui: &mut egui::Ui, screen: Rect) {
+        let ctx = ui.ctx().clone();
+        let now = ctx.input(|i| i.time);
+        let accent = self.accent();
+        let animated = self.animate_bg;
+        let texture = self.intro_texture(&ctx);
+        let Some(state) = self.intro.as_mut() else { return };
+
+        // Temps de l'animation : figé (captures), final (mouvement réduit ou passée) ou horloge.
+        let started = *state.started.get_or_insert(now);
+        let reduced = !animated && state.frozen.is_none();
+        let t = match state.frozen {
+            Some(t) => t,
+            None if state.skipped || reduced => intro::END_TIME,
+            None => (now - started) as f32,
+        };
+        let f: IntroFrame = intro::frame(t);
+        let finished = t >= intro::END_TIME;
+        let fade_out = state.leaving.map_or(1.0, |l| 1.0 - ((now - l) as f32 / intro::LEAVE_SECS).clamp(0.0, 1.0));
+        if state.leaving.is_some() && fade_out <= 0.0 {
+            self.intro = None;
+            self.intro_seen = true;
+            self.tab = Tab::Dashboard;
+            ctx.request_repaint();
+            return;
+        }
+        if state.frozen.is_none() && (!finished || state.leaving.is_some()) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
+
+        // Fond : on part du noir, puis le dégradé animé apparaît ; fondu final vers l'appli.
+        let painter = ui.painter().clone();
+        painter.rect_filled(
+            screen,
+            Rounding::ZERO,
+            Color32::from_black_alpha((235.0 * (1.0 - f.backdrop) + 235.0 * (1.0 - fade_out)).min(255.0) as u8),
+        );
+
+        // Disposition : bloc centré (icône, mot, présentation, bouton).
+        let icon_size = (screen.height() * 0.34).min(300.0);
+        let word_w = (icon_size * 1.85).min(screen.width() * 0.7);
+        let strokes = intro::word();
+        let k = word_w / strokes.width;
+        let word_h = strokes.height * k;
+        let gap = 22.0;
+        let block_h = icon_size + gap + word_h + gap + 24.0 + gap + 52.0;
+        let top = (screen.center().y - block_h / 2.0).max(screen.top() + 16.0);
+        let cx = screen.center().x;
+        let alpha = |a: f32| ((a * fade_out).clamp(0.0, 1.0) * 255.0) as u8;
+
+        // Icône : halo doux, puis l'image qui apparaît avec un petit rebond.
+        let icon_center = Pos2::new(cx, top + icon_size / 2.0);
+        let breath = if animated { 1.0 + 0.05 * ((now as f32) * 1.6).sin() } else { 1.0 };
+        radial_glow(&painter, icon_center, icon_size * 0.95 * breath * f.icon_scale, accent, 170.0 * f.icon_alpha * fade_out);
+        let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size * f.icon_scale));
+        painter.image(
+            texture.id(),
+            icon_rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::from_white_alpha(alpha(f.icon_alpha)),
+        );
+
+        // « Bienvenue » : tracé du stylo, ombre douce, bouts arrondis, pointe lumineuse.
+        let word_left = cx - word_w / 2.0;
+        let word_top = top + icon_size + gap;
+        let to_screen = |p: intro::Point| Pos2::new(word_left + p[0] * k, word_top + p[1] * k);
+        let pen = (strokes.pen * k * 3.0).max(3.0);
+        let (drawn, tip) = strokes.drawn(f.write);
+        for stroke in &drawn {
+            let pts: Vec<Pos2> = stroke.iter().map(|p| to_screen(*p)).collect();
+            painter.add(egui::Shape::line(
+                pts.iter().map(|p| *p + Vec2::new(0.0, 2.5)).collect(),
+                Stroke::new(pen * 2.4, Color32::from_black_alpha(alpha(0.16))),
+            ));
+            painter.add(egui::Shape::line(pts.clone(), Stroke::new(pen, Color32::from_white_alpha(alpha(1.0)))));
+            for end in [pts.first(), pts.last()].into_iter().flatten() {
+                painter.circle_filled(*end, pen / 2.0, Color32::from_white_alpha(alpha(1.0)));
+            }
+        }
+        if let (Some(tip), true) = (tip, f.write < 1.0 && f.write > 0.0) {
+            let p = to_screen(tip);
+            radial_glow(&painter, p, pen * 4.5, Color32::WHITE, 150.0 * fade_out);
+        }
+
+        // Présentation.
+        painter.text(
+            Pos2::new(cx, word_top + word_h + gap),
+            egui::Align2::CENTER_TOP,
+            "OrganizeMyFiles range vos fichiers pour vous.",
+            egui::FontId::proportional(18.0),
+            with_alpha(text_primary(), alpha(f.subtitle * 0.92)),
+        );
+
+        // Clic n'importe où ou Entrée / Espace / Échap : on saute à la fin (sans quitter l'écran).
+        let anywhere = ui.interact(screen, ui.id().with("intro-skip-anywhere"), egui::Sense::click());
+        let key = ctx.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::Escape));
+        let mut start_app = false;
+        if !finished && (anywhere.clicked() || key) {
+            if let Some(state) = self.intro.as_mut() {
+                state.skipped = true;
+            }
+        } else if finished && key {
+            start_app = true;
+        }
+
+        // « Passer » (discret) tant que l'animation n'est pas terminée.
+        if !finished {
+            let skip_rect = Rect::from_min_size(Pos2::new(screen.right() - 110.0, screen.bottom() - 44.0), Vec2::new(92.0, 28.0));
+            let resp = ui.interact(skip_rect, ui.id().with("intro-skip"), egui::Sense::click());
+            painter.text(
+                skip_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Passer  ›",
+                egui::FontId::proportional(14.0),
+                with_alpha(text_primary(), if resp.hovered() { 230 } else { 140 }),
+            );
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                if let Some(state) = self.intro.as_mut() {
+                    state.skipped = true;
+                }
+            }
+        }
+
+        // Bouton « Commencer » : apparaît en dernier, avec le halo qui pulse.
+        if f.button > 0.01 {
+            let btn_rect = Rect::from_center_size(Pos2::new(cx, word_top + word_h + gap + 24.0 + gap + 26.0), Vec2::new(210.0, 52.0));
+            let mut child = ui
+                .new_child(egui::UiBuilder::new().max_rect(btn_rect).layout(Layout::centered_and_justified(egui::Direction::LeftToRight)));
+            child.set_opacity((f.button * fade_out).clamp(0.0, 1.0));
+            let slot = child.painter().add(egui::Shape::Noop);
+            let run = pill(&mut child, "Commencer", accent, true, true);
+            let phase = if animated && state_is_live(&self.intro) { (now / 1.8).fract() as f32 } else { 0.3 };
+            child.painter().set(slot, pulse_glow(run.rect, accent, phase, 0.5 * f.button));
+            if run.clicked() {
+                start_app = true;
+            }
+        }
+        if start_app && state_is_live(&self.intro) {
+            if let Some(state) = self.intro.as_mut() {
+                state.leaving.get_or_insert(now);
+            }
         }
     }
 
@@ -1220,17 +1423,39 @@ fn toast_pill(ui: &mut egui::Ui, text: &str, kind: ToastKind, look: toast::Toast
 }
 
 /// Halo qui « respire » autour d'un bouton rond : plusieurs couches arrondies dont l'écart et l'opacité suivent `phase` (0..1).
-fn pulse_glow(rect: Rect, accent: Color32, phase: f32) -> egui::Shape {
+fn pulse_glow(rect: Rect, accent: Color32, phase: f32, strength: f32) -> egui::Shape {
     let breath = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
     let radius = rect.height() / 2.0;
     let layers = (0..8)
         .map(|i| {
             let grow = 2.0 + i as f32 * 2.6 + 7.0 * breath;
-            let alpha = (40.0 - i as f32 * 4.6) * (0.45 + 0.55 * breath);
+            let alpha = (40.0 - i as f32 * 4.6) * (0.45 + 0.55 * breath) * strength;
             egui::Shape::rect_filled(rect.expand(grow), Rounding::same(radius + grow), with_alpha(accent, alpha.max(0.0) as u8))
         })
         .collect();
     egui::Shape::Vec(layers)
+}
+
+/// Vrai si l'intro avance en direct (pas figée pour une capture).
+fn state_is_live(intro: &Option<IntroState>) -> bool {
+    intro.as_ref().is_some_and(|s| s.frozen.is_none())
+}
+
+/// Halo doux : disque dont l'opacité décroît du centre (`alpha` au centre) vers le bord (transparent).
+fn radial_glow(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32, alpha: f32) {
+    const SEGMENTS: usize = 64;
+    let mut mesh = egui::epaint::Mesh::default();
+    let inner = with_alpha(color, alpha.clamp(0.0, 255.0) as u8);
+    let outer = with_alpha(color, 0);
+    mesh.colored_vertex(center, inner);
+    for i in 0..=SEGMENTS {
+        let angle = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+        mesh.colored_vertex(center + Vec2::angled(angle) * radius, outer);
+    }
+    for i in 1..=SEGMENTS as u32 {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn lighten(c: Color32, d: u8) -> Color32 {
@@ -1776,6 +2001,10 @@ impl eframe::App for App {
         };
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
             backdrop(ui, screen, self.accent(), bg_time);
+            if self.intro.is_some() {
+                self.intro_ui(ui, screen);
+                return;
+            }
 
             egui::TopBottomPanel::top("topbar").exact_height(56.0).frame(egui::Frame::none().fill(PANEL_GLASS)).show_inside(ui, |ui| {
                 self.top_bar(ui);
@@ -2250,7 +2479,7 @@ impl App {
                 let animated = self.animate_bg && self.app_enabled;
                 let phase = if animated { (ctx.input(|i| i.time) / 1.8).fract() as f32 } else { 0.3 };
                 if self.app_enabled {
-                    ui.painter().set(glow_slot, pulse_glow(run.rect, accent, phase));
+                    ui.painter().set(glow_slot, pulse_glow(run.rect, accent, phase, 1.0));
                 }
                 if animated {
                     ctx.request_repaint_after(std::time::Duration::from_millis(33));
@@ -3458,7 +3687,7 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 110.0), |ui| {
+        card(ui, Vec2::new(756.0, 150.0), |ui| {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             ui.label(RichText::new(format!("OrganizeMyFiles · version {}", env!("CARGO_PKG_VERSION"))).size(14.5).color(text_primary()));
@@ -3466,6 +3695,10 @@ impl App {
             ui.label(
                 RichText::new("Outil libre et open source. Tout reste sur ton Mac : aucun envoi de données.").size(13.5).color(text_dim()),
             );
+            ui.add_space(8.0);
+            if btn(ui, "Revoir l'introduction", Btn::Ghost, accent, None).clicked() {
+                self.intro = Some(IntroState::new(None));
+            }
         });
         let _ = accent;
     }
@@ -3534,7 +3767,8 @@ mod tests {
 
     #[test]
     fn app_state_survives_snapshot_and_restore() {
-        let launch = || Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false };
+        let launch =
+            || Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false, show_intro: false, intro_time: None };
         let mut a = App::blank(launch());
         a.seed_demo();
         a.accent = 3;
@@ -3553,13 +3787,29 @@ mod tests {
 
     #[test]
     fn restore_applies_history_retention() {
-        let mut a = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
+        let mut a = App::blank(Launch {
+            bg_time: 0.0,
+            screenshot: None,
+            tab: None,
+            empty: false,
+            background: false,
+            show_intro: false,
+            intro_time: None,
+        });
         a.seed_demo();
         let mut state = a.snapshot();
         state.settings.retention_days = 1;
         state.history[0].created = SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
         let before = state.history.len();
-        let mut b = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
+        let mut b = App::blank(Launch {
+            bg_time: 0.0,
+            screenshot: None,
+            tab: None,
+            empty: false,
+            background: false,
+            show_intro: false,
+            intro_time: None,
+        });
         b.restore(state);
         assert_eq!(b.history.len(), before - 1);
     }
@@ -3580,7 +3830,15 @@ mod tests {
 
     #[test]
     fn removing_a_shared_folder_keeps_the_rule_and_undo_restores_it() {
-        let mut app = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
+        let mut app = App::blank(Launch {
+            bg_time: 0.0,
+            screenshot: None,
+            tab: None,
+            empty: false,
+            background: false,
+            show_intro: false,
+            intro_time: None,
+        });
         app.folders = vec![
             Folder { id: 1, path: "/a".into(), enabled: true, priority: 0 },
             Folder { id: 2, path: "/b".into(), enabled: true, priority: 1 },
@@ -3626,7 +3884,15 @@ mod tests {
         // Le fichier a été déplacé dans sub/ puis renommé en b.txt.
         std::fs::write(sub.join("b.txt"), b"x").unwrap();
         let (orig, moved, renamed) = (dir.join("a.txt"), sub.join("a.txt"), sub.join("b.txt"));
-        let mut app = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
+        let mut app = App::blank(Launch {
+            bg_time: 0.0,
+            screenshot: None,
+            tab: None,
+            empty: false,
+            background: false,
+            show_intro: false,
+            intro_time: None,
+        });
         app.history = vec![
             history_entry(1, ActionKind::Move, &moved, &orig, &orig, &moved),
             history_entry(1, ActionKind::Rename, &renamed, &moved, &moved, &renamed),

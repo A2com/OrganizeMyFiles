@@ -19,6 +19,9 @@ Version testée : 0.1.0 · Mac : ____________ · macOS : ____________ · Date : 
 | [ ] | Le nom affiché dans le menu « À propos » est **OrganizeMyFiles** (pas « file-organizer ») | À faire |
 | [x] | `OrganizeMyFiles.app` se construit, signature ad hoc valide, `omf-extract` présent dans le bundle | Auto (2026-11-12) |
 | [ ] | L'icône de l'appli (Dock, Finder) est bien celle du dossier bleu/violet | À faire |
+| [ ] | **Premier lancement** (aucun fichier `~/Library/Application Support/OrganizeMyFiles/state.json`) : écran d'introduction animé : icône (300 px max), « Bienvenue » qui s'écrit à la main sur le fond animé, présentation, bouton « Commencer » ; « Passer » ou un clic saute l'animation | À faire |
+| [x] | Introduction : chronologie, tracé progressif du mot, captures à 0,5 / 1,5 / 2,5 / 3,5 / 5,5 s relues ; ancien état = introduction non remontrée | Auto (2026-11-12) |
+| [ ] | Réglages › À propos › « Revoir l'introduction » rejoue l'animation ; option de lancement `--intro` | À faire |
 | [ ] | La carte de bienvenue s'affiche une seule fois ; « Compris » la ferme définitivement | À faire |
 
 ## 2. Dossiers suivis

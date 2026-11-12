@@ -7,7 +7,15 @@ use std::time::SystemTime;
 use super::*;
 
 fn blank_app() -> App {
-    let mut app = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
+    let mut app = App::blank(Launch {
+        bg_time: 0.0,
+        screenshot: None,
+        tab: None,
+        empty: false,
+        background: false,
+        show_intro: false,
+        intro_time: None,
+    });
     app.notify = false; // pas de vraie notification pendant les tests
     app
 }
@@ -96,4 +104,35 @@ fn removing_a_folder_can_be_undone_with_its_rules() {
     app.restore_folder();
     assert_eq!(app.folders.len(), 1);
     assert_eq!(app.rules.len(), 1);
+}
+
+#[test]
+fn intro_shows_until_it_has_been_seen_and_never_when_launched_in_background() {
+    let mut seen = blank_app();
+    let mut state = seen.snapshot();
+    state.settings.intro_seen = true;
+    seen.restore(state);
+    assert!(seen.intro.is_none(), "déjà vue : pas d'introduction");
+
+    let mut first = blank_app();
+    let mut state = first.snapshot();
+    state.settings.intro_seen = false;
+    first.restore(state);
+    assert!(first.intro.is_some(), "pas encore vue : on la montre");
+    assert!(!first.intro_seen);
+
+    // Démarrage à l'ouverture de session : jamais d'introduction.
+    let mut background = App::blank(Launch {
+        bg_time: 0.0,
+        screenshot: None,
+        tab: None,
+        empty: false,
+        background: true,
+        show_intro: false,
+        intro_time: None,
+    });
+    let mut state = background.snapshot();
+    state.settings.intro_seen = false;
+    background.restore(state);
+    assert!(background.intro.is_none());
 }
