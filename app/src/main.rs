@@ -10,6 +10,7 @@
 mod alerts;
 mod engine;
 mod extract;
+mod glow;
 mod history_view;
 mod intro;
 mod login;
