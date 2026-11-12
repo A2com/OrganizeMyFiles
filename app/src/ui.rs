@@ -772,7 +772,7 @@ impl App {
                     run.rect,
                     run.rect.height() / 2.0,
                     accent,
-                    glow_breath(phase, 0.015, 0.045) * f.button,
+                    glow_breath(phase, 0.02, 0.02) * f.button,
                     2.0 * (phase * std::f32::consts::TAU).sin().abs(),
                 ),
             );
@@ -1456,7 +1456,7 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
             with_alpha(accent, if hover { 56 } else { 34 })
         };
         if primary {
-            ui.painter().add(outer_glow(ui.ctx(), rect, h / 2.0, accent, 0.05, 0.0));
+            ui.painter().add(outer_glow(ui.ctx(), rect, h / 2.0, accent, 0.03, 0.0));
         }
         ui.painter().rect_filled(rect, Rounding::same(h / 2.0), fill);
         let tc = Color32::WHITE;
@@ -2571,7 +2571,7 @@ impl App {
                             run.rect,
                             run.rect.height() / 2.0,
                             accent,
-                            glow_breath(phase, 0.02, 0.065),
+                            glow_breath(phase, 0.02, 0.02),
                             2.0 * (phase * std::f32::consts::TAU).sin().abs(),
                         ),
                     );
