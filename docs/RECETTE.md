@@ -64,6 +64,8 @@ Version testée : 0.1.0 · Mac : ____________ · macOS : ____________ · Date : 
 | [ ] | L'icône « Dossiers suivis » apparaît dans la barre des menus (lisible en mode clair **et** sombre ; atténuée en veille) | À faire |
 | [ ] | Le menu : titre, état « Surveillance active », « N dossiers suivis · M règles actives », dernier rangement, icônes cohérentes et teintées selon le mode | À faire |
 | [ ] | Entrées : Ouvrir (⌘O), Organiser maintenant (⌘R), Aperçu (⌘P), Mettre en veille / Reprendre, Dossiers suivis ▸ (clic = afficher dans le Finder, « Gérer les dossiers… »), Règles, Historique, Réglages… (⌘,) | À faire |
+| [ ] | Ligne « Surveillance » avec un vrai interrupteur : un clic active/désactive l'appli, et le bouton « Actif » de la fenêtre suit (et inversement) | À faire |
+| [x] | Interrupteur du menu : `performClick` → l'appli bascule, l'état de l'interrupteur suit, l'état est sauvegardé | Auto (2026-11-12) |
 | [ ] | Les compteurs se mettent à jour quand on ajoute un dossier ou une règle, ou qu'on en met un en pause | À faire |
 | [ ] | Bouton rouge : la fenêtre **se ferme** (pas dans le Dock), l'icône du Dock disparaît, l'icône de la barre reste et la surveillance continue | À faire |
 | [x] | Fenêtre fermée : processus vivant, fichier déposé rangé, historique enregistré ; « Ouvrir » ramène l'appli au premier plan (politique d'activation vérifiée sur le `.app`) | Auto (2026-11-12) |
@@ -95,9 +97,12 @@ Version testée : 0.1.0 · Mac : ____________ · macOS : ____________ · Date : 
 | [ ] | Les heures affichées correspondent à l'horloge du Mac (heure locale, y compris l'heure d'été) | À faire |
 | [x] | Conversion en heure locale (tests : Paris, Auckland, décalage de jour) | Auto (2026-11-12) |
 
-## 9. Réglages et persistance
+## 9. Réglages, Aperçu et persistance
 | | Contrôle | État |
 |---|---|---|
+| [ ] | Aperçu : le bouton « Organiser maintenant » a un halo qui pulse (pas d'animation si l'appli est en veille ou si « Animer le fond » est décoché) | À faire |
+| [ ] | Pastille d'état en bas : verte avec point qui pulse après un rangement réussi, rouge après une erreur ou un échec ; s'estompe seule ; un clic la ferme | À faire |
+| [x] | Pastille : durée de vie, pulsation, vert/rouge selon le lot (tests) ; captures verte et rouge | Auto (2026-11-12) |
 | [ ] | Changer la couleur d'accent ; « Animer le fond » coupe l'animation | À faire |
 | [ ] | Le curseur de rétention purge les entrées plus anciennes ; « Purger l'ancien historique » | À faire |
 | [ ] | Fermer (Quitter) puis relancer : dossiers, règles, historique et réglages sont retrouvés | À faire |

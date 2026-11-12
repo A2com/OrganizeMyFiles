@@ -17,6 +17,7 @@ mod menubar_info;
 mod store;
 mod system;
 mod tags;
+mod toast;
 mod ui;
 mod watcher;
 mod zipmini;
