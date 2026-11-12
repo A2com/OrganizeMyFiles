@@ -31,6 +31,9 @@ pub struct Settings {
     /// L'écran d'introduction a déjà été montré (absent des anciens fichiers : on le considère comme vu).
     #[serde(default = "default_true")]
     pub intro_seen: bool,
+    /// Jouer les sons de l'appli (absent des anciens fichiers : oui).
+    #[serde(default = "default_true")]
+    pub sounds: bool,
 }
 
 fn default_true() -> bool {
@@ -189,6 +192,7 @@ mod tests {
                 launch_at_login: true,
                 welcome_seen: true,
                 intro_seen: true,
+                sounds: true,
             },
             next_id: 9,
             next_batch: 8,
@@ -264,5 +268,6 @@ mod tests {
         assert!(!s.launch_at_login);
         assert!(!s.welcome_seen);
         assert!(s.intro_seen, "un ancien fichier ne remontre pas l'introduction");
+        assert!(s.sounds, "un ancien fichier garde les sons activés");
     }
 }

@@ -21,6 +21,9 @@ Version testée : 0.1.0 · Mac : ____________ · macOS : ____________ · Date : 
 | [ ] | L'icône de l'appli (Dock, Finder) est bien celle du dossier bleu/violet | À faire |
 | [ ] | **Premier lancement** (aucun fichier `~/Library/Application Support/OrganizeMyFiles/state.json`) : écran d'introduction animé : icône (300 px max), « Bienvenue » qui s'écrit à la main sur le fond animé, présentation, bouton « Commencer » ; « Passer » ou un clic saute l'animation | À faire |
 | [x] | Introduction : chronologie, tracé progressif du mot, captures à 0,5 / 1,5 / 2,5 / 3,5 / 5,5 s relues ; ancien état = introduction non remontrée | Auto (2026-11-12) |
+| [ ] | Son d'introduction (4,5 s) pendant l'animation, calé sur l'écriture de « Bienvenue » ; « Passer » ou « Commencer » l'arrête en fondu court | À faire |
+| [ ] | Son du dashboard (3 s) à l'arrivée sur l'Aperçu après « Commencer », puis à chaque lancement de l'appli ; pas au changement d'onglet, ni à la réouverture depuis la barre des menus, ni au démarrage de session | À faire |
+| [x] | Sons : démarrage de l'intro (premier lancement), son du dashboard (lancement normal), rien si « Jouer les sons » est décoché ou en démarrage de session ; lecteur NSSound et fondu (test) | Auto (2026-11-12) |
 | [ ] | Réglages › À propos › « Revoir l'introduction » rejoue l'animation ; option de lancement `--intro` | À faire |
 | [ ] | La carte de bienvenue s'affiche une seule fois ; « Compris » la ferme définitivement | À faire |
 
@@ -103,6 +106,7 @@ Version testée : 0.1.0 · Mac : ____________ · macOS : ____________ · Date : 
 ## 9. Réglages, Aperçu et persistance
 | | Contrôle | État |
 |---|---|---|
+| [ ] | Réglages : la case « Jouer les sons » coupe tous les sons (intro et dashboard) | À faire |
 | [ ] | Aperçu : le bouton « Organiser maintenant » a un halo qui pulse (pas d'animation si l'appli est en veille ou si « Animer le fond » est décoché) | À faire |
 | [ ] | Pastille d'état en bas : verte avec point qui pulse après un rangement réussi, rouge après une erreur ou un échec ; s'estompe seule ; un clic la ferme | À faire |
 | [x] | Pastille : durée de vie, pulsation, vert/rouge selon le lot (tests) ; captures verte et rouge | Auto (2026-11-12) |
