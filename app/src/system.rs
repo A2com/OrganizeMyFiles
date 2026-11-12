@@ -7,7 +7,19 @@ use std::time::{Duration, Instant};
 
 pub struct CommandOutput {
     pub success: bool,
+    pub stdout: String,
     pub stderr: String,
+}
+
+/// Taille maximale de sortie conservée (le reste est ignoré).
+const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+
+fn read_capped(pipe: Option<impl Read>) -> String {
+    let mut bytes = Vec::new();
+    if let Some(p) = pipe {
+        let _ = p.take(MAX_OUTPUT_BYTES as u64).read_to_end(&mut bytes);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 pub trait CommandRunner {
@@ -26,18 +38,13 @@ impl CommandRunner for SystemCommands {
         let mut child = Command::new(program)
             .args(args)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Impossible de lancer « {program} » : {e}"))?;
-        let mut pipe = child.stderr.take();
-        let reader = std::thread::spawn(move || {
-            let mut text = String::new();
-            if let Some(p) = pipe.as_mut() {
-                let _ = p.read_to_string(&mut text);
-            }
-            text
-        });
+        let (out_pipe, err_pipe) = (child.stdout.take(), child.stderr.take());
+        let out_reader = std::thread::spawn(move || read_capped(out_pipe));
+        let err_reader = std::thread::spawn(move || read_capped(err_pipe));
         let start = Instant::now();
         let status = loop {
             match child.try_wait() {
@@ -51,8 +58,9 @@ impl CommandRunner for SystemCommands {
                 Err(e) => return Err(e.to_string()),
             }
         };
-        let stderr = reader.join().unwrap_or_default().trim().to_string();
-        Ok(CommandOutput { success: status.success(), stderr })
+        let stdout = out_reader.join().unwrap_or_default();
+        let stderr = err_reader.join().unwrap_or_default().trim().to_string();
+        Ok(CommandOutput { success: status.success(), stdout, stderr })
     }
 }
 
@@ -95,12 +103,13 @@ pub mod fake {
     pub struct FakeCommands {
         pub calls: RefCell<Vec<(String, Vec<String>)>>,
         pub reply: Result<bool, String>,
+        pub stdout: String,
         pub stderr: String,
     }
 
     impl FakeCommands {
         pub fn ok() -> Self {
-            Self { calls: RefCell::new(vec![]), reply: Ok(true), stderr: String::new() }
+            Self { calls: RefCell::new(vec![]), reply: Ok(true), stdout: String::new(), stderr: String::new() }
         }
     }
 
@@ -108,7 +117,7 @@ pub mod fake {
         fn run(&self, program: &str, args: &[String], _t: Duration) -> Result<CommandOutput, String> {
             self.calls.borrow_mut().push((program.to_string(), args.to_vec()));
             match &self.reply {
-                Ok(success) => Ok(CommandOutput { success: *success, stderr: self.stderr.clone() }),
+                Ok(success) => Ok(CommandOutput { success: *success, stdout: self.stdout.clone(), stderr: self.stderr.clone() }),
                 Err(e) => Err(e.clone()),
             }
         }

@@ -24,6 +24,9 @@ else
   cp "app/target/release/$BIN" "$APP/Contents/MacOS/$BIN"
 fi
 
+# Programme de lecture des PDF et des images (PDFKit + Vision)
+swiftc -O tools/omf-extract.swift -o "$APP/Contents/MacOS/omf-extract"
+
 sed "s/@VERSION@/$VERSION/g" assets/Info.plist.in > "$APP/Contents/Info.plist"
 
 cp assets/icons/macos/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"

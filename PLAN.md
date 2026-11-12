@@ -3,7 +3,7 @@
 > **Statut au 2026-11-11** — Partie A (nettoyage) : **faite** (historique réécrit, dépôt, disque local et Mac Studio nettoyés).
 > Partie B : **à réaliser**, une branche par tâche, dans l'ordre du tableau.
 >
-> Avancement partie B : **B0 fait** · **B1 `feat/persistance` fait** (PR en relecture) · B2 fait · B3 fait · B4 fait · B6 fait · B8 fait (PR en relecture) · B5, B7, B9, B10 à faire.
+> Avancement partie B : **B0 fait** · **B1 `feat/persistance` fait** (PR en relecture) · B2 fait · B3 fait · B4 fait · B6 fait · B8 fait · B7 fait · B5 fait (PR en relecture) · B9, B10 à faire.
 
 ## Contexte
 L'appli (écrans Aperçu, Dossiers, Règles, Historique, Réglages ; moteur de règles) est complète côté **interface**.
