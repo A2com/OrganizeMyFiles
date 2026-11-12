@@ -15,5 +15,5 @@ python3 -m fontTools.subset "$SRC/ms-static.ttf" --unicodes="${UNI#,}" --output-
 for pair in Regular:400 SemiBold:600 Bold:700; do
   name="${pair%%:*}"; wght="${pair##*:}"
   python3 -m fontTools.varLib.instancer "$SRC/outfit/Outfit-var.ttf" wght="$wght" -o "$SRC/outfit/Outfit-$name-full.ttf"
-  python3 -m fontTools.subset "$SRC/outfit/Outfit-$name-full.ttf" --unicodes="U+0020-007E,U+00A0-00FF,U+2013-2026,U+20AC,U+2190-2193,U+2318" --layout-features='kern,tnum,calt,liga' --output-file="$OUT/Outfit-$name.ttf" --no-hinting
+  python3 -m fontTools.subset "$SRC/outfit/Outfit-$name-full.ttf" --unicodes="U+0020-007E,U+00A0-00FF,U+0100-017F,U+2013-2026,U+20AC,U+2190-2193,U+2318" --layout-features='kern,tnum,calt,liga' --output-file="$OUT/Outfit-$name.ttf" --no-hinting
 done
