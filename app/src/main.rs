@@ -13,6 +13,7 @@ mod mechanics;
 mod menubar;
 mod store;
 mod system;
+mod tags;
 mod ui;
 mod watcher;
 mod zipmini;

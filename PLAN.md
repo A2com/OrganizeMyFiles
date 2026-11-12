@@ -50,7 +50,7 @@ Branche de travail : `chore/nettoyage-craft` (pour le commit « supprime… » e
 | A10 | Docs | créer `PLAN.md` (ce document) sur `docs/plan-finalisation` + PR vers `main`. Puis PR `feat/theme-nocturne` → `main`. |
 
 **Conservés volontairement** (dis-le-moi si tu veux les supprimer aussi) :
-`~/forel-build` sur le Mac (copie de compilation + captures, hors du dossier Craft) et `Craft Anything/forel` (4 Ko, dossier créé par l'outil Craft).
+`~/forel-build` (aujourd'hui `~/organize-my-files`) sur le Mac (copie de compilation + captures, hors du dossier Craft) et `Craft Anything/forel` (4 Ko, dossier créé par l'outil Craft).
 
 ---
 

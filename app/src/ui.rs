@@ -11,6 +11,7 @@ use crate::engine::*;
 use crate::mechanics::*;
 use crate::menubar::{MenuBar, MenuCommand};
 use crate::store::{self, Loaded, Settings, State};
+use crate::tags;
 use crate::watcher::{self, WatchConfig, Watcher};
 
 // ------------------------------------------------------------------- theme
@@ -1257,6 +1258,74 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, danger: bool) -> bool {
     let col = if hot && danger { RED } else if hot { text_primary() } else { text_dim() };
     draw_icon(&ui.painter().clone(), r.center(), icon, col, 16.0);
     resp.on_hover_text(tip).clicked()
+}
+
+/// Pastille avec une croix pour la retirer ; renvoie vrai si la croix est cliquée.
+fn removable_chip(ui: &mut egui::Ui, text: &str, tip: &str, accent: Color32) -> bool {
+    let font = egui::FontId::new(14.0, semibold());
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font, accent);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 34.0, 24.0), egui::Sense::click());
+    ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(CANVAS, 140));
+    ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(accent, 38));
+    ui.painter().galley(Pos2::new(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0), galley, accent);
+    let cross = Rect::from_center_size(Pos2::new(rect.right() - 12.0, rect.center().y), Vec2::splat(18.0));
+    let over_cross = resp.hover_pos().is_some_and(|p| cross.contains(p));
+    if over_cross {
+        ui.painter().circle_filled(cross.center(), 8.0, with_alpha(RED, 60));
+    }
+    draw_icon(&ui.painter().clone(), cross.center(), Icon::Cross, if over_cross { RED } else { text_dim() }, 12.0);
+    let hovered = resp.on_hover_text(tip);
+    hovered.clicked() && hovered.interact_pointer_pos().is_some_and(|p| cross.contains(p))
+}
+
+/// Extensions affichées en pastilles, avec un champ pour en ajouter (Entrée, virgule ou espace).
+/// Renvoie la nouvelle valeur (« png, jpg ») quand elle change.
+fn extension_tags(ui: &mut egui::Ui, id: egui::Id, value: &str, width: f32, accent: Color32) -> Option<String> {
+    let mut exts = tags::split_extensions(value);
+    let mut changed = false;
+    ui.allocate_ui_with_layout(Vec2::new(width, 28.0), Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
+        ui.set_width(width);
+        let mut remove = None;
+        for (i, e) in exts.iter().enumerate() {
+            if removable_chip(ui, &format!(".{e}"), "Retirer cette extension", accent) {
+                remove = Some(i);
+            }
+        }
+        if let Some(i) = remove {
+            exts.remove(i);
+            changed = true;
+        }
+        let input_id = id.with("draft");
+        let mut draft: String = ui.data_mut(|d| d.get_temp(input_id)).unwrap_or_default();
+        let was_empty = draft.is_empty();
+        let hint = if exts.is_empty() { "ex. png, jpg, pdf" } else { "ajouter…" };
+        let invalid = tags::has_invalid_token(&draft);
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut draft)
+                .id(input_id.with("edit"))
+                .margin(egui::Margin::symmetric(8.0, 5.0))
+                .desired_width(if exts.is_empty() { 150.0 } else { 90.0 })
+                .text_color(if invalid { RED } else { text_primary() })
+                .hint_text(hint),
+        )
+        .on_hover_text("Entrée, virgule ou espace pour valider. Lettres, chiffres, « _ » et « - » seulement.");
+        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let (added, left) = tags::absorb_extensions(&mut exts, &draft, enter || (resp.lost_focus() && !draft.is_empty()));
+        if added {
+            changed = true;
+        }
+        if left != draft {
+            draft = left;
+        }
+        if enter {
+            resp.request_focus();
+        }
+        if resp.has_focus() && was_empty && ui.input(|i| i.key_pressed(egui::Key::Backspace)) && exts.pop().is_some() {
+            changed = true;
+        }
+        ui.data_mut(|d| d.insert_temp(input_id, draft));
+    });
+    changed.then(|| tags::join_extensions(&exts))
 }
 
 fn cross_button(ui: &mut egui::Ui, tip: &str) -> bool {
@@ -2560,6 +2629,91 @@ impl App {
         self.undo_folder = Some(UndoFolder { folder: removed, rules: gone, detached, index: i, at: std::time::Instant::now() });
     }
 
+    /// Dossiers cibles d'une règle : pastilles + panneau de sélection (recherche, cases à cocher).
+    /// Renvoie vrai si la liste a changé.
+    fn target_folders_ui(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) -> bool {
+        const MAX_CHIPS: usize = 6;
+        let rid = self.rules[idx].id;
+        let mut changed = false;
+        let mut refused_last = false;
+        ui.label(caps("DOSSIERS CIBLES"));
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let ids = self.rules[idx].folder_ids.clone();
+            let shown = if ids.len() > MAX_CHIPS { MAX_CHIPS - 1 } else { ids.len() };
+            for fid in ids.iter().take(shown) {
+                let label = tags::folder_label(&self.folders, *fid);
+                let full = self.folders.iter().find(|f| f.id == *fid).map(|f| f.path.display().to_string()).unwrap_or_default();
+                if removable_chip(ui, &label, &full, accent) {
+                    if ids.len() > 1 {
+                        self.rules[idx].folder_ids.retain(|id| id != fid);
+                        changed = true;
+                    } else {
+                        refused_last = true;
+                    }
+                }
+            }
+            let popup_id = egui::Id::new(("folder-popup", rid));
+            let hidden = ids.len() - shown;
+            let label = if hidden > 0 { format!("+{hidden}  ·  Dossiers") } else { "+ Dossier".to_string() };
+            let opener = chip_button(ui, &label, accent, with_alpha(accent, 38)).on_hover_text("Choisir les dossiers suivis ciblés");
+            if opener.clicked() {
+                ui.memory_mut(|m| m.toggle_popup(popup_id));
+            }
+            egui::popup_below_widget(ui, popup_id, &opener, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                ui.set_min_width(340.0);
+                let search_id = popup_id.with("search");
+                let mut query: String = ui.data_mut(|d| d.get_temp(search_id)).unwrap_or_default();
+                ui.add(
+                    egui::TextEdit::singleline(&mut query)
+                        .margin(egui::Margin::symmetric(8.0, 6.0))
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Rechercher un dossier…"),
+                );
+                ui.data_mut(|d| d.insert_temp(search_id, query.clone()));
+                ui.add_space(6.0);
+                if self.folders.is_empty() {
+                    ui.label(RichText::new("Aucun dossier suivi : ajoutez-en dans « Dossiers suivis ».").size(13.5).color(text_dim()));
+                    return;
+                }
+                let all_selected = self.folders.iter().all(|f| self.rules[idx].folder_ids.contains(&f.id));
+                let toggle_all = if all_selected { "Tout désélectionner (garde le premier)" } else { "Tout sélectionner" };
+                if ui.link(RichText::new(toggle_all).size(13.5).color(accent)).clicked() {
+                    self.rules[idx].folder_ids =
+                        if all_selected { self.folders.iter().take(1).map(|f| f.id).collect() } else { self.folders.iter().map(|f| f.id).collect() };
+                    changed = true;
+                }
+                ui.add_space(4.0);
+                let q = tags::fold(&query);
+                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                    for fi in 0..self.folders.len() {
+                        let (fid, path) = (self.folders[fi].id, self.folders[fi].path.display().to_string());
+                        if !q.is_empty() && !tags::fold(&path).contains(&q) {
+                            continue;
+                        }
+                        let ids = &mut self.rules[idx].folder_ids;
+                        let mut on = ids.contains(&fid);
+                        if check_box(ui, &mut on, &shorten(&path), accent).changed() {
+                            if on {
+                                ids.push(fid);
+                                changed = true;
+                            } else if ids.len() > 1 {
+                                ids.retain(|id| *id != fid);
+                                changed = true;
+                            } else {
+                                refused_last = true;
+                            }
+                        }
+                    }
+                });
+            });
+        });
+        if refused_last {
+            self.toast("Une règle doit garder au moins un dossier.");
+        }
+        changed
+    }
+
     fn rule_matches(&self, rule: &Rule, q: &str) -> bool {
         let folder = self
             .folders
@@ -2644,41 +2798,23 @@ impl App {
                         self.rules[idx].name = name;
                     }
                 });
-                ui.add_space(8.0);
-                ui.vertical(|ui| {
-                    ui.label(caps("DOSSIERS CIBLES"));
-                    let mut refused_last = false;
-                    for fi in 0..self.folders.len() {
-                        let (fid, label) = (self.folders[fi].id, shorten(&self.folders[fi].path.display().to_string()));
-                        let ids = &mut self.rules[idx].folder_ids;
-                        let mut on = ids.contains(&fid);
-                        if check_box(ui, &mut on, &label, accent).changed() {
-                            if on {
-                                ids.push(fid);
-                                moved = true;
-                            } else if ids.len() > 1 {
-                                ids.retain(|id| *id != fid);
-                                moved = true;
-                            } else {
-                                refused_last = true;
-                            }
-                        }
-                    }
-                    if refused_last {
-                        self.toast("Une règle doit garder au moins un dossier.");
-                    }
-                });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if btn(ui, "Supprimer la règle", Btn::Danger, accent, None).clicked() {
+                    if icon_button(ui, Icon::Trash, "Supprimer la règle", true) {
                         deleted = true;
                     }
                     ui.add_space(8.0);
                     let mut en = self.rules[idx].enabled;
-                    if check_box(ui, &mut en, "Activée", accent).changed() {
+                    let label = if en { "Activée" } else { "Désactivée" };
+                    ui.label(RichText::new(label).size(14.5).color(if en { text_primary() } else { text_dim() }));
+                    if toggle(ui, &mut en, accent).on_hover_text("Activer ou désactiver la règle").changed() {
                         self.rules[idx].enabled = en;
                     }
                 });
             });
+            ui.add_space(12.0);
+            if self.target_folders_ui(ui, idx, accent) {
+                moved = true;
+            }
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 let current = if self.rules[idx].match_all { 0 } else { 1 };
@@ -2773,7 +2909,11 @@ impl App {
                         };
                         let mut val = self.rules[idx].conditions[ci].value.clone();
                         let w = (ui.available_width() - 60.0).max(80.0);
-                        if ui.add(egui::TextEdit::singleline(&mut val).margin(egui::Margin::symmetric(8.0, 7.0)).desired_width(w).hint_text(hint)).changed() {
+                        if field == Field::Extension {
+                            if let Some(v) = extension_tags(ui, egui::Id::new(("ext", rid, ci)), &val, w, accent) {
+                                self.rules[idx].conditions[ci].value = v;
+                            }
+                        } else if ui.add(egui::TextEdit::singleline(&mut val).margin(egui::Margin::symmetric(8.0, 7.0)).desired_width(w).hint_text(hint)).changed() {
                             self.rules[idx].conditions[ci].value = val;
                         }
                         if cross_button(ui, "Supprimer") {
