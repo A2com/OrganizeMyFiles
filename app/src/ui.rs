@@ -3361,6 +3361,9 @@ impl App {
                             if let Some(f) = FIELDS.iter().find(|f| f.label() == pick) {
                                 self.rules[idx].conditions[ci].field = *f;
                                 self.rules[idx].conditions[ci].op = f.ops()[0];
+                                if *f == Field::Kind && kind_label(&self.rules[idx].conditions[ci].value).is_none() {
+                                    self.rules[idx].conditions[ci].value = KIND_CHOICES[0].0.into();
+                                }
                             }
                         }
                         let op = self.rules[idx].conditions[ci].op;
@@ -3376,7 +3379,6 @@ impl App {
                             Field::Extension => ".png, .jpg",
                             Field::Size => "50 MB / 512 KB",
                             Field::DateAdded | Field::DateModified => "2024-01-31  ou  30 days",
-                            Field::Kind => "document / image / video / audio / archive / folder",
                             Field::Contents => "texte à chercher",
                             _ => "valeur",
                         };
@@ -3385,6 +3387,17 @@ impl App {
                         if field == Field::Extension {
                             if let Some(v) = extension_tags(ui, egui::Id::new(("ext", rid, ci)), &val, w, accent) {
                                 self.rules[idx].conditions[ci].value = v;
+                            }
+                        } else if field == Field::Kind {
+                            let current = match kind_label(&val) {
+                                Some(label) => label.to_string(),
+                                None => format!("⚠ valeur inconnue : {val}"),
+                            };
+                            let labels: Vec<&str> = KIND_CHOICES.iter().map(|(_, l)| *l).collect();
+                            if let Some(pick) = combo(ui, &format!("ck-{idx}-{ci}"), &current, &labels) {
+                                if let Some((v, _)) = KIND_CHOICES.iter().find(|(_, l)| *l == pick) {
+                                    self.rules[idx].conditions[ci].value = (*v).into();
+                                }
                             }
                         } else if ui
                             .add(
