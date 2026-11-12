@@ -2,17 +2,19 @@
 """Génère toutes les icônes de l'appli depuis icon/icon.png (à lancer sur le Mac : Pillow + iconutil).
 
 Sorties dans assets/icons/ (versionnées, pour que le build n'ait pas besoin de Pillow) :
-  macos/AppIcon.icns, windows/OrganizeMyFiles.ico, linux/hicolor/<n>x<n>/apps/organizemyfiles.png, app-256.png
+  macos/AppIcon.icns, tray-template-44.png (barre des menus), windows/OrganizeMyFiles.ico, linux/hicolor/<n>x<n>/apps/organizemyfiles.png, app-256.png
 """
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "icon" / "icon.png"
+SYMBOLS_FONT = ROOT / "app" / "assets" / "fonts" / "MaterialSymbolsOutlined-subset.ttf"
+FOLDER_MANAGED = "\uf775"  # glyphe « dossiers suivis », le même que dans la barre latérale
 OUT = ROOT / "assets" / "icons"
 MAC_BODY = 824 / 1024  # gabarit Apple : le corps de l'icône occupe 824 px sur 1024
 
@@ -31,6 +33,16 @@ def render(src: Image.Image, size: int, body: float = 1.0) -> Image.Image:
     inner = round(size * body)
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     out.paste(src.resize((inner, inner), Image.LANCZOS), ((size - inner) // 2, (size - inner) // 2))
+    return out
+
+
+def tray_template(size: int = 44) -> Image.Image:
+    """Pictogramme noir sur fond transparent : macOS le teinte selon le mode clair ou sombre."""
+    font = ImageFont.truetype(str(SYMBOLS_FONT), round(size * 0.9))
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).text((size / 2, size / 2), FOLDER_MANAGED, font=font, fill=255, anchor="mm")
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.putalpha(mask)
     return out
 
 
@@ -62,6 +74,7 @@ def main() -> None:
 
     # Icône embarquée dans le programme (fenêtre, barre latérale)
     render(src, 256).save(OUT / "app-256.png")
+    tray_template().save(OUT / "tray-template-44.png")
     print("OK :", OUT)
 
 
