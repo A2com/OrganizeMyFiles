@@ -122,16 +122,10 @@ pub mod fake {
             }
         }
     }
-}
 
-#[cfg(test)]
-impl CommandRunner for std::rc::Rc<fake::FakeCommands> {
-    fn run(&self, program: &str, args: &[String], t: Duration) -> Result<CommandOutput, String> {
-        (**self).run(program, args, t)
+    impl CommandRunner for std::rc::Rc<FakeCommands> {
+        fn run(&self, program: &str, args: &[String], t: Duration) -> Result<CommandOutput, String> {
+            (**self).run(program, args, t)
+        }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 }

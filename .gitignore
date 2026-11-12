@@ -19,3 +19,6 @@ app/target/
 
 # Source Photoshop de l'icône (lourde, non versionnée)
 /icon/icon.psd
+
+# Captures d'écran de contrôle
+/captures/

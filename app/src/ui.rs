@@ -136,7 +136,7 @@ fn apply_theme(ctx: &egui::Context) {
     v.faint_bg_color = glass(10);
     v.override_text_color = Some(text_primary());
     v.selection.bg_fill = with_alpha(ACCENTS[0].1, 90);
-    v.selection.stroke = Stroke::new(1.0, ACCENTS[0].1);
+    v.selection.stroke = Stroke::new(1.0_f32, ACCENTS[0].1);
     let r = Rounding::same(8.0);
     for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
         w.rounding = r;
@@ -148,8 +148,8 @@ fn apply_theme(ctx: &egui::Context) {
     v.widgets.inactive.weak_bg_fill = glass(16);
     v.widgets.hovered.bg_fill = glass(30);
     v.widgets.hovered.weak_bg_fill = glass(28);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, with_alpha(ACCENTS[0].1, 120));
-    v.widgets.active.bg_stroke = Stroke::new(1.0, ACCENTS[0].1);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, with_alpha(ACCENTS[0].1, 120));
+    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENTS[0].1);
     ctx.set_visuals(v);
     load_fonts(ctx);
     ctx.style_mut(|s| {
@@ -347,20 +347,10 @@ impl App {
     fn seed_demo(&mut self) {
         let home = home_dir();
         for (p, prio) in [("Downloads", 0i64), ("Desktop", 1), ("Documents", 2)] {
-            self.folders.push(Folder {
-                id: self.next_id,
-                path: PathBuf::from(format!("{home}/{p}")),
-                enabled: true,
-                priority: prio,
-            });
+            self.folders.push(Folder { id: self.next_id, path: PathBuf::from(format!("{home}/{p}")), enabled: true, priority: prio });
             self.next_id += 1;
         }
-        self.folders.push(Folder {
-            id: self.next_id,
-            path: PathBuf::from(format!("{home}/Projets-Clients")),
-            enabled: false,
-            priority: 3,
-        });
+        self.folders.push(Folder { id: self.next_id, path: PathBuf::from(format!("{home}/Projets-Clients")), enabled: false, priority: 3 });
         self.next_id += 1;
         let f0 = self.folders[0].id;
         self.rules.push(sample_rule(self.next_id, f0, "Tri Bureau & Téléchargements", 0));
@@ -389,11 +379,7 @@ impl App {
                 },
                 reversible: i % 3 == 0,
                 status: if i == 5 { Status::BlockedByConflict } else { Status::Applied },
-                message: if i == 5 {
-                    "un fichier existe déjà à la destination".into()
-                } else {
-                    "déplacé → Archive/2026-11".into()
-                },
+                message: if i == 5 { "un fichier existe déjà à la destination".into() } else { "déplacé → Archive/2026-11".into() },
                 created: now - std::time::Duration::from_secs(i as u64 * 1500),
             });
         }
@@ -436,13 +422,7 @@ impl App {
     }
 
     fn restore(&mut self, state: State) {
-        let max_id = state
-            .folders
-            .iter()
-            .map(|f| f.id)
-            .chain(state.rules.iter().map(|r| r.id))
-            .max()
-            .unwrap_or(0);
+        let max_id = state.folders.iter().map(|f| f.id).chain(state.rules.iter().map(|r| r.id)).max().unwrap_or(0);
         self.folders = state.folders;
         self.rules = state.rules;
         self.history = state.history;
@@ -607,9 +587,17 @@ impl App {
         }
         panel_card_with(ui, Some(with_alpha(RED, 26)), 16.0, |ui| {
             let text = match (blocked, refused_actions) {
-                (b, 0) => format!("macOS empêche OrganizeMyFiles de lire {b} dossier{} suivi{}.", if b > 1 { "s" } else { "" }, if b > 1 { "s" } else { "" }),
+                (b, 0) => format!(
+                    "macOS empêche OrganizeMyFiles de lire {b} dossier{} suivi{}.",
+                    if b > 1 { "s" } else { "" },
+                    if b > 1 { "s" } else { "" }
+                ),
                 (0, a) => format!("macOS a refusé {a} action{} du dernier lot.", if a > 1 { "s" } else { "" }),
-                (b, a) => format!("macOS bloque {b} dossier{} et a refusé {a} action{} du dernier lot.", if b > 1 { "s" } else { "" }, if a > 1 { "s" } else { "" }),
+                (b, a) => format!(
+                    "macOS bloque {b} dossier{} et a refusé {a} action{} du dernier lot.",
+                    if b > 1 { "s" } else { "" },
+                    if a > 1 { "s" } else { "" }
+                ),
             };
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
@@ -791,9 +779,18 @@ fn perm_table() -> &'static [u8; 512] {
 /// Bruit simplexe 3D (algorithme de Gustavson), valeurs dans ≈ [-1, 1].
 fn snoise(x: f32, y: f32, z: f32) -> f32 {
     const GRAD: [[f32; 3]; 12] = [
-        [1.0, 1.0, 0.0], [-1.0, 1.0, 0.0], [1.0, -1.0, 0.0], [-1.0, -1.0, 0.0],
-        [1.0, 0.0, 1.0], [-1.0, 0.0, 1.0], [1.0, 0.0, -1.0], [-1.0, 0.0, -1.0],
-        [0.0, 1.0, 1.0], [0.0, -1.0, 1.0], [0.0, 1.0, -1.0], [0.0, -1.0, -1.0],
+        [1.0, 1.0, 0.0],
+        [-1.0, 1.0, 0.0],
+        [1.0, -1.0, 0.0],
+        [-1.0, -1.0, 0.0],
+        [1.0, 0.0, 1.0],
+        [-1.0, 0.0, 1.0],
+        [1.0, 0.0, -1.0],
+        [-1.0, 0.0, -1.0],
+        [0.0, 1.0, 1.0],
+        [0.0, -1.0, 1.0],
+        [0.0, 1.0, -1.0],
+        [0.0, -1.0, -1.0],
     ];
     const F3: f32 = 1.0 / 3.0;
     const G3: f32 = 1.0 / 6.0;
@@ -895,18 +892,11 @@ fn bg_color(u: f64, v: f64, t: f64, aspect: f64, accent: Color32) -> Color32 {
     for (i, col) in palette.iter().enumerate().skip(1) {
         let fi = i as f32;
         let seed = 13.0 + fi * 7.0;
-        let noise = snoise(cx + tt * (1.0 + fi) / 30.0 * 2.0 + seed, cy + seed, tt * (1.0 + fi) * 0.11 + seed) - 0.1 * fi
-            + 0.5 * BG_BLENDING;
+        let noise =
+            snoise(cx + tt * (1.0 + fi) / 30.0 * 2.0 + seed, cy + seed, tt * (1.0 + fi) * 0.11 + seed) - 0.1 * fi + 0.5 * BG_BLENDING;
         let noise = noise.clamp(0.0, 0.9 + fi * 0.02);
         let k = smoothstep(0.0, BG_BLENDING, noise);
-        c = {
-            let m = [
-                c[0] + (col.r() as f32 - c[0]) * k,
-                c[1] + (col.g() as f32 - c[1]) * k,
-                c[2] + (col.b() as f32 - c[2]) * k,
-            ];
-            m
-        };
+        c = [c[0] + (col.r() as f32 - c[0]) * k, c[1] + (col.g() as f32 - c[1]) * k, c[2] + (col.b() as f32 - c[2]) * k];
     }
 
     // 3. Éclairage du tissu : lumière rasante venue d'en haut à droite, reflet spéculaire.
@@ -1095,11 +1085,7 @@ fn glass_shapes(rect: Rect) -> egui::Shape {
 fn card(ui: &mut egui::Ui, size: Vec2, add: impl FnOnce(&mut egui::Ui)) {
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     ui.painter().add(glass_shapes(rect));
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(Vec2::new(22.0, 18.0)))
-            .layout(Layout::top_down(Align::Min)),
-    );
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(22.0, 18.0))).layout(Layout::top_down(Align::Min)));
     child.set_min_size(size - Vec2::new(44.0, 36.0));
     add(&mut child);
 }
@@ -1116,7 +1102,11 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
     } else {
         let hover = response.hovered();
         let fill = if primary {
-            if hover { lighten(accent, 18) } else { accent }
+            if hover {
+                lighten(accent, 18)
+            } else {
+                accent
+            }
         } else {
             with_alpha(accent, if hover { 56 } else { 34 })
         };
@@ -1131,57 +1121,41 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
         }
         ui.painter().rect_filled(rect, Rounding::same(h / 2.0), fill);
         let tc = Color32::WHITE;
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            text,
-            egui::FontId::proportional(font),
-            tc,
-        );
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(font), tc);
     }
     response
 }
 
 fn lighten(c: Color32, d: u8) -> Color32 {
-    Color32::from_rgb(
-        c.r().saturating_add(d),
-        c.g().saturating_add(d),
-        c.b().saturating_add(d),
-    )
+    Color32::from_rgb(c.r().saturating_add(d), c.g().saturating_add(d), c.b().saturating_add(d))
 }
 
 fn icon_char(icon: Icon) -> char {
     match icon {
-        Icon::Chart => '\u{e871}',   // dashboard
-        Icon::Folder => '\u{f775}',  // folder_managed
-        Icon::List => '\u{f1c2}',    // rule
-        Icon::Clock => '\u{e8b3}',   // history
-        Icon::Sliders => '\u{e429}', // tune
-        Icon::Funnel => '\u{ef4f}',  // filter_alt
-        Icon::Bolt => '\u{ea0b}',    // bolt
-        Icon::Grip => '\u{e945}',    // drag_indicator
-        Icon::Bell => '\u{e7f5}',    // notifications
-        Icon::Gear => '\u{e8b8}',    // settings
-        Icon::Search => '\u{ef7a}',  // search
-        Icon::Cross => '\u{e5cd}',   // close
-        Icon::Add => '\u{e145}',     // add
-        Icon::Trash => '\u{e92e}',   // delete
+        Icon::Chart => '\u{e871}',      // dashboard
+        Icon::Folder => '\u{f775}',     // folder_managed
+        Icon::List => '\u{f1c2}',       // rule
+        Icon::Clock => '\u{e8b3}',      // history
+        Icon::Sliders => '\u{e429}',    // tune
+        Icon::Funnel => '\u{ef4f}',     // filter_alt
+        Icon::Bolt => '\u{ea0b}',       // bolt
+        Icon::Grip => '\u{e945}',       // drag_indicator
+        Icon::Bell => '\u{e7f5}',       // notifications
+        Icon::Gear => '\u{e8b8}',       // settings
+        Icon::Search => '\u{ef7a}',     // search
+        Icon::Cross => '\u{e5cd}',      // close
+        Icon::Add => '\u{e145}',        // add
+        Icon::Trash => '\u{e92e}',      // delete
         Icon::FolderOpen => '\u{e2c8}', // folder_open
-        Icon::Refresh => '\u{e5d5}',  // refresh
-        Icon::Tick => '\u{e668}',     // check
-        Icon::Undo => '\u{e166}',     // undo
+        Icon::Refresh => '\u{e5d5}',    // refresh
+        Icon::Tick => '\u{e668}',       // check
+        Icon::Undo => '\u{e166}',       // undo
     }
 }
 
 /// Glyphe Material Symbols centré en `c` (`s` = taille de la boîte d'icône, en px).
 fn draw_icon(painter: &egui::Painter, c: Pos2, icon: Icon, color: Color32, s: f32) {
-    painter.text(
-        c,
-        egui::Align2::CENTER_CENTER,
-        icon_char(icon).to_string(),
-        egui::FontId::new(s * 1.25, icons_family()),
-        color,
-    );
+    painter.text(c, egui::Align2::CENTER_CENTER, icon_char(icon).to_string(), egui::FontId::new(s * 1.25, icons_family()), color);
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1189,7 +1163,6 @@ enum Btn {
     Primary,
     Ghost,
     Sky,
-    Danger,
 }
 
 /// Bouton 32 px de haut (rayon 8) : primaire orange, fantôme, bleu azur ou danger.
@@ -1205,14 +1178,13 @@ fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<I
         Btn::Primary => (if hover { lighten(accent, 16) } else { accent }, Color32::WHITE),
         Btn::Ghost => (glass(if hover { 28 } else { 16 }), text_primary()),
         Btn::Sky => (with_alpha(SKY, if hover { 60 } else { 36 }), SKY),
-        Btn::Danger => (with_alpha(RED, if hover { 60 } else { 34 }), RED),
     };
     let (fill, fg) = if enabled { (fill, fg) } else { (glass(12), with_alpha(Color32::WHITE, 70)) };
     let p = ui.painter();
     if kind == Btn::Primary && enabled {
         p.rect_filled(rect.expand(3.0), Rounding::same(10.0), with_alpha(accent, 40));
     }
-    if matches!(kind, Btn::Sky | Btn::Danger) {
+    if matches!(kind, Btn::Sky) {
         p.rect_filled(rect, Rounding::same(8.0), with_alpha(CANVAS, 140));
     }
     p.rect_filled(rect, Rounding::same(8.0), fill);
@@ -1267,13 +1239,7 @@ fn check_box(ui: &mut egui::Ui, on: &mut bool, label: &str, accent: Color32) -> 
         ui.painter().line_segment([Pos2::new(b.left() + 4.5, b.center().y), m], st);
         ui.painter().line_segment([m, Pos2::new(b.right() - 4.0, b.top() + 5.0)], st);
     }
-    ui.painter().text(
-        Pos2::new(rect.left() + 26.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        font,
-        text_primary(),
-    );
+    ui.painter().text(Pos2::new(rect.left() + 26.0, rect.center().y), egui::Align2::LEFT_CENTER, label, font, text_primary());
     resp
 }
 
@@ -1322,10 +1288,8 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool, accent: Color32) -> egui::Response {
 /// Contrôle segmenté ; renvoie l'index cliqué.
 fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, active: Color32) -> Option<usize> {
     let font = egui::FontId::new(14.0, semibold());
-    let widths: Vec<f32> = labels
-        .iter()
-        .map(|l| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::WHITE).size().x + 28.0)
-        .collect();
+    let widths: Vec<f32> =
+        labels.iter().map(|l| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::WHITE).size().x + 28.0).collect();
     let total = widths.iter().sum::<f32>() + 8.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(total, 34.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, Rounding::same(9.0), with_alpha(CANVAS, 150));
@@ -1340,13 +1304,7 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
         } else if resp.hovered() {
             ui.painter().rect_filled(seg, Rounding::same(6.0), glass(18));
         }
-        ui.painter().text(
-            seg.center(),
-            egui::Align2::CENTER_CENTER,
-            label,
-            font.clone(),
-            if on { Color32::WHITE } else { text_dim() },
-        );
+        ui.painter().text(seg.center(), egui::Align2::CENTER_CENTER, label, font.clone(), if on { Color32::WHITE } else { text_dim() });
         if resp.clicked() {
             out = Some(i);
         }
@@ -1362,7 +1320,13 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, danger: bool) -> bool {
     if hot {
         ui.painter().rect_filled(r, Rounding::same(7.0), if danger { with_alpha(RED, 36) } else { glass(24) });
     }
-    let col = if hot && danger { RED } else if hot { text_primary() } else { text_dim() };
+    let col = if hot && danger {
+        RED
+    } else if hot {
+        text_primary()
+    } else {
+        text_dim()
+    };
     draw_icon(&ui.painter().clone(), r.center(), icon, col, 16.0);
     resp.on_hover_text(tip).clicked()
 }
@@ -1407,15 +1371,16 @@ fn extension_tags(ui: &mut egui::Ui, id: egui::Id, value: &str, width: f32, acce
         let was_empty = draft.is_empty();
         let hint = if exts.is_empty() { "ex. png, jpg, pdf" } else { "ajouter…" };
         let invalid = tags::has_invalid_token(&draft);
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut draft)
-                .id(input_id.with("edit"))
-                .margin(egui::Margin::symmetric(8.0, 5.0))
-                .desired_width(if exts.is_empty() { 150.0 } else { 90.0 })
-                .text_color(if invalid { RED } else { text_primary() })
-                .hint_text(hint),
-        )
-        .on_hover_text("Entrée, virgule ou espace pour valider. Lettres, chiffres, « _ » et « - » seulement.");
+        let resp = ui
+            .add(
+                egui::TextEdit::singleline(&mut draft)
+                    .id(input_id.with("edit"))
+                    .margin(egui::Margin::symmetric(8.0, 5.0))
+                    .desired_width(if exts.is_empty() { 150.0 } else { 90.0 })
+                    .text_color(if invalid { RED } else { text_primary() })
+                    .hint_text(hint),
+            )
+            .on_hover_text("Entrée, virgule ou espace pour valider. Lettres, chiffres, « _ » et « - » seulement.");
         let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let (added, left) = tags::absorb_extensions(&mut exts, &draft, enter || (resp.lost_focus() && !draft.is_empty()));
         if added {
@@ -1492,14 +1457,10 @@ fn panel_card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
 
 /// Ligne imbriquée dans une carte (condition ou action).
 fn row_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
-    egui::Frame::none()
-        .fill(glass(12))
-        .rounding(Rounding::same(10.0))
-        .inner_margin(egui::Margin::symmetric(12.0, 10.0))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            add(ui)
-        })
+    egui::Frame::none().fill(glass(12)).rounding(Rounding::same(10.0)).inner_margin(egui::Margin::symmetric(12.0, 10.0)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        add(ui)
+    })
 }
 
 fn caps(text: &str) -> RichText {
@@ -1508,11 +1469,23 @@ fn caps(text: &str) -> RichText {
 
 fn rule_tab(ui: &mut egui::Ui, label: &str, active: bool, enabled: bool, accent: Color32) -> egui::Response {
     let font = egui::FontId::new(14.5, if active { semibold() } else { egui::FontFamily::Proportional });
-    let fg = if active { Color32::WHITE } else if enabled { text_dim() } else { text_label() };
+    let fg = if active {
+        Color32::WHITE
+    } else if enabled {
+        text_dim()
+    } else {
+        text_label()
+    };
     let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), fg);
     let lead = if active { 30.0 } else { 16.0 };
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + lead + 16.0, 34.0), egui::Sense::click());
-    let fill = glass(if active { 30 } else if resp.hovered() { 20 } else { 11 });
+    let fill = glass(if active {
+        30
+    } else if resp.hovered() {
+        20
+    } else {
+        11
+    });
     ui.painter().rect_filled(rect, Rounding::same(9.0), fill);
     if active {
         ui.painter().circle_filled(Pos2::new(rect.left() + 16.0, rect.center().y), 3.5, accent);
@@ -1604,20 +1577,8 @@ fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub
         egui::FontId::new(12.5, semibold()),
         text_label(),
     );
-    p.text(
-        Pos2::new(r.left() + 20.0, r.top() + 86.0),
-        egui::Align2::LEFT_CENTER,
-        value,
-        egui::FontId::new(38.0, bold()),
-        Color32::WHITE,
-    );
-    p.text(
-        Pos2::new(r.left() + 20.0, r.bottom() - 20.0),
-        egui::Align2::LEFT_CENTER,
-        sub,
-        egui::FontId::proportional(14.5),
-        text_dim(),
-    );
+    p.text(Pos2::new(r.left() + 20.0, r.top() + 86.0), egui::Align2::LEFT_CENTER, value, egui::FontId::new(38.0, bold()), Color32::WHITE);
+    p.text(Pos2::new(r.left() + 20.0, r.bottom() - 20.0), egui::Align2::LEFT_CENTER, sub, egui::FontId::proportional(14.5), text_dim());
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -1633,17 +1594,14 @@ fn status_color(s: Status) -> Color32 {
 
 fn combo(ui: &mut egui::Ui, id: &str, current: &str, options: &[impl AsRef<str>]) -> Option<String> {
     let mut chosen = None;
-    egui::ComboBox::from_id_source(id)
-        .selected_text(current)
-        .width(150.0)
-        .show_ui(ui, |ui| {
-            for o in options {
-                let label = o.as_ref();
-                if ui.selectable_label(label == current, label).clicked() && label != current {
-                    chosen = Some(label.to_string());
-                }
+    egui::ComboBox::from_id_salt(id).selected_text(current).width(150.0).show_ui(ui, |ui| {
+        for o in options {
+            let label = o.as_ref();
+            if ui.selectable_label(label == current, label).clicked() && label != current {
+                chosen = Some(label.to_string());
             }
-        });
+        }
+    });
     chosen
 }
 
@@ -1717,39 +1675,33 @@ impl eframe::App for App {
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
             backdrop(ui, screen, self.accent(), bg_time);
 
-            egui::TopBottomPanel::top("topbar")
-                .exact_height(56.0)
-                .frame(egui::Frame::none().fill(PANEL_GLASS))
-                .show_inside(ui, |ui| {
-                    self.top_bar(ui);
-                });
+            egui::TopBottomPanel::top("topbar").exact_height(56.0).frame(egui::Frame::none().fill(PANEL_GLASS)).show_inside(ui, |ui| {
+                self.top_bar(ui);
+            });
 
-            egui::SidePanel::left("sidebar")
-                .resizable(false)
-                .exact_width(256.0)
-                .frame(egui::Frame::none().fill(PANEL_GLASS))
-                .show_inside(ui, |ui| {
+            egui::SidePanel::left("sidebar").resizable(false).exact_width(256.0).frame(egui::Frame::none().fill(PANEL_GLASS)).show_inside(
+                ui,
+                |ui| {
                     self.sidebar(ui);
-                });
+                },
+            );
 
             // Contenu : le défilement va jusqu'au bas de la fenêtre ; un fondu efface les cartes en bas.
             let content = ui.available_rect_before_wrap();
-            egui::ScrollArea::vertical()
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    egui::Frame::none().inner_margin(egui::Margin::symmetric(28.0, 0.0)).show(ui, |ui| {
-                        ui.add_space(24.0);
-                        self.notices(ui);
-                        match self.tab {
-                            Tab::Dashboard => self.dashboard(ui),
-                            Tab::Folders => self.folders_ui(ui),
-                            Tab::Rules => self.rules_ui(ui),
-                            Tab::History => self.history_ui(ui),
-                            Tab::Settings => self.settings_ui(ui),
-                        }
-                        ui.add_space(BOTTOM_FADE_H);
-                    });
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::Frame::none().inner_margin(egui::Margin::symmetric(28.0, 0.0)).show(ui, |ui| {
+                    ui.add_space(24.0);
+                    self.notices(ui);
+                    match self.tab {
+                        Tab::Dashboard => self.dashboard(ui),
+                        Tab::Folders => self.folders_ui(ui),
+                        Tab::Rules => self.rules_ui(ui),
+                        Tab::History => self.history_ui(ui),
+                        Tab::Settings => self.settings_ui(ui),
+                    }
+                    ui.add_space(BOTTOM_FADE_H);
                 });
+            });
             bottom_fade(ui, content, screen, bg_time, accent_now);
 
             // Message / bandeau « Annuler » par-dessus le fondu.
@@ -1758,9 +1710,7 @@ impl eframe::App for App {
                 Pos2::new(content.right() - 28.0, content.bottom() - 4.0),
             );
             let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(Layout::left_to_right(Align::Center)));
-            let pending = self.undo_folder.as_ref().map(|u| {
-                (u.folder.path.display().to_string(), u.rules.len(), u.at.elapsed().as_secs())
-            });
+            let pending = self.undo_folder.as_ref().map(|u| (u.folder.path.display().to_string(), u.rules.len(), u.at.elapsed().as_secs()));
             match pending {
                 Some((path, n_rules, secs)) if secs < UNDO_SECONDS => {
                     bar_ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
@@ -1820,10 +1770,7 @@ impl App {
         let search_rect = Rect::from_min_size(Pos2::new(search_left, rect.center().y - 17.0), Vec2::new(search_w, 34.0));
 
         // --- gauche
-        let left = Rect::from_min_max(
-            Pos2::new(rect.left() + 16.0, rect.top()),
-            Pos2::new(search_rect.left() - 10.0, rect.bottom()),
-        );
+        let left = Rect::from_min_max(Pos2::new(rect.left() + 16.0, rect.top()), Pos2::new(search_rect.left() - 10.0, rect.bottom()));
         let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left).layout(Layout::left_to_right(Align::Center)));
         if cfg!(target_os = "macos") {
             lui.add_space(76.0); // feux natifs de la fenêtre
@@ -1839,9 +1786,7 @@ impl App {
         // --- centre : recherche
         ui.painter().rect_filled(search_rect, Rounding::same(8.0), with_alpha(CANVAS, 180));
         let mut sui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(search_rect.shrink2(Vec2::new(10.0, 0.0)))
-                .layout(Layout::left_to_right(Align::Center)),
+            egui::UiBuilder::new().max_rect(search_rect.shrink2(Vec2::new(10.0, 0.0))).layout(Layout::left_to_right(Align::Center)),
         );
         let (ic, _) = sui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
         draw_icon(&sui.painter().clone(), ic.center(), Icon::Search, text_dim(), 15.0);
@@ -1862,10 +1807,7 @@ impl App {
         );
 
         // --- droite
-        let right = Rect::from_min_max(
-            Pos2::new(search_rect.right() + 10.0, rect.top()),
-            Pos2::new(rect.right() - 16.0, rect.bottom()),
-        );
+        let right = Rect::from_min_max(Pos2::new(search_rect.right() + 10.0, rect.top()), Pos2::new(rect.right() - 16.0, rect.bottom()));
         let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right).layout(Layout::right_to_left(Align::Center)));
         if wide {
             let (r, resp) = rui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::click());
@@ -1898,8 +1840,7 @@ impl App {
         if run.clicked() {
             self.run_batch(false);
         }
-        let preview = btn(&mut rui, "Aperçu simulation", Btn::Ghost, accent, None)
-            .on_hover_text("Simule, sans toucher aux fichiers.");
+        let preview = btn(&mut rui, "Aperçu simulation", Btn::Ghost, accent, None).on_hover_text("Simule, sans toucher aux fichiers.");
         if preview.clicked() {
             self.run_batch(true);
         }
@@ -1961,11 +1902,7 @@ impl App {
             match_all: true,
             recursion_depth: 0,
             priority: count as i64,
-            conditions: vec![Condition {
-                field: Field::Extension,
-                op: Op::Equals,
-                value: String::new(),
-            }],
+            conditions: vec![Condition { field: Field::Extension, op: Op::Equals, value: String::new() }],
             actions: vec![Action::new(ActionKind::Move)],
         });
         self.selected_rule = self.rule_order().iter().position(|r| *r == id).unwrap_or(0);
@@ -1974,9 +1911,7 @@ impl App {
 
     /// Ouvre l'écran Règles sur la première règle du dossier.
     fn show_rules_of(&mut self, folder_id: u64) {
-        let first = self.rule_order().iter().position(|id| {
-            self.rules.iter().any(|r| r.id == *id && r.folder_ids.contains(&folder_id))
-        });
+        let first = self.rule_order().iter().position(|id| self.rules.iter().any(|r| r.id == *id && r.folder_ids.contains(&folder_id)));
         if let Some(pos) = first {
             self.selected_rule = pos;
         }
@@ -2038,12 +1973,7 @@ impl App {
                 let img = app_icon_image();
                 ui.ctx().load_texture("app-logo", img, egui::TextureOptions::LINEAR)
             });
-            ui.painter().image(
-                logo.id(),
-                r,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
-            );
+            ui.painter().image(logo.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
             ui.add_space(8.0);
             ui.label(RichText::new("OrganizeMyFiles").size(17.0).family(semibold()).color(Color32::WHITE));
         });
@@ -2111,11 +2041,7 @@ impl App {
         c.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(caps("APPLICATION"));
-                ui.label(
-                    RichText::new(if self.app_enabled { "Activée" } else { "En veille" })
-                        .size(15.5)
-                        .color(Color32::WHITE),
-                );
+                ui.label(RichText::new(if self.app_enabled { "Activée" } else { "En veille" }).size(15.5).color(Color32::WHITE));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 toggle(ui, &mut self.app_enabled, accent);
@@ -2207,9 +2133,7 @@ impl App {
                     .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).");
                 organise = run.clicked() && self.app_enabled;
                 ui.add_space(10.0);
-                preview = pill(ui, "Aperçu", accent, false, true)
-                    .on_hover_text("Simule, sans toucher aux fichiers.")
-                    .clicked();
+                preview = pill(ui, "Aperçu", accent, false, true).on_hover_text("Simule, sans toucher aux fichiers.").clicked();
             }
         });
         // Anneau : part des fichiers concernés lors du dernier passage.
@@ -2233,13 +2157,7 @@ impl App {
             text_label(),
         );
         p.text(center, egui::Align2::CENTER_CENTER, pct_text, egui::FontId::new(26.0, bold()), Color32::WHITE);
-        p.text(
-            Pos2::new(center.x, center.y + 76.0),
-            egui::Align2::CENTER_CENTER,
-            caption,
-            egui::FontId::proportional(14.0),
-            text_dim(),
-        );
+        p.text(Pos2::new(center.x, center.y + 76.0), egui::Align2::CENTER_CENTER, caption, egui::FontId::proportional(14.0), text_dim());
         ui.add_space(vgap);
 
         // ---------------------------------------------------------------- tuiles
@@ -2251,13 +2169,35 @@ impl App {
         };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            if kpi_tile(ui, w, Icon::Folder, "DOSSIERS ACTIFS", &count(folders_active).to_string(), &format!("sur {folders_total} suivi{}", if folders_total > 1 { "s" } else { "" }), accent).clicked() {
+            if kpi_tile(
+                ui,
+                w,
+                Icon::Folder,
+                "DOSSIERS ACTIFS",
+                &count(folders_active).to_string(),
+                &format!("sur {folders_total} suivi{}", if folders_total > 1 { "s" } else { "" }),
+                accent,
+            )
+            .clicked()
+            {
                 go = Some(Tab::Folders);
             }
-            if kpi_tile(ui, w, Icon::List, "RÈGLES ACTIVES", &count(rules_active).to_string(), &format!("sur {rules_total} règle{}", if rules_total > 1 { "s" } else { "" }), accent).clicked() {
+            if kpi_tile(
+                ui,
+                w,
+                Icon::List,
+                "RÈGLES ACTIVES",
+                &count(rules_active).to_string(),
+                &format!("sur {rules_total} règle{}", if rules_total > 1 { "s" } else { "" }),
+                accent,
+            )
+            .clicked()
+            {
                 go = Some(Tab::Rules);
             }
-            if kpi_tile(ui, w, Icon::Clock, "FICHIERS CE MOIS", &count(self.monthly_used as usize).to_string(), "organisés", accent).clicked() {
+            if kpi_tile(ui, w, Icon::Clock, "FICHIERS CE MOIS", &count(self.monthly_used as usize).to_string(), "organisés", accent)
+                .clicked()
+            {
                 go = Some(Tab::History);
             }
             if kpi_tile(ui, w, Icon::Bolt, "DERNIER LOT", &matched_actions, actions_sub, accent).clicked() {
@@ -2346,9 +2286,7 @@ impl App {
                     text_dim(),
                 );
                 let mut right = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(rect.shrink2(Vec2::new(8.0, 0.0)))
-                        .layout(Layout::right_to_left(Align::Center)),
+                    egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(8.0, 0.0))).layout(Layout::right_to_left(Align::Center)),
                 );
                 if !exists {
                     chip(&mut right, "Introuvable", RED, with_alpha(RED, 38));
@@ -2422,9 +2360,7 @@ impl App {
                     text_dim(),
                 );
                 if can_undo {
-                    let mut right = ui.new_child(
-                        egui::UiBuilder::new().max_rect(rect).layout(Layout::right_to_left(Align::Center)),
-                    );
+                    let mut right = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::right_to_left(Align::Center)));
                     if btn(&mut right, "Annuler", Btn::Ghost, accent, Some(Icon::Undo)).clicked() {
                         undo_idx = Some(*idx);
                     }
@@ -2486,10 +2422,7 @@ impl App {
         let (title, sub) = if hovering {
             ("Relâchez pour ajouter", "Ils seront suivis aussitôt.")
         } else if empty {
-            (
-                "Aucun dossier suivi",
-                "Glissez des dossiers du Finder, ou choisissez-les.",
-            )
+            ("Aucun dossier suivi", "Glissez des dossiers du Finder, ou choisissez-les.")
         } else {
             ("Ajouter un dossier", "Glissez un dossier du Finder, ou choisissez-le.")
         };
@@ -2590,11 +2523,7 @@ impl App {
             let exists = f.path.is_dir();
             let n_rules = self.rules.iter().filter(|r| r.folder_ids.contains(&f.id)).count();
             let files = if exists { self.folder_count(f.id, &f.path) } else { None };
-            let name = f
-                .path
-                .file_name()
-                .map(|n| nfc(&n.to_string_lossy()))
-                .unwrap_or_else(|| nfc(&f.path.display().to_string()));
+            let name = f.path.file_name().map(|n| nfc(&n.to_string_lossy())).unwrap_or_else(|| nfc(&f.path.display().to_string()));
             let (_, rect) = panel_card_with(ui, None, 16.0, |ui| {
                 ui.horizontal(|ui| {
                     ui.dnd_drag_source(egui::Id::new(("fdrag", f.id)), DragRow { list: 2, idx: i }, |ui| {
@@ -2795,8 +2724,11 @@ impl App {
                 let all_selected = self.folders.iter().all(|f| self.rules[idx].folder_ids.contains(&f.id));
                 let toggle_all = if all_selected { "Tout désélectionner (garde le premier)" } else { "Tout sélectionner" };
                 if ui.link(RichText::new(toggle_all).size(13.5).color(accent)).clicked() {
-                    self.rules[idx].folder_ids =
-                        if all_selected { self.folders.iter().take(1).map(|f| f.id).collect() } else { self.folders.iter().map(|f| f.id).collect() };
+                    self.rules[idx].folder_ids = if all_selected {
+                        self.folders.iter().take(1).map(|f| f.id).collect()
+                    } else {
+                        self.folders.iter().map(|f| f.id).collect()
+                    };
                     changed = true;
                 }
                 ui.add_space(4.0);
@@ -2838,9 +2770,7 @@ impl App {
             .map(|f| nfc(&f.path.display().to_string()).to_lowercase())
             .collect::<Vec<_>>()
             .join(" ");
-        rule.name.to_lowercase().contains(q)
-            || folder.contains(q)
-            || rule.actions.iter().any(|a| a.kind.label().to_lowercase().contains(q))
+        rule.name.to_lowercase().contains(q) || folder.contains(q) || rule.actions.iter().any(|a| a.kind.label().to_lowercase().contains(q))
     }
 
     fn rules_ui(&mut self, ui: &mut egui::Ui) {
@@ -2850,12 +2780,7 @@ impl App {
             ui.label(RichText::new("Règles").size(24.0).family(bold()).color(Color32::WHITE));
             ui.add_space(6.0);
             let n = self.rules.iter().filter(|r| r.enabled).count();
-            chip(
-                ui,
-                &format!("{n} {}", if n > 1 { "actives" } else { "active" }),
-                SKY,
-                with_alpha(SKY, 38),
-            );
+            chip(ui, &format!("{n} {}", if n > 1 { "actives" } else { "active" }), SKY, with_alpha(SKY, 38));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if btn(ui, "Nouvelle règle", Btn::Sky, accent, Some(Icon::Add)).clicked() {
                     self.new_rule();
@@ -2910,7 +2835,10 @@ impl App {
                 ui.vertical(|ui| {
                     ui.label(caps("NOM DE LA RÈGLE"));
                     let mut name = self.rules[idx].name.clone();
-                    if ui.add(egui::TextEdit::singleline(&mut name).margin(egui::Margin::symmetric(8.0, 7.0)).desired_width(300.0)).changed() {
+                    if ui
+                        .add(egui::TextEdit::singleline(&mut name).margin(egui::Margin::symmetric(8.0, 7.0)).desired_width(300.0))
+                        .changed()
+                    {
                         self.rules[idx].name = name;
                     }
                 });
@@ -2934,13 +2862,9 @@ impl App {
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 let current = if self.rules[idx].match_all { 0 } else { 1 };
-                if let Some(i) = segmented(
-                    ui,
-                    egui::Id::new(("match", rid)),
-                    &["TOUTES les conditions", "AU MOINS UNE condition"],
-                    current,
-                    SKY_DEEP,
-                ) {
+                if let Some(i) =
+                    segmented(ui, egui::Id::new(("match", rid)), &["TOUTES les conditions", "AU MOINS UNE condition"], current, SKY_DEEP)
+                {
                     self.rules[idx].match_all = i == 0;
                 }
                 ui.add_space(20.0);
@@ -2952,11 +2876,7 @@ impl App {
                 chip(ui, &depth.to_string(), accent, with_alpha(accent, 38));
             });
             ui.add_space(4.0);
-            ui.label(
-                RichText::new("0 = premier niveau seulement ; n = n niveaux de plus.")
-                    .size(13.5)
-                    .color(text_dim()),
-            );
+            ui.label(RichText::new("0 = premier niveau seulement ; n = n niveaux de plus.").size(13.5).color(text_dim()));
         });
 
         if deleted {
@@ -2975,12 +2895,7 @@ impl App {
             ui.horizontal(|ui| {
                 section_title(ui, Icon::Funnel, "Conditions");
                 let n = self.rules[idx].conditions.len();
-                chip(
-                    ui,
-                    &format!("{n} {}", if n > 1 { "critères actifs" } else { "critère actif" }),
-                    SKY,
-                    with_alpha(SKY, 38),
-                );
+                chip(ui, &format!("{n} {}", if n > 1 { "critères actifs" } else { "critère actif" }), SKY, with_alpha(SKY, 38));
             });
             ui.add_space(10.0);
             let mut drop: Option<usize> = None;
@@ -2992,12 +2907,9 @@ impl App {
                             draw_icon(&ui.painter().clone(), r.center(), Icon::Grip, text_dim(), 16.0);
                         });
                         let field = self.rules[idx].conditions[ci].field;
-                        if let Some(pick) = combo(
-                            ui,
-                            &format!("cf-{idx}-{ci}"),
-                            field.label(),
-                            &FIELDS.iter().map(|f| f.label()).collect::<Vec<_>>(),
-                        ) {
+                        if let Some(pick) =
+                            combo(ui, &format!("cf-{idx}-{ci}"), field.label(), &FIELDS.iter().map(|f| f.label()).collect::<Vec<_>>())
+                        {
                             if let Some(f) = FIELDS.iter().find(|f| f.label() == pick) {
                                 self.rules[idx].conditions[ci].field = *f;
                                 self.rules[idx].conditions[ci].op = f.ops()[0];
@@ -3005,12 +2917,9 @@ impl App {
                         }
                         let op = self.rules[idx].conditions[ci].op;
                         let ops = field.ops();
-                        if let Some(pick) = combo(
-                            ui,
-                            &format!("co-{idx}-{ci}"),
-                            op.label(),
-                            &ops.iter().map(|o| o.label()).collect::<Vec<_>>(),
-                        ) {
+                        if let Some(pick) =
+                            combo(ui, &format!("co-{idx}-{ci}"), op.label(), &ops.iter().map(|o| o.label()).collect::<Vec<_>>())
+                        {
                             if let Some(o) = ops.iter().find(|o| o.label() == pick) {
                                 self.rules[idx].conditions[ci].op = *o;
                             }
@@ -3029,7 +2938,15 @@ impl App {
                             if let Some(v) = extension_tags(ui, egui::Id::new(("ext", rid, ci)), &val, w, accent) {
                                 self.rules[idx].conditions[ci].value = v;
                             }
-                        } else if ui.add(egui::TextEdit::singleline(&mut val).margin(egui::Margin::symmetric(8.0, 7.0)).desired_width(w).hint_text(hint)).changed() {
+                        } else if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut val)
+                                    .margin(egui::Margin::symmetric(8.0, 7.0))
+                                    .desired_width(w)
+                                    .hint_text(hint),
+                            )
+                            .changed()
+                        {
                             self.rules[idx].conditions[ci].value = val;
                         }
                         if cross_button(ui, "Supprimer") {
@@ -3047,11 +2964,7 @@ impl App {
                 self.rules[idx].conditions.remove(ci);
             }
             if btn(ui, "+ Ajouter une condition", Btn::Sky, accent, None).clicked() {
-                self.rules[idx].conditions.push(Condition {
-                    field: Field::Name,
-                    op: Op::Contains,
-                    value: String::new(),
-                });
+                self.rules[idx].conditions.push(Condition { field: Field::Name, op: Op::Contains, value: String::new() });
             }
         });
         if let Some((from, insert)) = reorder_cond {
@@ -3064,11 +2977,7 @@ impl App {
         panel_card(ui, |ui| {
             ui.horizontal(|ui| {
                 section_title(ui, Icon::Bolt, "Actions");
-                ui.label(
-                    RichText::new("exécutées dans l'ordre")
-                        .size(14.0)
-                        .color(text_dim()),
-                );
+                ui.label(RichText::new("exécutées dans l'ordre").size(14.0).color(text_dim()));
             });
             ui.add_space(10.0);
             let mut drop: Option<usize> = None;
@@ -3080,12 +2989,9 @@ impl App {
                             draw_icon(&ui.painter().clone(), r.center(), Icon::Grip, text_dim(), 16.0);
                         });
                         let kind = self.rules[idx].actions[ai].kind.clone();
-                        if let Some(pick) = combo(
-                            ui,
-                            &format!("ak-{idx}-{ai}"),
-                            kind.label(),
-                            &ACTION_KINDS.iter().map(|k| k.label()).collect::<Vec<_>>(),
-                        ) {
+                        if let Some(pick) =
+                            combo(ui, &format!("ak-{idx}-{ai}"), kind.label(), &ACTION_KINDS.iter().map(|k| k.label()).collect::<Vec<_>>())
+                        {
                             if let Some(k) = ACTION_KINDS.iter().find(|k| k.label() == pick) {
                                 self.rules[idx].actions[ai] = Action::new(k.clone());
                             }
@@ -3131,13 +3037,9 @@ impl App {
                                 "number" => 2,
                                 _ => 1,
                             };
-                            if let Some(i) = segmented(
-                                ui,
-                                egui::Id::new(("conflict", rid, ai)),
-                                &["remplacer", "ignorer", "numéroter"],
-                                current,
-                                accent,
-                            ) {
+                            if let Some(i) =
+                                segmented(ui, egui::Id::new(("conflict", rid, ai)), &["remplacer", "ignorer", "numéroter"], current, accent)
+                            {
                                 let v = ["replace", "skip", "number"][i];
                                 self.rules[idx].actions[ai].params.insert(ON_CONFLICT_PARAM_KEY.into(), v.into());
                             }
@@ -3170,7 +3072,11 @@ impl App {
             panel_card(ui, |ui| {
                 ui.label(RichText::new("Rien pour l'instant.").size(16.0).family(semibold()).color(text_primary()));
                 ui.add_space(4.0);
-                ui.label(RichText::new("Chaque rangement apparaîtra ici, par lot, avec la possibilité de l'annuler.").size(14.0).color(text_dim()));
+                ui.label(
+                    RichText::new("Chaque rangement apparaîtra ici, par lot, avec la possibilité de l'annuler.")
+                        .size(14.0)
+                        .color(text_dim()),
+                );
                 ui.add_space(12.0);
                 if btn(ui, "Lancer un aperçu", Btn::Sky, accent, None).clicked() {
                     self.run_batch(true);
@@ -3232,10 +3138,13 @@ impl App {
                 let sum = history_view::batch_summary(&self.history, &batch.entries);
                 panel_card_with(ui, None, 14.0, |ui| {
                     let id = ui.make_persistent_id(("history-batch", batch.batch_id));
-                    let state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, first_batch == Some(batch.batch_id));
+                    let state =
+                        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, first_batch == Some(batch.batch_id));
                     state
                         .show_header(ui, |ui| {
-                            ui.label(RichText::new(format!("Lot n°{}", batch.batch_id)).size(15.0).family(semibold()).color(text_primary()));
+                            ui.label(
+                                RichText::new(format!("Lot n°{}", batch.batch_id)).size(15.0).family(semibold()).color(text_primary()),
+                            );
                             ui.label(
                                 RichText::new(format!(
                                     "·  {}  ·  {} fichier{}",
@@ -3247,13 +3156,28 @@ impl App {
                                 .color(text_dim()),
                             );
                             if sum.applied > 0 {
-                                chip(ui, &format!("{} appliqué{}", sum.applied, if sum.applied > 1 { "s" } else { "" }), status_color(Status::Applied), with_alpha(status_color(Status::Applied), 38));
+                                chip(
+                                    ui,
+                                    &format!("{} appliqué{}", sum.applied, if sum.applied > 1 { "s" } else { "" }),
+                                    status_color(Status::Applied),
+                                    with_alpha(status_color(Status::Applied), 38),
+                                );
                             }
                             if sum.failed > 0 {
-                                chip(ui, &format!("{} échec{}", sum.failed, if sum.failed > 1 { "s" } else { "" }), status_color(Status::Failed), with_alpha(status_color(Status::Failed), 38));
+                                chip(
+                                    ui,
+                                    &format!("{} échec{}", sum.failed, if sum.failed > 1 { "s" } else { "" }),
+                                    status_color(Status::Failed),
+                                    with_alpha(status_color(Status::Failed), 38),
+                                );
                             }
                             if sum.undone > 0 {
-                                chip(ui, &format!("{} annulé{}", sum.undone, if sum.undone > 1 { "s" } else { "" }), status_color(Status::Undone), with_alpha(status_color(Status::Undone), 38));
+                                chip(
+                                    ui,
+                                    &format!("{} annulé{}", sum.undone, if sum.undone > 1 { "s" } else { "" }),
+                                    status_color(Status::Undone),
+                                    with_alpha(status_color(Status::Undone), 38),
+                                );
                             }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if sum.undoable > 0
@@ -3312,7 +3236,11 @@ impl App {
                 };
                 truncated(ui, name_w, RichText::new(history_view::file_name(e)).size(14.5).family(semibold()).color(text_primary()));
                 ui.label(RichText::new("→").size(14.0).color(text_label()));
-                truncated(ui, (left_w - name_w - 24.0).max(40.0), RichText::new(history_view::destination_label(e)).size(14.0).color(text_dim()));
+                truncated(
+                    ui,
+                    (left_w - name_w - 24.0).max(40.0),
+                    RichText::new(history_view::destination_label(e)).size(14.0).color(text_dim()),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if history_view::is_undoable(e) && chip_button(ui, "Annuler", accent, with_alpha(accent, 38)).clicked() {
                         *undo_idx = Some(i);
@@ -3394,27 +3322,11 @@ impl App {
                 chip(ui, &format!("{} jours", self.retention_days), accent, with_alpha(accent, 38));
             });
             ui.add_space(4.0);
-            ui.label(
-                RichText::new(format!(
-                    "Les entrées plus anciennes sont purgées.",
-                ))
-                .size(13.5)
-                .color(text_dim()),
-            );
-            ui.label(
-                RichText::new(format!("{HISTORY_RETENTION_SETTING_KEY} · de 1 à 365 jours"))
-                    .size(13.5)
-                    .color(text_dim()),
-            );
+            ui.label(RichText::new("Les entrées plus anciennes sont purgées.").size(13.5).color(text_dim()));
+            ui.label(RichText::new(format!("{HISTORY_RETENTION_SETTING_KEY} · de 1 à 365 jours")).size(13.5).color(text_dim()));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Purger l'ancien historique").size(14.0))
-                            .fill(glass(34)),
-                    )
-                    .clicked()
-                {
+                if ui.add(egui::Button::new(RichText::new("Purger l'ancien historique").size(14.0)).fill(glass(34))).clicked() {
                     let removed = purge_history(&mut self.history, self.retention_days, SystemTime::now());
                     self.toast(format!("{removed} entrée(s) purgée(s)"));
                 }
@@ -3425,16 +3337,10 @@ impl App {
         card(ui, Vec2::new(756.0, 110.0), |ui| {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
-            ui.label(
-                RichText::new(format!("OrganizeMyFiles · version {}", env!("CARGO_PKG_VERSION")))
-                    .size(14.5)
-                    .color(text_primary()),
-            );
+            ui.label(RichText::new(format!("OrganizeMyFiles · version {}", env!("CARGO_PKG_VERSION"))).size(14.5).color(text_primary()));
             ui.add_space(4.0);
             ui.label(
-                RichText::new("Outil libre et open source. Tout reste sur ton Mac : aucun envoi de données.")
-                    .size(13.5)
-                    .color(text_dim()),
+                RichText::new("Outil libre et open source. Tout reste sur ton Mac : aucun envoi de données.").size(13.5).color(text_dim()),
             );
         });
         let _ = accent;
@@ -3577,7 +3483,14 @@ mod tests {
         assert_eq!(app.folders.len(), 2);
     }
 
-    fn history_entry(batch: u64, kind: ActionKind, from: &std::path::Path, to: &std::path::Path, original: &std::path::Path, result: &std::path::Path) -> HistoryEntry {
+    fn history_entry(
+        batch: u64,
+        kind: ActionKind,
+        from: &std::path::Path,
+        to: &std::path::Path,
+        original: &std::path::Path,
+        result: &std::path::Path,
+    ) -> HistoryEntry {
         HistoryEntry {
             batch_id: batch,
             rule_name: "r".into(),
@@ -3610,3 +3523,6 @@ mod tests {
         assert!(app.history.iter().all(|e| e.status == Status::Undone));
     }
 }
+
+#[cfg(test)]
+mod e2e;

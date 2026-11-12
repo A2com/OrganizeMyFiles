@@ -6,10 +6,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 
 pub fn zip_file(src: &Path, out: &Path) -> io::Result<u64> {
-    let name = src
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "item".to_string());
+    let name = src.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "item".to_string());
     let entries = vec![(src.to_path_buf(), name)];
     write_zip(&entries, out)
 }
@@ -27,11 +24,7 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<(std::path::PathBuf, String)>)
         if p.is_dir() {
             collect(root, &p, out)?;
         } else {
-            let rel = p
-                .strip_prefix(root)
-                .unwrap_or(&p)
-                .to_string_lossy()
-                .replace('\\', "/");
+            let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
             out.push((p, rel));
         }
     }

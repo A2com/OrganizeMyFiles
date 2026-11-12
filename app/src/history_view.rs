@@ -80,16 +80,11 @@ pub fn destination_label(e: &HistoryEntry) -> String {
     if !matches!(e.status, Status::Applied | Status::Undone) || e.result_path.as_os_str().is_empty() {
         return "—".into();
     }
-    e.result_path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|n| nfc(&n.to_string_lossy()))
-        .unwrap_or_else(|| "—".into())
+    e.result_path.parent().and_then(|p| p.file_name()).map(|n| nfc(&n.to_string_lossy())).unwrap_or_else(|| "—".into())
 }
 
 fn matches_query(e: &HistoryEntry, query: &str) -> bool {
-    query.is_empty()
-        || [file_name(e), destination_label(e), e.rule_name.clone()].iter().any(|t| fold(t).contains(query))
+    query.is_empty() || [file_name(e), destination_label(e), e.rule_name.clone()].iter().any(|t| fold(t).contains(query))
 }
 
 /// Regroupe l'historique : jours, puis lots, le plus récent d'abord. `query` est déjà passé par `fold`.

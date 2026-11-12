@@ -2,14 +2,6 @@
 //! Source addresses for every value are documented in `MECHANICS.md` and
 //! `mechanics.json`. Do not change these without changing those files too.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
-// ---- Plan limits (observed) -----------------------------------------------
-/// Free plan watches the first 2 folders by priority (addresses 0x1001e3d60).
-pub const FREE_FOLDER_LIMIT: usize = 2;
-/// Free plan processes 300 files per calendar month (0x1001e3c50).
-pub const MONTHLY_FILE_LIMIT: u32 = 300;
-
 // ---- Content extraction caps (observed) -----------------------------------
 /// Text / PDF / office document extraction cap, 100 MB (0x1001e30f0).
 pub const TEXT_LIMIT_BYTES: u64 = 104857600;
@@ -35,15 +27,8 @@ pub const HISTORY_RETENTION_DEFAULT_DAYS: u32 = 30;
 /// Case-insensitive color name -> Finder label index (0 = none):
 /// gray=1, green=2, purple=3, blue=4, yellow=5, red=6, orange=7.
 /// The label is appended as "<name>\n<index>" to the user-tags value.
-pub const FINDER_COLOR_INDEX: &[(&str, u8)] = &[
-    ("gray", 1),
-    ("green", 2),
-    ("purple", 3),
-    ("blue", 4),
-    ("yellow", 5),
-    ("red", 6),
-    ("orange", 7),
-];
+pub const FINDER_COLOR_INDEX: &[(&str, u8)] =
+    &[("gray", 1), ("green", 2), ("purple", 3), ("blue", 4), ("yellow", 5), ("red", 6), ("orange", 7)];
 
 // ---- History purge formula (observed, Database.purgeHistory 0x10017a438) ---
 /// Purge cutoff seconds: days * 86400, subtracted from "now" (timezone
@@ -55,41 +40,15 @@ pub const HISTORY_PURGE_SECONDS_PER_DAY: u64 = 86400;
 pub const FILENAME_MAX_LENGTH: usize = 255;
 
 // ---- Archive kind list (observed, 0x1001e0d60) ----------------------------
-pub const ARCHIVE_KIND_EXTENSIONS: &[&str] =
-    &["zip", "tar", "gz", "7z", "rar", "xz", "zst", "tgz", "tbz", "cab"];
+pub const ARCHIVE_KIND_EXTENSIONS: &[&str] = &["zip", "tar", "gz", "7z", "rar", "xz", "zst", "tgz", "tbz", "cab"];
 
 // ---- Document kind lists used by the `kind` condition (derived) ------------
-pub const IMAGE_EXTENSIONS: &[&str] =
-    &["png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "heic", "raw"];
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "heic", "raw"];
 pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "m4v", "avi", "mkv", "webm"];
 pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "m4a", "aac", "wav", "flac", "aiff", "ogg"];
 pub const DOCUMENT_EXTENSIONS: &[&str] = &[
-    "txt", "md", "rtf", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "odt", "ods",
-    "odp", "pages", "numbers", "key", "epub",
+    "txt", "md", "rtf", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "odt", "ods", "odp", "pages", "numbers", "key", "epub",
 ];
-
-/// Month key of the monthly counter: `"%04d-%02d"` (year, month) — formula from
-/// `MonthlyFileUsageStore.monthlyUsage` (0x100168dc0), persisted as
-/// `free.monthlyFileUsage.<key>`.
-pub fn month_key(t: SystemTime) -> String {
-    let secs = t
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let days = secs.div_euclid(86_400);
-    let (y, m, _d) = civil_from_days(days);
-    format!("{:04}-{:02}", y, m)
-}
-
-/// Days elapsed in the current calendar month (for the reset date display).
-pub fn month_day(t: SystemTime) -> u32 {
-    let secs = t
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let (_y, _m, d) = civil_from_days(secs.div_euclid(86_400));
-    d
-}
 
 /// (année, mois, jour, heure, minute, seconde) d'un instant Unix, à l'heure locale du système
 /// (fuseau et heure d'été compris).
@@ -176,12 +135,6 @@ pub fn parse_span(s: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn month_key_is_yyyy_mm() {
-        let t = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        assert_eq!(month_key(t), "2023-11");
-    }
 
     #[test]
     fn size_parsing() {
