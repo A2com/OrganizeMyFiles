@@ -19,7 +19,7 @@ pub fn notify(body: String) {
     #[cfg(target_os = "macos")]
     std::thread::spawn(move || {
         let _ = mac_notification_sys::set_application("com.a2com.organizemyfiles");
-        let _ = mac_notification_sys::Notification::new().title("OrganizeFiles").message(&body).send();
+        let _ = mac_notification_sys::Notification::new().title("OrganizeMyFiles").message(&body).send();
     });
     #[cfg(not(target_os = "macos"))]
     let _ = body;

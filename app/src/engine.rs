@@ -1626,7 +1626,7 @@ mod tests {
 
     #[test]
     fn numbered_path_skips_existing_names() {
-        let dir = std::env::temp_dir().join(format!("organizefiles-num-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("organizemyfiles-num-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let first = dir.join("photo.png");
         fs::write(&first, b"x").unwrap();
@@ -1638,7 +1638,7 @@ mod tests {
 
     #[test]
     fn validate_new_folder_rejects_missing_and_duplicates() {
-        let dir = std::env::temp_dir().join(format!("organizefiles-folders-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("organizemyfiles-folders-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("a.txt"), b"x").unwrap();
         fs::write(dir.join(".hidden"), b"x").unwrap();
@@ -1750,13 +1750,13 @@ mod tests {
 
     #[test]
     fn one_rule_applies_to_every_folder_it_targets() {
-        let (a, b) = (std::env::temp_dir().join(format!("organizefiles-multi-a-{}", std::process::id())),
-                      std::env::temp_dir().join(format!("organizefiles-multi-b-{}", std::process::id())));
+        let (a, b) = (std::env::temp_dir().join(format!("organizemyfiles-multi-a-{}", std::process::id())),
+                      std::env::temp_dir().join(format!("organizemyfiles-multi-b-{}", std::process::id())));
         for d in [&a, &b] {
             fs::create_dir_all(d).unwrap();
             fs::write(d.join("x.png"), b"x").unwrap();
         }
-        let dest = std::env::temp_dir().join(format!("organizefiles-multi-out-{}", std::process::id()));
+        let dest = std::env::temp_dir().join(format!("organizemyfiles-multi-out-{}", std::process::id()));
         let mut act = Action::new(ActionKind::Copy);
         act.params.insert("destination".into(), dest.to_string_lossy().into_owned());
         act.params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_NUMBER.into());

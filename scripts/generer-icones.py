@@ -2,7 +2,7 @@
 """Génère toutes les icônes de l'appli depuis icon/icon.png (à lancer sur le Mac : Pillow + iconutil).
 
 Sorties dans assets/icons/ (versionnées, pour que le build n'ait pas besoin de Pillow) :
-  macos/AppIcon.icns, windows/OrganizeFiles.ico, linux/hicolor/<n>x<n>/apps/organizefiles.png, app-256.png
+  macos/AppIcon.icns, windows/OrganizeMyFiles.ico, linux/hicolor/<n>x<n>/apps/organizemyfiles.png, app-256.png
 """
 import shutil
 import subprocess
@@ -52,13 +52,13 @@ def main() -> None:
     # Windows : un .ico à plusieurs tailles
     (OUT / "windows").mkdir()
     sizes = [16, 24, 32, 48, 64, 128, 256]
-    render(src, 256).save(OUT / "windows" / "OrganizeFiles.ico", sizes=[(s, s) for s in sizes])
+    render(src, 256).save(OUT / "windows" / "OrganizeMyFiles.ico", sizes=[(s, s) for s in sizes])
 
     # Linux : thème hicolor
     for s in (16, 32, 48, 64, 128, 256, 512):
         d = OUT / "linux" / "hicolor" / f"{s}x{s}" / "apps"
         d.mkdir(parents=True)
-        render(src, s).save(d / "organizefiles.png")
+        render(src, s).save(d / "organizemyfiles.png")
 
     # Icône embarquée dans le programme (fenêtre, barre latérale)
     render(src, 256).save(OUT / "app-256.png")

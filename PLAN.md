@@ -1,4 +1,4 @@
-# Plan : nettoyage du dépôt puis finalisation de OrganizeFiles (en Rust)
+# Plan : nettoyage du dépôt puis finalisation de OrganizeMyFiles (en Rust)
 
 > **Statut au 2026-11-11** — Partie A (nettoyage) : **faite** (historique réécrit, dépôt, disque local et Mac Studio nettoyés).
 > Partie B : **à réaliser**, une branche par tâche, dans l'ordre du tableau.

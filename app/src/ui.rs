@@ -255,8 +255,8 @@ impl App {
         let tab = launch.tab.clone();
         let mut app = Self::blank(launch);
         if app.screenshot.is_some() {
-            // Capture d'écran : jamais d'écriture. Avec ORGANIZEFILES_STATE_DIR, on charge ce dossier (contrôle de la restauration).
-            if std::env::var_os("ORGANIZEFILES_STATE_DIR").is_some() {
+            // Capture d'écran : jamais d'écriture. Avec ORGANIZEMYFILES_STATE_DIR, on charge ce dossier (contrôle de la restauration).
+            if std::env::var_os("ORGANIZEMYFILES_STATE_DIR").is_some() {
                 app.load_saved_state();
                 app.store_path = None;
             } else if !empty {
@@ -1864,7 +1864,7 @@ impl App {
                 Color32::WHITE,
             );
             ui.add_space(8.0);
-            ui.label(RichText::new("OrganizeFiles").size(17.0).family(semibold()).color(Color32::WHITE));
+            ui.label(RichText::new("OrganizeMyFiles").size(17.0).family(semibold()).color(Color32::WHITE));
         });
         ui.add_space(22.0);
         ui.horizontal(|ui| {
@@ -3075,7 +3075,7 @@ impl App {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             ui.label(
-                RichText::new(format!("OrganizeFiles · version {}", env!("CARGO_PKG_VERSION")))
+                RichText::new(format!("OrganizeMyFiles · version {}", env!("CARGO_PKG_VERSION")))
                     .size(14.5)
                     .color(text_primary()),
             );

@@ -25,7 +25,7 @@ mod imp {
     impl MenuBar {
         /// `icon_png` : l'icône de l'appli ; `wake` réveille l'interface à chaque clic dans le menu.
         pub fn new(icon_png: &[u8], enabled: bool, wake: impl Fn() + Send + Sync + 'static) -> Option<Self> {
-            let open = MenuItem::new("Ouvrir OrganizeFiles", true, None);
+            let open = MenuItem::new("Ouvrir OrganizeMyFiles", true, None);
             let organize = MenuItem::new("Organiser maintenant", true, None);
             let enabled_item = CheckMenuItem::new("Surveillance active", true, enabled, None);
             let quit = MenuItem::new("Quitter", true, None);
@@ -38,7 +38,7 @@ mod imp {
             let tray = TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
                 .with_icon(icon)
-                .with_tooltip("OrganizeFiles")
+                .with_tooltip("OrganizeMyFiles")
                 .build()
                 .ok()?;
 
