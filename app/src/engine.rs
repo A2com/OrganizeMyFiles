@@ -1406,9 +1406,40 @@ pub fn nfc(s: &str) -> String {
     s.nfc().collect()
 }
 
+/// État d'accès à un dossier suivi.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    Ok,
+    /// macOS (ou les droits Unix) refuse la lecture du dossier.
+    Denied,
+    Missing,
+}
+
+fn is_permission_io(e: &std::io::Error) -> bool {
+    // EPERM (1) est ce que renvoie macOS quand une autorisation de confidentialité manque.
+    e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(1)
+}
+
+pub fn folder_access(path: &Path) -> Access {
+    match fs::read_dir(path) {
+        Ok(_) => Access::Ok,
+        Err(e) if is_permission_io(&e) => Access::Denied,
+        Err(_) => Access::Missing,
+    }
+}
+
+/// Vrai si un message d'erreur système vient d'un accès refusé.
+pub fn is_permission_error(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("operation not permitted") || m.contains("permission denied") || m.contains("(os error 1)") || m.contains("(os error 13)")
+}
+
 /// Traduit à l'affichage les messages du moteur (valeurs d'origine, laissées intactes
 /// dans les données). Un message inconnu est rendu tel quel.
 pub fn fr_message(msg: &str) -> String {
+    if is_permission_error(msg) {
+        return "accès refusé par macOS : autorisez OrganizeMyFiles dans Réglages Système › Confidentialité et sécurité".into();
+    }
     nfc(&fr_message_raw(msg))
 }
 
@@ -1724,7 +1755,7 @@ mod tests {
         assert_eq!(fr_message("move → /a/b"), "déplacé → /a/b");
         assert_eq!(fr_message("serait copy vers /x"), "serait copié vers /x");
         assert_eq!(fr_message("serait addTag [a]"), "ajouterait les étiquettes [a]");
-        assert_eq!(fr_message("Permission denied (os error 13)"), "Permission denied (os error 13)");
+        assert_eq!(fr_message("No such file or directory (os error 2)"), "No such file or directory (os error 2)");
     }
 
     #[test]
@@ -1772,5 +1803,32 @@ mod tests {
         let out = runner.run(&folders, &[rule], SystemTime::now());
         assert_eq!(out.matched, 2, "un fichier par dossier ciblé");
         assert_eq!(fs::read_dir(&dest).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn permission_errors_are_recognised_and_explained() {
+        for m in ["Operation not permitted (os error 1)", "Permission denied (os error 13)", "Destination indisponible : Operation not permitted (os error 1)"] {
+            assert!(is_permission_error(m), "{m}");
+            assert!(fr_message(m).contains("Confidentialité"), "{m}");
+        }
+        assert!(!is_permission_error("No such file or directory (os error 2)"));
+    }
+
+    #[test]
+    fn folder_access_distinguishes_ok_missing_and_denied() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("organizemyfiles-access-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(folder_access(&dir), Access::Ok);
+        assert_eq!(folder_access(&dir.join("absent")), Access::Missing);
+        let locked = dir.join("locked");
+        fs::create_dir_all(&locked).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = folder_access(&locked);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        // Un utilisateur root lit tout : on ne vérifie le refus que pour un utilisateur normal.
+        if std::env::var("USER").map(|u| u != "root").unwrap_or(true) {
+            assert_eq!(denied, Access::Denied);
+        }
     }
 }

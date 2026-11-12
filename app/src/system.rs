@@ -69,6 +69,15 @@ pub fn reveal_in_finder(path: &std::path::Path) {
     let _ = path;
 }
 
+/// Ouvre Réglages Système sur « Accès complet au disque ». Sans effet hors macOS.
+pub fn open_privacy_settings() {
+    #[cfg(target_os = "macos")]
+    std::thread::spawn(|| {
+        let url = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles".to_string();
+        let _ = SystemCommands.run("open", &[url], Duration::from_secs(10));
+    });
+}
+
 pub fn open_application_args(app: &str, file: &str) -> Vec<String> {
     vec!["-a".into(), app.into(), file.into()]
 }
