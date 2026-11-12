@@ -2147,7 +2147,7 @@ impl App {
                 let tile = Rect::from_min_size(rect.min + Vec2::new(8.0, 10.0), Vec2::splat(34.0));
                 ui.painter().rect_filled(tile, Rounding::same(10.0), with_alpha(if exists { accent } else { RED }, 70));
                 draw_icon(&ui.painter().clone(), tile.center(), Icon::Folder, Color32::WHITE, 17.0);
-                let name = f.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = f.path.file_name().map(|n| nfc(&n.to_string_lossy())).unwrap_or_default();
                 let clip = Rect::from_min_max(rect.min, Pos2::new(rect.right() - 170.0, rect.bottom()));
                 let tp = ui.painter().with_clip_rect(clip);
                 tp.text(
@@ -2410,8 +2410,8 @@ impl App {
             let name = f
                 .path
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| f.path.display().to_string());
+                .map(|n| nfc(&n.to_string_lossy()))
+                .unwrap_or_else(|| nfc(&f.path.display().to_string()));
             let (_, rect) = panel_card_with(ui, None, 16.0, |ui| {
                 ui.horizontal(|ui| {
                     ui.dnd_drag_source(egui::Id::new(("fdrag", f.id)), DragRow { list: 2, idx: i }, |ui| {
@@ -2565,7 +2565,7 @@ impl App {
             .folders
             .iter()
             .filter(|f| rule.folder_ids.contains(&f.id))
-            .map(|f| f.path.display().to_string().to_lowercase())
+            .map(|f| nfc(&f.path.display().to_string()).to_lowercase())
             .collect::<Vec<_>>()
             .join(" ");
         rule.name.to_lowercase().contains(q)
@@ -3096,6 +3096,7 @@ fn shorten(p: &str) -> String {
 
 /// Raccourcit un chemin : `~/…` sous le dossier personnel, chemin absolu sinon.
 fn shorten_with_home(p: &str, home: &str) -> String {
+    let (p, home) = (&nfc(p), &nfc(home));
     let full = match std::path::Path::new(p).strip_prefix(home) {
         Ok(rel) if rel.as_os_str().is_empty() => "~".to_string(),
         Ok(rel) => format!("~/{}", rel.to_string_lossy()),
