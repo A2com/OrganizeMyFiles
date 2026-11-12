@@ -8,9 +8,11 @@ use eframe::egui::{self, Align, Color32, Layout, Pos2, Rect, RichText, Rounding,
 
 use crate::alerts;
 use crate::engine::*;
+use crate::history_view;
 use crate::mechanics::*;
 use crate::menubar::{MenuBar, MenuCommand};
 use crate::store::{self, Loaded, Settings, State};
+use crate::system;
 use crate::tags;
 use crate::watcher::{self, WatchConfig, Watcher};
 
@@ -233,6 +235,9 @@ pub struct App {
     /// Vrai quand l'utilisateur a choisi « Quitter » : la fermeture n'est plus interceptée.
     quitting: bool,
     search: String,
+    history_filter: history_view::StatusFilter,
+    /// Nombre d'actions affichées dans l'historique (+50 à chaque « Afficher plus »).
+    history_limit: usize,
     toast: Option<String>,
     undo_folder: Option<UndoFolder>,
     /// Fichier de sauvegarde ; `None` en mode capture d'écran (on n'écrit jamais dans les vraies données).
@@ -308,6 +313,8 @@ impl App {
             menubar_failed: false,
             quitting: false,
             search: String::new(),
+            history_filter: history_view::StatusFilter::All,
+            history_limit: HISTORY_PAGE_SIZE,
             toast: None,
             undo_folder: None,
             store_path: None,
@@ -508,21 +515,40 @@ impl App {
         }
     }
 
+    /// Annule une entrée de l'historique et prévient la surveillance de ne pas la retraiter.
+    fn undo_one(&mut self, idx: usize) -> Result<(), String> {
+        let e = self.history.get_mut(idx).ok_or("entrée introuvable")?;
+        undo_entry(e)?;
+        e.status = Status::Undone;
+        e.message = "restored".into();
+        let paths = vec![e.original_path.clone(), e.result_path.clone()];
+        if let Some(w) = &self.watcher {
+            w.ignore(paths);
+        }
+        Ok(())
+    }
+
     fn undo(&mut self, idx: usize) {
-        if let Some(e) = self.history.get_mut(idx) {
-            match undo_entry(e) {
-                Ok(()) => {
-                    e.status = Status::Undone;
-                    e.message = "restored".into();
-                    let paths = vec![e.original_path.clone(), e.result_path.clone()];
-                    if let Some(w) = &self.watcher {
-                        w.ignore(paths);
-                    }
-                    self.toast("Annulé");
-                }
-                Err(msg) => self.toast(format!("Annulation impossible : {msg}")),
+        match self.undo_one(idx) {
+            Ok(()) => self.toast("Annulé"),
+            Err(msg) => self.toast(format!("Annulation impossible : {msg}")),
+        }
+    }
+
+    /// Annule tout un lot, de la dernière action à la première ; continue si l'une échoue.
+    fn undo_batch(&mut self, entries: &[usize]) {
+        let (mut done, mut failed) = (0, 0);
+        for idx in history_view::undo_order(&self.history, entries) {
+            match self.undo_one(idx) {
+                Ok(()) => done += 1,
+                Err(_) => failed += 1,
             }
         }
+        self.toast(match (done, failed) {
+            (d, 0) => format!("{d} action(s) annulée(s)"),
+            (0, f) => format!("Annulation impossible pour {f} action(s)"),
+            (d, f) => format!("{d} action(s) annulée(s), {f} impossible(s)"),
+        });
     }
 
     /// Les fichiers que l'appli vient de déplacer ne doivent pas être retraités par la surveillance.
@@ -1740,7 +1766,7 @@ impl App {
                 .id(search_id)
                 .frame(false)
                 .desired_width(search_w - 90.0)
-                .hint_text("Rechercher règles, dossiers…"),
+                .hint_text("Rechercher règles, dossiers, fichiers…"),
         );
         let key = if cfg!(target_os = "macos") { "⌘ K" } else { "Ctrl K" };
         ui.painter().text(
@@ -3053,84 +3079,179 @@ impl App {
         self.header(ui, "Historique", "Actions par lot, annulables si possible.");
 
         if self.history.is_empty() {
-            ui.label(RichText::new("Rien pour l'instant. Lancez un lot ou un aperçu.").color(text_dim()));
+            panel_card(ui, |ui| {
+                ui.label(RichText::new("Rien pour l'instant.").size(16.0).family(semibold()).color(text_primary()));
+                ui.add_space(4.0);
+                ui.label(RichText::new("Chaque rangement apparaîtra ici, par lot, avec la possibilité de l'annuler.").size(14.0).color(text_dim()));
+                ui.add_space(12.0);
+                if btn(ui, "Lancer un aperçu", Btn::Sky, accent, None).clicked() {
+                    self.run_batch(true);
+                }
+            });
             return;
         }
 
-        let total = self.history.len();
-        let start = total.saturating_sub(HISTORY_PAGE_SIZE);
-        let mut undo_idx: Option<usize> = None;
-        let mut batch: Option<u64> = None;
-
-        for (i, e) in self.history.iter().enumerate().skip(start) {
-            if batch != Some(e.batch_id) {
-                batch = Some(e.batch_id);
-                ui.label(
-                    RichText::new(format!(
-                        "Lot n°{}  ·  {}  ·  {}",
-                        e.batch_id,
-                        date_str(e.created),
-                        time_str(e.created)
-                    ))
-                    .size(14.0)
-                    .family(semibold())
-                    .color(text_dim()),
-                );
-                ui.add_space(8.0);
+        // Filtres : statut (avec compteurs) et recherche de la barre du haut.
+        let labels: Vec<String> = history_view::FILTERS
+            .iter()
+            .map(|f| format!("{} {}", f.label(), self.history.iter().filter(|e| f.matches(e.status)).count()))
+            .collect();
+        let current = history_view::FILTERS.iter().position(|f| *f == self.history_filter).unwrap_or(0);
+        let mut clear_search = false;
+        ui.horizontal(|ui| {
+            let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+            if let Some(i) = segmented(ui, egui::Id::new("history-filter"), &refs, current, SKY_DEEP) {
+                self.history_filter = history_view::FILTERS[i];
+                self.history_limit = HISTORY_PAGE_SIZE;
             }
-            card(ui, Vec2::new(756.0, 72.0), |ui| {
-                ui.horizontal(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), egui::Sense::hover());
-                    ui.painter().circle_filled(rect.center(), 5.0, status_color(e.status));
-                    ui.add_space(12.0);
-                    ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new(format!("{} — {}", e.rule_name, e.action_label))
-                                .size(15.0)
-                                .family(semibold())
-                                .color(text_primary()),
-                        );
-                        ui.label(
-                            RichText::new(format!(
-                                "{}  →  {}  ·  {}",
-                                shorten(&e.original_path.display().to_string()),
-                                shorten(&e.result_path.display().to_string()),
-                                fr_message(&e.message)
-                            ))
-                            .size(13.5)
-                            .color(text_dim()),
-                        );
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if e.reversible && e.status == Status::Applied {
-                            if pill(ui, "Annuler", accent, false, false).clicked() {
-                                undo_idx = Some(i);
-                            }
-                        } else {
-                            ui.label(
-                                RichText::new(e.status.label())
-                                    .size(13.5)
-                                    .color(status_color(e.status)),
-                            );
-                        }
-                    });
-                });
-            });
-            ui.add_space(8.0);
+            if !self.search.trim().is_empty() {
+                ui.add_space(8.0);
+                if chip_button(ui, &format!("Recherche : {}  ×", self.search.trim()), accent, with_alpha(accent, 38))
+                    .on_hover_text("Effacer la recherche")
+                    .clicked()
+                {
+                    clear_search = true;
+                }
+            }
+        });
+        if clear_search {
+            self.search.clear();
+        }
+        ui.add_space(14.0);
+
+        let days = history_view::group(&self.history, SystemTime::now(), self.history_filter, &tags::fold(self.search.trim()));
+        if days.is_empty() {
+            ui.label(RichText::new("Aucune entrée ne correspond à ce filtre.").size(14.5).color(text_dim()));
+            return;
         }
 
-        if total > HISTORY_PAGE_SIZE {
-            ui.label(
-                RichText::new(format!(
-                    "{HISTORY_PAGE_SIZE} dernières entrées sur {total}."
-                ))
-                .size(13.5)
-                .color(text_dim()),
-            );
+        let mut undo_idx: Option<usize> = None;
+        let mut undo_batch: Option<Vec<usize>> = None;
+        let mut reveal: Option<PathBuf> = None;
+        let mut shown = 0usize;
+        let mut more = false;
+        let first_batch = days.first().and_then(|d| d.batches.first()).map(|b| b.batch_id);
+
+        'days: for day in &days {
+            ui.label(caps(&day.label.to_uppercase()));
+            ui.add_space(6.0);
+            for batch in &day.batches {
+                if shown >= self.history_limit {
+                    more = true;
+                    break 'days;
+                }
+                shown += batch.entries.len();
+                let sum = history_view::batch_summary(&self.history, &batch.entries);
+                panel_card_with(ui, None, 14.0, |ui| {
+                    let id = ui.make_persistent_id(("history-batch", batch.batch_id));
+                    let state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, first_batch == Some(batch.batch_id));
+                    state
+                        .show_header(ui, |ui| {
+                            ui.label(RichText::new(format!("Lot n°{}", batch.batch_id)).size(15.0).family(semibold()).color(text_primary()));
+                            ui.label(
+                                RichText::new(format!(
+                                    "·  {}  ·  {} fichier{}",
+                                    time_str(batch.created),
+                                    sum.files,
+                                    if sum.files > 1 { "s" } else { "" }
+                                ))
+                                .size(13.5)
+                                .color(text_dim()),
+                            );
+                            if sum.applied > 0 {
+                                chip(ui, &format!("{} appliqué{}", sum.applied, if sum.applied > 1 { "s" } else { "" }), status_color(Status::Applied), with_alpha(status_color(Status::Applied), 38));
+                            }
+                            if sum.failed > 0 {
+                                chip(ui, &format!("{} échec{}", sum.failed, if sum.failed > 1 { "s" } else { "" }), status_color(Status::Failed), with_alpha(status_color(Status::Failed), 38));
+                            }
+                            if sum.undone > 0 {
+                                chip(ui, &format!("{} annulé{}", sum.undone, if sum.undone > 1 { "s" } else { "" }), status_color(Status::Undone), with_alpha(status_color(Status::Undone), 38));
+                            }
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if sum.undoable > 0
+                                    && chip_button(ui, "Annuler le lot", accent, with_alpha(accent, 38))
+                                        .on_hover_text("Annule toutes les actions annulables de ce lot")
+                                        .clicked()
+                                {
+                                    undo_batch = Some(batch.entries.clone());
+                                }
+                            });
+                        })
+                        .body(|ui| {
+                            ui.add_space(8.0);
+                            for &i in &batch.entries {
+                                self.history_row(ui, i, accent, &mut undo_idx, &mut reveal);
+                            }
+                        });
+                });
+                ui.add_space(10.0);
+            }
         }
-        if let Some(i) = undo_idx {
+
+        if more {
+            let remaining: usize = days.iter().flat_map(|d| &d.batches).map(|b| b.entries.len()).sum::<usize>() - shown;
+            if btn(ui, &format!("Afficher plus ({remaining} restantes)"), Btn::Ghost, accent, None).clicked() {
+                self.history_limit += HISTORY_PAGE_SIZE;
+            }
+        }
+        if let Some(path) = reveal {
+            system::reveal_in_finder(&path);
+        }
+        if let Some(entries) = undo_batch {
+            self.undo_batch(&entries);
+        } else if let Some(i) = undo_idx {
             self.undo(i);
         }
+    }
+
+    /// Une ligne compacte : fichier → dossier d'arrivée, action, boutons. Texte tronqué, détail au survol.
+    fn history_row(&self, ui: &mut egui::Ui, i: usize, accent: Color32, undo_idx: &mut Option<usize>, reveal: &mut Option<PathBuf>) {
+        let e = &self.history[i];
+        let failed = matches!(e.status, Status::Failed | Status::BlockedByConflict);
+        let frame = egui::Frame::none().inner_margin(egui::Margin::symmetric(4.0, 4.0)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (dot, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                ui.painter().circle_filled(dot.center(), 4.5, status_color(e.status));
+                ui.add_space(6.0);
+                let right_w = 190.0;
+                let left_w = (ui.available_width() - right_w).max(120.0);
+                let name_w = (left_w * 0.58).floor();
+                let truncated = |ui: &mut egui::Ui, w: f32, text: RichText| {
+                    ui.allocate_ui_with_layout(Vec2::new(w, 22.0), Layout::left_to_right(Align::Center), |ui| {
+                        ui.add(egui::Label::new(text).truncate());
+                    });
+                };
+                truncated(ui, name_w, RichText::new(history_view::file_name(e)).size(14.5).family(semibold()).color(text_primary()));
+                ui.label(RichText::new("→").size(14.0).color(text_label()));
+                truncated(ui, (left_w - name_w - 24.0).max(40.0), RichText::new(history_view::destination_label(e)).size(14.0).color(text_dim()));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if history_view::is_undoable(e) && chip_button(ui, "Annuler", accent, with_alpha(accent, 38)).clicked() {
+                        *undo_idx = Some(i);
+                    }
+                    if e.status == Status::Applied && icon_button(ui, Icon::FolderOpen, "Afficher dans le Finder", false) {
+                        *reveal = Some(e.result_path.clone());
+                    }
+                    chip(ui, &history_view::short_action(&e.action_label), text_dim(), glass(14));
+                });
+            });
+            if failed {
+                ui.horizontal(|ui| {
+                    ui.add_space(22.0);
+                    ui.add(egui::Label::new(RichText::new(fr_message(&e.message)).size(13.0).color(status_color(e.status))).wrap());
+                });
+            }
+        });
+        let tip = format!(
+            "{}\nDepuis : {}\nVers : {}\nRègle : {} · {}\n{}",
+            e.status.label(),
+            e.original_path.display(),
+            e.result_path.display(),
+            e.rule_name,
+            e.action_label,
+            fr_message(&e.message)
+        );
+        ui.interact(frame.response.rect, egui::Id::new(("history-row", i)), egui::Sense::hover()).on_hover_text(nfc(&tip));
     }
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
@@ -3366,5 +3487,38 @@ mod tests {
         let shared = app.rules.iter().find(|r| r.id == 10).unwrap();
         assert!(shared.folder_ids.contains(&1) && shared.folder_ids.contains(&2));
         assert_eq!(app.folders.len(), 2);
+    }
+
+    fn history_entry(batch: u64, kind: ActionKind, from: &std::path::Path, to: &std::path::Path, original: &std::path::Path, result: &std::path::Path) -> HistoryEntry {
+        HistoryEntry {
+            batch_id: batch,
+            rule_name: "r".into(),
+            action_label: kind.label().into(),
+            original_path: original.to_path_buf(),
+            result_path: result.to_path_buf(),
+            undo: Some(Undo { kind, from: from.to_path_buf(), to: to.to_path_buf() }),
+            reversible: true,
+            status: Status::Applied,
+            message: String::new(),
+            created: SystemTime::now(),
+        }
+    }
+
+    #[test]
+    fn undoing_a_batch_reverts_the_last_action_first() {
+        let dir = std::env::temp_dir().join(format!("organizemyfiles-undo-batch-{}", std::process::id()));
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        // Le fichier a été déplacé dans sub/ puis renommé en b.txt.
+        std::fs::write(sub.join("b.txt"), b"x").unwrap();
+        let (orig, moved, renamed) = (dir.join("a.txt"), sub.join("a.txt"), sub.join("b.txt"));
+        let mut app = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
+        app.history = vec![
+            history_entry(1, ActionKind::Move, &moved, &orig, &orig, &moved),
+            history_entry(1, ActionKind::Rename, &renamed, &moved, &moved, &renamed),
+        ];
+        app.undo_batch(&[0, 1]);
+        assert!(orig.exists(), "le fichier est revenu à sa place d'origine");
+        assert!(app.history.iter().all(|e| e.status == Status::Undone));
     }
 }

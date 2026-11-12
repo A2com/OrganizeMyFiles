@@ -56,6 +56,19 @@ impl CommandRunner for SystemCommands {
     }
 }
 
+/// Montre le fichier dans le Finder (`open -R`), sans bloquer l'interface. Sans effet hors macOS.
+pub fn reveal_in_finder(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    {
+        let target = path.to_string_lossy().into_owned();
+        std::thread::spawn(move || {
+            let _ = SystemCommands.run("open", &["-R".to_string(), target], Duration::from_secs(10));
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = path;
+}
+
 pub fn open_application_args(app: &str, file: &str) -> Vec<String> {
     vec!["-a".into(), app.into(), file.into()]
 }
