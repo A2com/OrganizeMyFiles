@@ -15,6 +15,7 @@ use crate::menubar_info::{self, MenuFolder, MenuInfo};
 use crate::store::{self, Loaded, Settings, State};
 use crate::system;
 use crate::tags;
+use crate::toast::{self, Toast, ToastKind};
 use crate::watcher::{self, WatchConfig, Watcher};
 
 // ------------------------------------------------------------------- theme
@@ -243,7 +244,7 @@ pub struct App {
     history_filter: history_view::StatusFilter,
     /// Nombre d'actions affichées dans l'historique (+50 à chaque « Afficher plus »).
     history_limit: usize,
-    toast: Option<String>,
+    toast: Option<Toast>,
     undo_folder: Option<UndoFolder>,
     /// Fichier de sauvegarde ; `None` en mode capture d'écran (on n'écrit jamais dans les vraies données).
     store_path: Option<std::path::PathBuf>,
@@ -394,8 +395,21 @@ impl App {
         ACCENTS[self.accent].1
     }
 
+    /// Message d'état en bas de la fenêtre : pastille verte.
     fn toast(&mut self, msg: impl Into<String>) {
-        self.toast = Some(msg.into());
+        self.toast = Some(Toast { text: msg.into(), kind: ToastKind::Ok, since: std::time::Instant::now() });
+    }
+
+    fn show_toast(&mut self, text: String, kind: ToastKind) {
+        match kind {
+            ToastKind::Ok => self.toast(text),
+            ToastKind::Error => self.toast_error(text),
+        }
+    }
+
+    /// Message d'erreur en bas de la fenêtre : pastille rouge.
+    fn toast_error(&mut self, msg: impl Into<String>) {
+        self.toast = Some(Toast { text: msg.into(), kind: ToastKind::Error, since: std::time::Instant::now() });
     }
 
     /// Photographie de tout ce qui doit survivre à la fermeture.
@@ -452,7 +466,7 @@ impl App {
             Loaded::Fresh => {}
             Loaded::Restored(state) => self.restore(*state),
             Loaded::Unreadable { backup, reason } => {
-                self.toast(format!("Données illisibles ({reason}) : copie gardée dans {}", backup.display()));
+                self.toast_error(format!("Données illisibles ({reason}) : copie gardée dans {}", backup.display()));
             }
         }
         self.last_saved = store::to_json(&self.snapshot());
@@ -468,13 +482,13 @@ impl App {
         }
         match store::save(&path, &json) {
             Ok(()) => self.last_saved = json,
-            Err(e) => self.toast(format!("Sauvegarde impossible : {e}")),
+            Err(e) => self.toast_error(format!("Sauvegarde impossible : {e}")),
         }
     }
 
     fn run_batch(&mut self, dry_run: bool) {
         if self.folders.is_empty() {
-            self.toast("Ajoutez d'abord un dossier");
+            self.toast_error("Ajoutez d'abord un dossier");
             return;
         }
         let mut runner = Runner {
@@ -498,15 +512,13 @@ impl App {
                 alerts::notify(text);
             }
         }
+        let failed = outcome.history.iter().filter(|e| matches!(e.status, Status::Failed | Status::BlockedByConflict)).count();
         for e in outcome.history {
             self.history.push(e);
         }
         purge_history(&mut self.history, self.retention_days, SystemTime::now());
-        if dry_run {
-            self.toast(format!("Aperçu : {} fichier(s) concerné(s)", outcome.matched));
-        } else {
-            self.toast(format!("{} fichier(s) organisé(s)", outcome.matched));
-        }
+        let (text, kind) = toast::batch_toast(if dry_run { "Aperçu : " } else { "" }, "", outcome.matched, failed);
+        self.show_toast(text, kind);
     }
 
     /// Annule une entrée de l'historique et prévient la surveillance de ne pas la retraiter.
@@ -525,7 +537,7 @@ impl App {
     fn undo(&mut self, idx: usize) {
         match self.undo_one(idx) {
             Ok(()) => self.toast("Annulé"),
-            Err(msg) => self.toast(format!("Annulation impossible : {msg}")),
+            Err(msg) => self.toast_error(format!("Annulation impossible : {msg}")),
         }
     }
 
@@ -538,11 +550,11 @@ impl App {
                 Err(_) => failed += 1,
             }
         }
-        self.toast(match (done, failed) {
-            (d, 0) => format!("{d} action(s) annulée(s)"),
-            (0, f) => format!("Annulation impossible pour {f} action(s)"),
-            (d, f) => format!("{d} action(s) annulée(s), {f} impossible(s)"),
-        });
+        match (done, failed) {
+            (d, 0) => self.toast(format!("{d} action(s) annulée(s)")),
+            (0, f) => self.toast_error(format!("Annulation impossible pour {f} action(s)")),
+            (d, f) => self.toast_error(format!("{d} action(s) annulée(s), {f} impossible(s)")),
+        }
     }
 
     /// Relit l'état d'accès des dossiers suivis (macOS peut refuser la lecture sans autorisation).
@@ -748,7 +760,9 @@ impl App {
             self.monthly_used += r.monthly_delta;
             self.last_run = Some((r.matched, r.history.len(), r.scanned));
             self.last_run_dry = false;
-            self.toast(format!("{} fichier(s) organisé(s) automatiquement", r.matched));
+            let failed = r.history.iter().filter(|e| matches!(e.status, Status::Failed | Status::BlockedByConflict)).count();
+            let (text, kind) = toast::batch_toast("", " automatiquement", r.matched, failed);
+            self.show_toast(text, kind);
             if self.notify {
                 if let Some(text) = alerts::summary(&r.history) {
                     alerts::notify(text);
@@ -1177,6 +1191,46 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
         ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(font), tc);
     }
     response
+}
+
+/// Pastille d'état : fond teinté (vert = tout va bien, rouge = erreur), point qui pulse, texte.
+/// Renvoie vrai si on a cliqué dessus pour la fermer.
+fn toast_pill(ui: &mut egui::Ui, text: &str, kind: ToastKind, look: toast::ToastLook, time: f64) -> bool {
+    let color = match kind {
+        ToastKind::Ok => GREEN,
+        ToastKind::Error => RED,
+    };
+    let fade = |a: f32| (a * look.opacity).round().clamp(0.0, 255.0) as u8;
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(14.5), Color32::WHITE);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 46.0, 32.0), egui::Sense::click());
+    ui.painter().rect_filled(rect, Rounding::same(16.0), with_alpha(CANVAS, fade(170.0)));
+    ui.painter().rect_filled(rect, Rounding::same(16.0), with_alpha(color, fade(if resp.hovered() { 44.0 } else { 30.0 })));
+    let dot = Pos2::new(rect.left() + 16.0, rect.center().y);
+    if look.pulsing {
+        let t = (time as f32 * 1.4).fract();
+        ui.painter().circle_filled(dot, 4.0 + 5.0 * t, with_alpha(color, fade((1.0 - t) * 90.0)));
+    }
+    ui.painter().circle_filled(dot, 4.0, with_alpha(color, fade(255.0)));
+    ui.painter().galley(
+        Pos2::new(rect.left() + 28.0, rect.center().y - galley.size().y / 2.0),
+        ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(14.5), with_alpha(text_primary(), fade(255.0))),
+        text_primary(),
+    );
+    resp.on_hover_text("Cliquer pour fermer").clicked()
+}
+
+/// Halo qui « respire » autour d'un bouton rond : plusieurs couches arrondies dont l'écart et l'opacité suivent `phase` (0..1).
+fn pulse_glow(rect: Rect, accent: Color32, phase: f32) -> egui::Shape {
+    let breath = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
+    let radius = rect.height() / 2.0;
+    let layers = (0..8)
+        .map(|i| {
+            let grow = 2.0 + i as f32 * 2.6 + 7.0 * breath;
+            let alpha = (40.0 - i as f32 * 4.6) * (0.45 + 0.55 * breath);
+            egui::Shape::rect_filled(rect.expand(grow), Rounding::same(radius + grow), with_alpha(accent, alpha.max(0.0) as u8))
+        })
+        .collect();
+    egui::Shape::Vec(layers)
 }
 
 fn lighten(c: Color32, d: u8) -> Color32 {
@@ -1781,8 +1835,18 @@ impl eframe::App for App {
                 }
                 _ => {
                     self.undo_folder = None;
-                    if let Some(t) = &self.toast {
-                        bar_ui.label(RichText::new(format!("•  {t}")).size(14.5).color(text_dim()));
+                    let shown =
+                        self.toast.as_ref().and_then(|t| toast::look(t.since.elapsed().as_secs_f32(), t.kind).map(|look| (t, look)));
+                    match shown {
+                        Some((t, look)) => {
+                            let time = ctx.input(|i| i.time);
+                            let dismissed = toast_pill(&mut bar_ui, &t.text, t.kind, look, time);
+                            ctx.request_repaint_after(std::time::Duration::from_millis(if look.pulsing { 50 } else { 250 }));
+                            if dismissed {
+                                self.toast = None;
+                            }
+                        }
+                        None => self.toast = None,
                     }
                 }
             }
@@ -1934,7 +1998,7 @@ impl App {
             .or_else(|| self.folders.first().map(|f| f.id));
         match folder_id {
             Some(id) => self.new_rule_in(id),
-            None => self.toast("Ajoutez d'abord un dossier."),
+            None => self.toast_error("Ajoutez d'abord un dossier."),
         }
     }
 
@@ -1987,7 +2051,9 @@ impl App {
             (n, None) => format!("{n} dossiers ajoutés"),
             (n, Some(first)) => format!("{n} ajouté(s), refusé : {first}"),
         };
-        if added > 0 || !refused.is_empty() {
+        if !refused.is_empty() {
+            self.toast_error(msg);
+        } else if added > 0 {
             self.toast(msg);
         }
     }
@@ -2177,8 +2243,18 @@ impl App {
                 }
             }
             HeroState::Ready | HeroState::Done => {
+                // Le halo est peint derrière le bouton : on réserve sa place avant de dessiner le bouton.
+                let glow_slot = ui.painter().add(egui::Shape::Noop);
                 let run = pill(ui, "Organiser maintenant", accent, true, true)
                     .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).");
+                let animated = self.animate_bg && self.app_enabled;
+                let phase = if animated { (ctx.input(|i| i.time) / 1.8).fract() as f32 } else { 0.3 };
+                if self.app_enabled {
+                    ui.painter().set(glow_slot, pulse_glow(run.rect, accent, phase));
+                }
+                if animated {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(33));
+                }
                 organise = run.clicked() && self.app_enabled;
                 ui.add_space(10.0);
                 preview = pill(ui, "Aperçu", accent, false, true).on_hover_text("Simule, sans toucher aux fichiers.").clicked();
@@ -2671,7 +2747,7 @@ impl App {
         if let Some(i) = finder {
             let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
             if std::process::Command::new(program).arg(&self.folders[i].path).spawn().is_err() {
-                self.toast("Ouverture impossible.");
+                self.toast_error("Ouverture impossible.");
             }
         }
         if let Some(i) = replace {
@@ -2683,7 +2759,7 @@ impl App {
                         self.folder_counts.remove(&id);
                         self.toast("Emplacement mis à jour");
                     }
-                    Err(why) => self.toast(format!("Non modifié — {why}")),
+                    Err(why) => self.toast_error(format!("Non modifié — {why}")),
                 }
             }
         }
@@ -2805,7 +2881,7 @@ impl App {
             });
         });
         if refused_last {
-            self.toast("Une règle doit garder au moins un dossier.");
+            self.toast_error("Une règle doit garder au moins un dossier.");
         }
         changed
     }
@@ -3353,7 +3429,7 @@ impl App {
             if self.launch_at_login != before {
                 if let Err(e) = crate::login::set_enabled(self.launch_at_login) {
                     self.launch_at_login = before;
-                    self.toast(format!("Lancement au démarrage impossible : {e}"));
+                    self.toast_error(format!("Lancement au démarrage impossible : {e}"));
                 }
             }
             ui.add_space(8.0);

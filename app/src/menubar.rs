@@ -35,8 +35,14 @@ mod imp {
 
     use muda::accelerator::{Accelerator, Code, Modifiers};
     use muda::{ContextMenu, IconMenuItem, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSMenu};
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{sel, MainThreadMarker};
+    use objc2_app_kit::{
+        NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSControlSize, NSImage, NSImageView, NSMenu, NSMenuItem,
+        NSSwitch, NSTextField, NSView,
+    };
+    use objc2_foundation::{NSData, NSPoint, NSRect, NSSize, NSString};
     use tray_icon::{TrayIcon, TrayIconBuilder};
 
     use super::{menubar_info, MenuCommand, MenuInfo, MenuScreen};
@@ -89,6 +95,60 @@ mod imp {
         }
     }
 
+    /// Ligne « Surveillance » du menu : icône, libellé et vrai interrupteur macOS (NSSwitch).
+    struct SwitchRow {
+        _view: Retained<NSView>,
+        switch: Retained<NSSwitch>,
+    }
+
+    impl SwitchRow {
+        /// Remplace l'affichage de la ligne `index` du menu par une vue avec un interrupteur. Le clic sur
+        /// l'interrupteur réutilise la cible et l'action de l'élément de menu (installées par muda) :
+        /// il produit donc le même événement qu'un clic sur la ligne.
+        fn install(menu: &Menu, index: isize, label: &str, icon_png: &[u8], enabled: bool) -> Option<Self> {
+            let mtm = MainThreadMarker::new()?;
+            let ptr = menu.ns_menu() as *const NSMenu;
+            // SAFETY : voir `mark_templates`.
+            let ns_menu = unsafe { ptr.as_ref() }?;
+            let entry: Retained<NSMenuItem> = ns_menu.itemArray().iter().nth(index as usize)?;
+
+            let (width, height) = (280.0, 30.0);
+            let rect = |x: f64, y: f64, w: f64, h: f64| NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
+            let view = NSView::initWithFrame(mtm.alloc(), rect(0.0, 0.0, width, height));
+            view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable);
+
+            let data = NSData::with_bytes(icon_png);
+            let image = NSImage::initWithData(mtm.alloc(), &data)?;
+            image.setTemplate(true);
+            let icon = NSImageView::imageViewWithImage(&image, mtm);
+            icon.setFrame(rect(14.0, 6.0, 18.0, 18.0));
+            view.addSubview(&icon);
+
+            let text = NSTextField::labelWithString(&NSString::from_str(label), mtm);
+            text.setFrame(rect(40.0, 5.0, 150.0, 20.0));
+            view.addSubview(&text);
+
+            let switch = NSSwitch::initWithFrame(mtm.alloc(), rect(width - 54.0, 4.0, 40.0, 22.0));
+            switch.setControlSize(NSControlSize::Small);
+            switch.setAutoresizingMask(NSAutoresizingMaskOptions::ViewMinXMargin);
+            switch.setState(if enabled { 1 } else { 0 });
+            // Même cible et même action que l'élément de menu : le clic déclenche l'événement de menu « toggle ».
+            let target: &AnyObject = &entry;
+            unsafe {
+                switch.setTarget(Some(target));
+                switch.setAction(Some(sel!(fireMenuItemAction:)));
+            }
+            view.addSubview(&switch);
+
+            entry.setView(Some(&view));
+            Some(SwitchRow { _view: view, switch })
+        }
+
+        fn set_enabled(&self, enabled: bool) {
+            self.switch.setState(if enabled { 1 } else { 0 });
+        }
+    }
+
     pub struct MenuBar {
         tray: TrayIcon,
         menu: Menu,
@@ -96,6 +156,7 @@ mod imp {
         counts: IconMenuItem,
         last: IconMenuItem,
         toggle: IconMenuItem,
+        switch: Option<SwitchRow>,
         folders: Submenu,
         rules: IconMenuItem,
         commands: Receiver<MenuCommand>,
@@ -158,7 +219,8 @@ mod imp {
                 let _ = tx.send(command);
                 wake();
             }));
-            let bar = MenuBar { tray, menu, status, counts, last, toggle, folders, rules, commands, shown: None };
+            let switch = SwitchRow::install(&menu, 8, "Surveillance", menu_icon!("veille"), true);
+            let bar = MenuBar { tray, menu, status, counts, last, toggle, switch, folders, rules, commands, shown: None };
             mark_templates(&bar.menu);
             Some(bar)
         }
@@ -179,7 +241,10 @@ mod imp {
             if let Some(text) = &info.last_batch {
                 self.last.set_text(text);
             }
-            self.toggle.set_text(menubar_info::toggle_label(info.enabled));
+            match &self.switch {
+                Some(row) => row.set_enabled(info.enabled),
+                None => self.toggle.set_text(menubar_info::toggle_label(info.enabled)),
+            }
             self.rules.set_text(menubar_info::rules_menu_title(info));
             self.folders.set_text(menubar_info::folders_menu_title(info));
             if previous.as_ref().map(|p| &p.folders) != Some(&info.folders) {
