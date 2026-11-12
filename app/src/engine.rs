@@ -809,7 +809,7 @@ pub fn expand_pattern(pattern: &str, f: &FileMeta, now: SystemTime) -> String {
 /// Destination tokens: {year} {month} {day} (0x1001e0b30).
 pub fn expand_destination(dest: &str, now: SystemTime) -> String {
     let secs = now_unix(now) as i64;
-    let (y, m, d) = crate::mechanics::month_key_parts(secs);
+    let (y, m, d, ..) = crate::mechanics::local_parts(secs);
     dest.replace("{year}", &format!("{:04}", y))
         .replace("{month}", &format!("{:02}", m))
         .replace("{day}", &format!("{:02}", d))
@@ -820,7 +820,7 @@ pub fn now_unix(t: SystemTime) -> u64 {
 }
 
 pub fn date_str(t: SystemTime) -> String {
-    let (y, m, d) = crate::mechanics::month_key_parts(now_unix(t) as i64);
+    let (y, m, d, ..) = crate::mechanics::local_parts(now_unix(t) as i64);
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
@@ -828,13 +828,13 @@ pub fn date_str(t: SystemTime) -> String {
 /// ActionExecutor.archiveFileName at 0x100140a14).
 pub fn timestamp_str(t: SystemTime) -> String {
     let secs = now_unix(t) as i64;
-    let (y, mo, d, h, mi, s) = crate::mechanics::timestamp_parts(secs);
+    let (y, mo, d, h, mi, s) = crate::mechanics::local_parts(secs);
     format!("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", y, mo, d, h, mi, s)
 }
 
 pub fn time_str(t: SystemTime) -> String {
-    let secs = now_unix(t) % 86_400;
-    format!("{:02}:{:02}", secs / 3600, (secs % 3600) / 60)
+    let (.., h, mi, _) = crate::mechanics::local_parts(now_unix(t) as i64);
+    format!("{:02}:{:02}", h, mi)
 }
 
 /// macOS filename validation (0x100138c54 family): no '/', not '.' / '..',
@@ -1590,17 +1590,16 @@ mod tests {
     fn pattern_tokens() {
         let f = meta("old", "pdf", 2048);
         let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        // Les dates suivent l'heure locale du système : on compare au même découpage.
+        let (y, mo, d, h, mi, sec) = crate::mechanics::local_parts(1_700_000_000);
         assert_eq!(
             expand_pattern("{name}-{current_date}.{extension}", &f, now),
-            "old-2023-11-14.pdf"
+            format!("old-{y:04}-{mo:02}-{d:02}.pdf")
         );
-        assert_eq!(
-            expand_pattern("{name}-{size}.{extension}", &f, now),
-            "old-2048.pdf"
-        );
+        assert_eq!(expand_pattern("{name}-{size}.{extension}", &f, now), "old-2048.pdf");
         assert_eq!(
             expand_pattern("{timestamp}", &f, now),
-            "2023-11-14_22-13-20"
+            format!("{y:04}-{mo:02}-{d:02}_{h:02}-{mi:02}-{sec:02}")
         );
     }
 

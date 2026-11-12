@@ -91,16 +91,21 @@ pub fn month_day(t: SystemTime) -> u32 {
     d
 }
 
-/// (year, month, day) of a unix timestamp in UTC.
-pub fn month_key_parts(secs: i64) -> (i64, u32, u32) {
-    civil_from_days(secs.div_euclid(86_400))
+/// (année, mois, jour, heure, minute, seconde) d'un instant Unix, à l'heure locale du système
+/// (fuseau et heure d'été compris).
+pub fn local_parts(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
+    use chrono::{Datelike, Local, TimeZone, Timelike};
+    match Local.timestamp_opt(secs, 0).single() {
+        Some(t) => (t.year() as i64, t.month(), t.day(), t.hour(), t.minute(), t.second()),
+        None => parts_at_offset(secs, 0),
+    }
 }
 
-/// (year, month, day, hour, min, sec) of a unix timestamp in UTC — for the
-/// "yyyy-MM-dd_HH-mm-ss" format of {timestamp}/{current_date} (0x100140a14).
-pub fn timestamp_parts(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
-    let (y, mo, d) = civil_from_days(secs.div_euclid(86_400));
-    let tod = secs.rem_euclid(86_400);
+/// Même découpage pour un décalage fixe en secondes par rapport à UTC.
+pub fn parts_at_offset(secs: i64, offset_secs: i64) -> (i64, u32, u32, u32, u32, u32) {
+    let local = secs + offset_secs;
+    let (y, mo, d) = civil_from_days(local.div_euclid(86_400));
+    let tod = local.rem_euclid(86_400);
     (y, mo, d, (tod / 3600) as u32, ((tod / 60) % 60) as u32, (tod % 60) as u32)
 }
 
@@ -182,5 +187,24 @@ mod tests {
     fn size_parsing() {
         assert_eq!(parse_size("10 MB"), Some(10 * 1024 * 1024));
         assert_eq!(parse_size("512"), Some(512));
+    }
+
+    #[test]
+    fn offset_shifts_the_day_and_the_hour() {
+        // 2026-01-15 23:30:00 UTC
+        let secs = 1_768_519_800;
+        assert_eq!(parts_at_offset(secs, 0), (2026, 1, 15, 23, 30, 0));
+        // Paris en hiver (UTC+1) : minuit passé, on est le lendemain.
+        assert_eq!(parts_at_offset(secs, 3600), (2026, 1, 16, 0, 30, 0));
+        // New York en hiver (UTC-5).
+        assert_eq!(parts_at_offset(secs, -5 * 3600), (2026, 1, 15, 18, 30, 0));
+    }
+
+    #[test]
+    fn local_parts_matches_the_system_offset() {
+        use chrono::{Local, Offset, TimeZone};
+        let secs = 1_768_519_800;
+        let offset = Local.timestamp_opt(secs, 0).single().map(|t| t.offset().fix().local_minus_utc() as i64).unwrap_or(0);
+        assert_eq!(local_parts(secs), parts_at_offset(secs, offset));
     }
 }
