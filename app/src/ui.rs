@@ -178,6 +178,8 @@ struct UndoFolder {
 const UNDO_SECONDS: u64 = 8;
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/app-256.png");
+/// Icône de la barre des menus : le pictogramme « Dossiers suivis », monochrome.
+const TRAY_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/tray-template-44.png");
 
 fn app_icon_image() -> egui::ColorImage {
     let img = image::load_from_memory(APP_ICON_PNG).expect("icône embarquée valide").to_rgba8();
@@ -537,7 +539,7 @@ impl App {
                 self.menubar_failed = false;
             } else if self.menubar.is_none() && !self.menubar_failed {
                 let wake = ctx.clone();
-                self.menubar = MenuBar::new(APP_ICON_PNG, self.app_enabled, move || wake.request_repaint());
+                self.menubar = MenuBar::new(TRAY_ICON_PNG, self.app_enabled, move || wake.request_repaint());
                 self.menubar_failed = self.menubar.is_none();
             }
         }

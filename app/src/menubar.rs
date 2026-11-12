@@ -23,7 +23,7 @@ mod imp {
     }
 
     impl MenuBar {
-        /// `icon_png` : l'icône de l'appli ; `wake` réveille l'interface à chaque clic dans le menu.
+        /// `icon_png` : pictogramme noir sur fond transparent (« template », teinté par macOS) ; `wake` réveille l'interface à chaque clic dans le menu.
         pub fn new(icon_png: &[u8], enabled: bool, wake: impl Fn() + Send + Sync + 'static) -> Option<Self> {
             let open = MenuItem::new("Ouvrir OrganizeMyFiles", true, None);
             let organize = MenuItem::new("Organiser maintenant", true, None);
@@ -33,11 +33,12 @@ mod imp {
             menu.append_items(&[&open, &organize, &enabled_item, &PredefinedMenuItem::separator(), &quit]).ok()?;
 
             let img = image::load_from_memory(icon_png).ok()?.to_rgba8();
-            let small = image::imageops::resize(&img, 44, 44, image::imageops::FilterType::Lanczos3);
-            let icon = Icon::from_rgba(small.into_raw(), 44, 44).ok()?;
+            let (w, h) = (img.width(), img.height());
+            let icon = Icon::from_rgba(img.into_raw(), w, h).ok()?;
             let tray = TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
                 .with_icon(icon)
+                .with_icon_as_template(true)
                 .with_tooltip("OrganizeMyFiles")
                 .build()
                 .ok()?;
