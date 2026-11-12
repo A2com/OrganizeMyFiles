@@ -16,3 +16,6 @@ app/target/
 
 # Sorties de l'emballage macOS
 /dist/
+
+# Source Photoshop de l'icône (lourde, non versionnée)
+/icon/icon.psd
