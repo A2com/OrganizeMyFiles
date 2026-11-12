@@ -165,7 +165,10 @@ fn apply_theme(ctx: &egui::Context) {
 /// Dossier retiré (avec ses règles), rétablissable pendant quelques secondes.
 struct UndoFolder {
     folder: Folder,
+    /// Règles supprimées avec le dossier (il en était la seule cible).
     rules: Vec<Rule>,
+    /// Règles gardées, qui ont seulement perdu ce dossier.
+    detached: Vec<u64>,
     index: usize,
     at: std::time::Instant,
 }
@@ -546,7 +549,7 @@ impl App {
 fn sample_rule(id: u64, folder_id: u64, name: &str, prio: i64) -> Rule {
     let mut r = Rule {
         id,
-        folder_id,
+        folder_ids: vec![folder_id],
         name: name.into(),
         enabled: true,
         match_all: true,
@@ -1681,7 +1684,7 @@ impl App {
     fn rule_order(&self) -> Vec<u64> {
         let mut order: Vec<&Rule> = self.rules.iter().collect();
         order.sort_by_key(|r| {
-            let folder_pos = self.folders.iter().position(|f| f.id == r.folder_id).unwrap_or(usize::MAX);
+            let folder_pos = self.folders.iter().position(|f| r.folder_ids.first() == Some(&f.id)).unwrap_or(usize::MAX);
             (folder_pos, r.priority, r.id)
         });
         order.into_iter().map(|r| r.id).collect()
@@ -1691,7 +1694,7 @@ impl App {
         let current = self.rule_order().get(self.selected_rule).copied();
         let folder_id = current
             .and_then(|id| self.rules.iter().find(|r| r.id == id))
-            .map(|r| r.folder_id)
+            .and_then(|r| r.folder_ids.first().copied())
             .or_else(|| self.folders.first().map(|f| f.id));
         match folder_id {
             Some(id) => self.new_rule_in(id),
@@ -1700,12 +1703,12 @@ impl App {
     }
 
     fn new_rule_in(&mut self, folder_id: u64) {
-        let count = self.rules.iter().filter(|r| r.folder_id == folder_id).count();
+        let count = self.rules.iter().filter(|r| r.folder_ids.contains(&folder_id)).count();
         let id = self.next_id;
         self.next_id += 1;
         self.rules.push(Rule {
             id,
-            folder_id,
+            folder_ids: vec![folder_id],
             name: "Nouvelle règle".into(),
             enabled: true,
             match_all: true,
@@ -1725,7 +1728,7 @@ impl App {
     /// Ouvre l'écran Règles sur la première règle du dossier.
     fn show_rules_of(&mut self, folder_id: u64) {
         let first = self.rule_order().iter().position(|id| {
-            self.rules.iter().any(|r| r.id == *id && r.folder_id == folder_id)
+            self.rules.iter().any(|r| r.id == *id && r.folder_ids.contains(&folder_id))
         });
         if let Some(pos) = first {
             self.selected_rule = pos;
@@ -1762,6 +1765,11 @@ impl App {
     fn restore_folder(&mut self) {
         if let Some(u) = self.undo_folder.take() {
             let at = u.index.min(self.folders.len());
+            for rule in &mut self.rules {
+                if u.detached.contains(&rule.id) && !rule.folder_ids.contains(&u.folder.id) {
+                    rule.folder_ids.push(u.folder.id);
+                }
+            }
             self.folders.insert(at, u.folder);
             self.rules.extend(u.rules);
             self.toast("Dossier rétabli");
@@ -2065,7 +2073,7 @@ impl App {
             }
             for f in folders.iter().take(4) {
                 let exists = f.path.is_dir();
-                let n_rules = self.rules.iter().filter(|r| r.folder_id == f.id).count();
+                let n_rules = self.rules.iter().filter(|r| r.folder_ids.contains(&f.id)).count();
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 54.0), egui::Sense::click());
                 if resp.hovered() {
                     ui.painter().rect_filled(rect, Rounding::same(10.0), glass(14));
@@ -2331,7 +2339,7 @@ impl App {
         for i in 0..self.folders.len() {
             let f = self.folders[i].clone();
             let exists = f.path.is_dir();
-            let n_rules = self.rules.iter().filter(|r| r.folder_id == f.id).count();
+            let n_rules = self.rules.iter().filter(|r| r.folder_ids.contains(&f.id)).count();
             let files = if exists { self.folder_count(f.id, &f.path) } else { None };
             let name = f
                 .path
@@ -2459,24 +2467,41 @@ impl App {
             }
         }
         if let Some(i) = remove {
-            let removed = self.folders.remove(i);
-            let (gone, kept): (Vec<Rule>, Vec<Rule>) =
-                std::mem::take(&mut self.rules).into_iter().partition(|r| r.folder_id == removed.id);
-            self.rules = kept;
-            self.undo_folder = Some(UndoFolder { folder: removed, rules: gone, index: i, at: std::time::Instant::now() });
+            self.remove_folder(i);
         }
         for (i, f) in self.folders.iter_mut().enumerate() {
             f.priority = i as i64;
         }
     }
 
+    /// Retire un dossier : les règles qui n'en ciblaient que lui partent avec ; les autres le perdent seulement.
+    fn remove_folder(&mut self, i: usize) {
+        let removed = self.folders.remove(i);
+        let mut gone = Vec::new();
+        let mut detached = Vec::new();
+        for rule in std::mem::take(&mut self.rules) {
+            if !rule.folder_ids.contains(&removed.id) {
+                self.rules.push(rule);
+            } else if rule.folder_ids.len() == 1 {
+                gone.push(rule);
+            } else {
+                let mut rule = rule;
+                rule.folder_ids.retain(|id| *id != removed.id);
+                detached.push(rule.id);
+                self.rules.push(rule);
+            }
+        }
+        self.undo_folder = Some(UndoFolder { folder: removed, rules: gone, detached, index: i, at: std::time::Instant::now() });
+    }
+
     fn rule_matches(&self, rule: &Rule, q: &str) -> bool {
         let folder = self
             .folders
             .iter()
-            .find(|f| f.id == rule.folder_id)
+            .filter(|f| rule.folder_ids.contains(&f.id))
             .map(|f| f.path.display().to_string().to_lowercase())
-            .unwrap_or_default();
+            .collect::<Vec<_>>()
+            .join(" ");
         rule.name.to_lowercase().contains(q)
             || folder.contains(q)
             || rule.actions.iter().any(|a| a.kind.label().to_lowercase().contains(q))
@@ -2555,22 +2580,26 @@ impl App {
                 });
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
-                    ui.label(caps("DOSSIER CIBLE"));
-                    let names: Vec<String> = self.folders.iter().map(|f| shorten(&f.path.display().to_string())).collect();
-                    let cur = self
-                        .folders
-                        .iter()
-                        .position(|f| f.id == self.rules[idx].folder_id)
-                        .and_then(|p| names.get(p).cloned())
-                        .unwrap_or_default();
-                    if let Some(pick) = combo(ui, "rule-folder", &cur, &names) {
-                        if let Some(p) = names.iter().position(|n| *n == pick) {
-                            let fid = self.folders[p].id;
-                            let count = self.rules.iter().filter(|r| r.folder_id == fid).count();
-                            self.rules[idx].folder_id = fid;
-                            self.rules[idx].priority = count as i64;
-                            moved = true;
+                    ui.label(caps("DOSSIERS CIBLES"));
+                    let mut refused_last = false;
+                    for fi in 0..self.folders.len() {
+                        let (fid, label) = (self.folders[fi].id, shorten(&self.folders[fi].path.display().to_string()));
+                        let ids = &mut self.rules[idx].folder_ids;
+                        let mut on = ids.contains(&fid);
+                        if check_box(ui, &mut on, &label, accent).changed() {
+                            if on {
+                                ids.push(fid);
+                                moved = true;
+                            } else if ids.len() > 1 {
+                                ids.retain(|id| *id != fid);
+                                moved = true;
+                            } else {
+                                refused_last = true;
+                            }
                         }
+                    }
+                    if refused_last {
+                        self.toast("Une règle doit garder au moins un dossier.");
                     }
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -3104,5 +3133,29 @@ mod tests {
         assert_eq!(hero_state(2, 0, false), HeroState::NoRule);
         assert_eq!(hero_state(2, 3, false), HeroState::Ready);
         assert_eq!(hero_state(2, 3, true), HeroState::Done);
+    }
+
+    fn rule_on(id: u64, folders: &[u64]) -> Rule {
+        let mut r = sample_rule(id, folders[0], "r", 0);
+        r.folder_ids = folders.to_vec();
+        r
+    }
+
+    #[test]
+    fn removing_a_shared_folder_keeps_the_rule_and_undo_restores_it() {
+        let mut app = App::blank(Launch { bg_time: 0.0, screenshot: None, tab: None, empty: false, background: false });
+        app.folders = vec![
+            Folder { id: 1, path: "/a".into(), enabled: true, priority: 0 },
+            Folder { id: 2, path: "/b".into(), enabled: true, priority: 1 },
+        ];
+        app.rules = vec![rule_on(10, &[1, 2]), rule_on(11, &[1])];
+        app.remove_folder(0);
+        assert_eq!(app.rules.len(), 1, "la règle propre au dossier part avec lui");
+        assert_eq!(app.rules[0].folder_ids, vec![2]);
+        app.restore_folder();
+        assert_eq!(app.rules.len(), 2);
+        let shared = app.rules.iter().find(|r| r.id == 10).unwrap();
+        assert!(shared.folder_ids.contains(&1) && shared.folder_ids.contains(&2));
+        assert_eq!(app.folders.len(), 2);
     }
 }
