@@ -214,7 +214,7 @@ impl Worker {
             }
             let now = Instant::now();
             let ready: Vec<PathBuf> =
-                debouncer.take_ready(now, file_size).into_iter().filter(|p| p.is_file() && !own.contains(p, now)).collect();
+                debouncer.take_ready(now, file_size).into_iter().filter(|p| p.exists() && !own.contains(p, now)).collect();
             if ready.is_empty() {
                 continue;
             }

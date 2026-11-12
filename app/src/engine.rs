@@ -59,12 +59,11 @@ impl FileMeta {
 
     /// Document kind used by the `kind` condition (derived from extension lists).
     pub fn kind(&self) -> &'static str {
-        if self.is_dir {
-            return "folder";
-        }
         let e = self.ext.as_str();
         if e == "app" {
             "app"
+        } else if self.is_dir {
+            "folder"
         } else if ARCHIVE_KIND_EXTENSIONS.contains(&e) {
             "archive"
         } else if IMAGE_EXTENSIONS.contains(&e) {
@@ -592,6 +591,14 @@ pub struct Rule {
 }
 
 impl Rule {
+    /// La règle vise-t-elle explicitement les dossiers (ou les applications) ? Seules ces règles voient
+    /// les dossiers : une règle « plus vieux que 30 jours → Corbeille » ne doit jamais jeter un dossier entier.
+    pub fn targets_dirs(&self) -> bool {
+        self.conditions
+            .iter()
+            .any(|c| c.field == Field::Kind && c.op == Op::Is && matches!(nfc(c.value.trim()).to_lowercase().as_str(), "folder" | "app"))
+    }
+
     /// La règle s'applique-t-elle à ce fichier ? Les conditions peu coûteuses sont testées d'abord :
     /// la condition « Contenu » (lecture, OCR) n'est évaluée que si les autres n'ont pas déjà tranché.
     pub fn matches(&self, meta: &FileMeta, now: SystemTime) -> bool {
@@ -767,7 +774,8 @@ impl Runner {
             // only sees files within its own `recursion_depth`.
             let max_depth = rule_list.iter().map(|r| r.recursion_depth as usize).max().unwrap_or(0);
             let mut files = Vec::new();
-            collect_files(&folder.path, max_depth, &mut files);
+            let include_dirs = rule_list.iter().any(|r| r.targets_dirs());
+            collect_files(&folder.path, max_depth, include_dirs, &mut files);
             files.sort();
             files.dedup();
             if let Some(only) = &self.only_paths {
@@ -787,7 +795,7 @@ impl Runner {
                 };
                 let rel_depth = rel_depth(&folder.path, path);
                 for rule in &rule_list {
-                    if rel_depth > rule.recursion_depth as usize {
+                    if rel_depth > rule.recursion_depth as usize || (meta.is_dir && !rule.targets_dirs()) {
                         continue;
                     }
                     let hits = rule.matches(&meta, now);
@@ -1190,13 +1198,19 @@ fn unique_zip_path(dir: &Path, name: &str) -> PathBuf {
     target
 }
 
-fn collect_files(root: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+/// Liste les fichiers sous `root`. Avec `include_dirs`, les sous-dossiers (et les `.app`) sont aussi des candidats ;
+/// on ne descend jamais à l'intérieur d'un `.app`, qui est un paquet et non un dossier à ranger.
+fn collect_files(root: &Path, depth: usize, include_dirs: bool, out: &mut Vec<PathBuf>) {
     let Ok(rd) = fs::read_dir(root) else { return };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
-            if depth > 0 {
-                collect_files(&p, depth - 1, out);
+            let is_bundle = p.extension().is_some_and(|x| x.eq_ignore_ascii_case("app"));
+            if include_dirs {
+                out.push(p.clone());
+            }
+            if depth > 0 && !is_bundle {
+                collect_files(&p, depth - 1, include_dirs, out);
             }
         } else {
             out.push(p);
@@ -1617,6 +1631,52 @@ mod tests {
         let out = runner.run(&folders, &[rule], SystemTime::now());
         assert_eq!(out.matched, 2, "un fichier par dossier ciblé");
         assert_eq!(fs::read_dir(&dest).unwrap().count(), 2);
+    }
+
+    fn kind_rule(value: &str) -> Rule {
+        let mut r = rule_with(true, vec![Condition { field: Field::Kind, op: Op::Is, value: value.into() }]);
+        r.recursion_depth = 1;
+        r
+    }
+
+    fn run_dry(root: &Path, rule: Rule) -> RunOutcome {
+        let folders = vec![Folder { id: 1, path: root.to_path_buf(), enabled: true, priority: 0 }];
+        let mut act = Action::new(ActionKind::Trash);
+        act.params.clear();
+        let mut rule = rule;
+        rule.actions = vec![act];
+        let mut runner =
+            Runner { monthly_used: 0, batch_id: 1, dry_run: true, commands: Box::new(crate::system::SystemCommands), only_paths: None };
+        runner.run(&folders, &[rule], SystemTime::now())
+    }
+
+    #[test]
+    fn kind_folder_rule_sees_subfolders_but_other_rules_do_not() {
+        let root = std::env::temp_dir().join(format!("organizemyfiles-kind-dir-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("Projet")).unwrap();
+        fs::write(root.join("note.txt"), "x").unwrap();
+        let out = run_dry(&root, kind_rule("folder"));
+        assert_eq!(out.matched, 1, "seul le dossier correspond");
+        assert!(out.history.iter().all(|h| h.original_path.ends_with("Projet")));
+        // Une règle sans condition de type ne voit jamais les dossiers.
+        let mut by_name = rule_with(true, vec![Condition { field: Field::Name, op: Op::Contains, value: "Projet".into() }]);
+        by_name.recursion_depth = 1;
+        assert_eq!(run_dry(&root, by_name).matched, 0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn kind_app_matches_bundle_and_is_not_entered() {
+        let root = std::env::temp_dir().join(format!("organizemyfiles-kind-app-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("Truc.app/Contents")).unwrap();
+        let out = run_dry(&root, kind_rule("app"));
+        assert_eq!(out.matched, 1);
+        let mut files = Vec::new();
+        collect_files(&root, 3, true, &mut files);
+        assert_eq!(files, vec![root.join("Truc.app")], "rien à l'intérieur du .app");
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn rule_with(match_all: bool, conditions: Vec<Condition>) -> Rule {
