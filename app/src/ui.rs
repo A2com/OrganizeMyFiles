@@ -6,8 +6,10 @@ use std::time::SystemTime;
 
 use eframe::egui::{self, Align, Color32, Layout, Pos2, Rect, RichText, Rounding, Stroke, Vec2};
 
+use crate::alerts;
 use crate::engine::*;
 use crate::mechanics::*;
+use crate::menubar::{MenuBar, MenuCommand};
 use crate::store::{self, Loaded, Settings, State};
 use crate::watcher::{self, WatchConfig, Watcher};
 
@@ -222,6 +224,11 @@ pub struct App {
     watch_key: String,
     /// Logo de la barre latérale (chargé au premier affichage).
     logo: Option<egui::TextureHandle>,
+    /// Icône et menu de la barre des menus (macOS).
+    menubar: Option<MenuBar>,
+    menubar_failed: bool,
+    /// Vrai quand l'utilisateur a choisi « Quitter » : la fermeture n'est plus interceptée.
+    quitting: bool,
     search: String,
     toast: Option<String>,
     undo_folder: Option<UndoFolder>,
@@ -294,6 +301,9 @@ impl App {
             watcher: None,
             watch_key: String::new(),
             logo: None,
+            menubar: None,
+            menubar_failed: false,
+            quitting: false,
             search: String::new(),
             toast: None,
             undo_folder: None,
@@ -479,6 +489,11 @@ impl App {
         let actions = outcome.history.len();
         self.last_run = Some((outcome.matched, actions, outcome.scanned));
         self.last_run_dry = dry_run;
+        if !dry_run && self.notify {
+            if let Some(text) = alerts::summary(&outcome.history) {
+                alerts::notify(text);
+            }
+        }
         for e in outcome.history {
             self.history.push(e);
         }
@@ -514,6 +529,51 @@ impl App {
         }
     }
 
+    /// Icône de la barre des menus, commandes du menu, et « fermer la fenêtre » = la cacher.
+    fn handle_menubar(&mut self, ctx: &egui::Context) {
+        if self.screenshot.is_none() {
+            if !self.menu_bar {
+                self.menubar = None;
+                self.menubar_failed = false;
+            } else if self.menubar.is_none() && !self.menubar_failed {
+                let wake = ctx.clone();
+                self.menubar = MenuBar::new(APP_ICON_PNG, self.app_enabled, move || wake.request_repaint());
+                self.menubar_failed = self.menubar.is_none();
+            }
+        }
+        let commands = match &self.menubar {
+            Some(mb) => {
+                mb.set_enabled(self.app_enabled);
+                mb.poll()
+            }
+            None => Vec::new(),
+        };
+        for cmd in commands {
+            match cmd {
+                MenuCommand::Open => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                MenuCommand::Organize => {
+                    if self.app_enabled {
+                        self.run_batch(false);
+                    }
+                }
+                MenuCommand::ToggleEnabled => self.app_enabled = !self.app_enabled,
+                MenuCommand::Quit => {
+                    self.quitting = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+        // Avec l'icône dans la barre des menus, fermer la fenêtre la réduit : l'appli et la surveillance continuent.
+        // (Masquer la fenêtre, `Visible(false)`, fait quitter l'appli sur macOS : constaté, d'où la réduction.)
+        if self.menubar.is_some() && !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+    }
+
     /// Envoie à la surveillance les dossiers et règles actuels, seulement s'ils ont changé.
     fn sync_watcher(&mut self) {
         let Some(w) = &self.watcher else { return };
@@ -540,6 +600,11 @@ impl App {
             self.last_run = Some((r.matched, r.history.len(), r.scanned));
             self.last_run_dry = false;
             self.toast(format!("{} fichier(s) organisé(s) automatiquement", r.matched));
+            if self.notify {
+                if let Some(text) = alerts::summary(&r.history) {
+                    alerts::notify(text);
+                }
+            }
             self.history.extend(r.history);
         }
         purge_history(&mut self.history, self.retention_days, SystemTime::now());
@@ -1454,6 +1519,7 @@ impl eframe::App for App {
             self.persist();
         }
         self.poll_watcher();
+        self.handle_menubar(ctx);
         ctx.request_repaint_after(std::time::Duration::from_millis(1100));
 
         let screen = ctx.screen_rect();
