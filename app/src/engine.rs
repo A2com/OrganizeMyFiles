@@ -24,11 +24,12 @@ pub struct FileMeta {
     pub modified: Option<SystemTime>,
     pub is_dir: bool,
     pub tags: Vec<String>,
-    pub contents: Option<String>,
+    /// Contenu lu à la demande (voir `FileMeta::contents`) : PDF et OCR peuvent être lents.
+    contents: std::cell::OnceCell<Option<String>>,
 }
 
 impl FileMeta {
-    pub fn read(path: &Path, read_text: bool) -> std::io::Result<Self> {
+    pub fn read(path: &Path) -> std::io::Result<Self> {
         let md = fs::metadata(path)?;
         let name = path
             .file_name()
@@ -45,7 +46,6 @@ impl FileMeta {
         let is_dir = md.is_dir();
         let size = if is_dir { dir_size(path) } else { md.len() };
         let tags = read_tags(path);
-        let contents = if read_text && !is_dir { read_text_content(path) } else { None };
         Ok(FileMeta {
             path: path.to_path_buf(),
             name,
@@ -56,8 +56,14 @@ impl FileMeta {
             modified: md.modified().ok(),
             is_dir,
             tags,
-            contents,
+            contents: std::cell::OnceCell::new(),
         })
+    }
+
+    /// Contenu du fichier en minuscules (texte, PDF, OCR des images), lu une seule fois et seulement
+    /// si une condition « Contenu » le demande.
+    pub fn contents(&self) -> Option<&str> {
+        self.contents.get_or_init(|| if self.is_dir { None } else { crate::extract::read_content(&self.path) }).as_deref()
     }
 
     /// Document kind used by the `kind` condition (derived from extension lists).
@@ -107,44 +113,6 @@ fn dir_size(p: &Path) -> u64 {
         }
     }
     total
-}
-
-fn read_text_content(path: &Path) -> Option<String> {
-    let md = fs::metadata(path).ok()?;
-    if md.len() > TEXT_LIMIT_BYTES {
-        return Some(format!("<<fichier au-delà de la limite de {} Mo pour le texte>>", TEXT_LIMIT_BYTES / 1024 / 1024));
-    }
-    // OCR dimension guard (extractImageOCR at 0x100150c7c): images wider than
-    // 12000 px or taller than 12001 px are refused before text recognition.
-    let ext = path
-        .extension()
-        .map(|s| s.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-        if let Ok((w, h)) = image::image_dimensions(path) {
-            if image_dimension_limit_exceeded(w, h) {
-                return Some(format!(
-                    "<<image au-delà de la limite de {} px pour l'OCR>>",
-                    OCR_IMAGE_DIMENSION_LIMIT
-                ));
-            }
-        }
-    }
-    let bytes = fs::read(path).ok()?;
-    let text = String::from_utf8_lossy(&bytes).to_string();
-    if text.chars().filter(|c| c.is_control() && *c != '\n' && *c != '\r' && *c != '\t').count()
-        > text.len() / 8
-    {
-        None
-    } else {
-        Some(nfc(&text).to_lowercase())
-    }
-}
-
-/// OCR dimension rule from extractImageOCR (0x100150c7c): width > 12000 or
-/// height >= 12001 (0x2ee0 / 0x2ee1 immediates) is refused.
-fn image_dimension_limit_exceeded(width: u32, height: u32) -> bool {
-    width > OCR_IMAGE_DIMENSION_LIMIT || height > OCR_IMAGE_DIMENSION_LIMIT + 1
 }
 
 /// macOS Finder tags live in the `kMDItemUserTags` xattr (`com.apple.metadata:_kMDItemUserTags`).
@@ -474,7 +442,7 @@ impl Condition {
                 }
             }
             Field::Contents => {
-                let Some(text) = &f.contents else { return false };
+                let Some(text) = f.contents() else { return false };
                 match self.op {
                     Op::Contains => text.contains(&lv),
                     Op::Matches => regex_match(text, v),
@@ -724,6 +692,20 @@ pub struct Rule {
     pub actions: Vec<Action>,
 }
 
+impl Rule {
+    /// La règle s'applique-t-elle à ce fichier ? Les conditions peu coûteuses sont testées d'abord :
+    /// la condition « Contenu » (lecture, OCR) n'est évaluée que si les autres n'ont pas déjà tranché.
+    pub fn matches(&self, meta: &FileMeta, now: SystemTime) -> bool {
+        let (contents, cheap): (Vec<&Condition>, Vec<&Condition>) = self.conditions.iter().partition(|c| c.field == Field::Contents);
+        let test = |c: &&Condition| c.evaluate(meta, now);
+        if self.match_all {
+            !self.conditions.is_empty() && cheap.iter().all(test) && contents.iter().all(test)
+        } else {
+            cheap.iter().any(test) || contents.iter().any(test)
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Folder {
     pub id: u64,
@@ -916,7 +898,7 @@ impl Runner {
                 if self.dry_run && matched >= PREVIEW_MATCH_LIMIT {
                     break;
                 }
-                let meta = match FileMeta::read(path, true) {
+                let meta = match FileMeta::read(path) {
                     Ok(m) => m,
                     Err(_) => continue,
                 };
@@ -925,11 +907,7 @@ impl Runner {
                     if rel_depth > rule.recursion_depth as usize {
                         continue;
                     }
-                    let hits = if rule.match_all {
-                        !rule.conditions.is_empty() && rule.conditions.iter().all(|c| c.evaluate(&meta, now))
-                    } else {
-                        rule.conditions.iter().any(|c| c.evaluate(&meta, now))
-                    };
+                    let hits = rule.matches(&meta, now);
                     if !hits {
                         continue;
                     }
@@ -1525,7 +1503,7 @@ mod tests {
             modified: Some(UNIX_EPOCH + Duration::from_secs(1_700_100_000)),
             is_dir: false,
             tags: vec![],
-            contents: None,
+            contents: std::cell::OnceCell::new(),
         }
     }
 
@@ -1567,14 +1545,6 @@ mod tests {
             value: "30 days".into(),
         };
         assert!(c.evaluate(&f, now));
-    }
-
-    #[test]
-    fn ocr_dimension_guard() {
-        assert_eq!(OCR_IMAGE_DIMENSION_LIMIT, 12000);
-        assert!(!image_dimension_limit_exceeded(12000, 12001));
-        assert!(image_dimension_limit_exceeded(12001, 1));
-        assert!(image_dimension_limit_exceeded(1, 12002));
     }
 
     #[test]
@@ -1773,5 +1743,36 @@ mod tests {
         let out = runner.run(&folders, &[rule], SystemTime::now());
         assert_eq!(out.matched, 2, "un fichier par dossier ciblé");
         assert_eq!(fs::read_dir(&dest).unwrap().count(), 2);
+    }
+
+    fn rule_with(match_all: bool, conditions: Vec<Condition>) -> Rule {
+        Rule { id: 1, folder_ids: vec![1], name: "r".into(), enabled: true, match_all, recursion_depth: 0, priority: 0, conditions, actions: vec![] }
+    }
+
+    #[test]
+    fn contents_are_not_read_when_cheap_conditions_already_decide() {
+        let f = meta("rapport", "txt", 10);
+        let contents_cond = Condition { field: Field::Contents, op: Op::Contains, value: "facture".into() };
+        let name_cond = Condition { field: Field::Name, op: Op::Equals, value: "autre.txt".into() };
+        // « TOUTES » : le nom ne correspond pas, le contenu n'est jamais lu (même placé en premier).
+        let all = rule_with(true, vec![contents_cond.clone(), name_cond.clone()]);
+        assert!(!all.matches(&f, SystemTime::now()));
+        assert!(f.contents.get().is_none(), "le contenu ne doit pas avoir été lu");
+        // « AU MOINS UNE » : le nom correspond, pas besoin du contenu.
+        let any = rule_with(false, vec![contents_cond, Condition { field: Field::Name, op: Op::Contains, value: "rapport".into() }]);
+        assert!(any.matches(&f, SystemTime::now()));
+        assert!(f.contents.get().is_none());
+    }
+
+    #[test]
+    fn contents_condition_reads_a_real_text_file() {
+        let dir = std::env::temp_dir().join(format!("organizemyfiles-contents-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("note.txt"), "Voici la FACTURE de mars").unwrap();
+        let f = FileMeta::read(&dir.join("note.txt")).unwrap();
+        let rule = rule_with(true, vec![Condition { field: Field::Contents, op: Op::Contains, value: "Facture".into() }]);
+        assert!(rule.matches(&f, SystemTime::now()));
+        let no = rule_with(true, vec![Condition { field: Field::Contents, op: Op::Contains, value: "devis".into() }]);
+        assert!(!no.matches(&f, SystemTime::now()));
     }
 }

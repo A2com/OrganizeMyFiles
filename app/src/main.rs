@@ -8,6 +8,7 @@
 
 mod alerts;
 mod engine;
+mod extract;
 mod history_view;
 mod login;
 mod mechanics;
