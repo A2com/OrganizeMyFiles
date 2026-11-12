@@ -25,6 +25,9 @@ pub struct Settings {
     /// Lancer l'appli à l'ouverture de session (absent des anciens fichiers : faux).
     #[serde(default)]
     pub launch_at_login: bool,
+    /// La carte de bienvenue (explication des autorisations macOS) a déjà été montrée.
+    #[serde(default)]
+    pub welcome_seen: bool,
 }
 
 /// Tout ce qui doit survivre à la fermeture de l'appli.
@@ -166,7 +169,7 @@ mod tests {
                 message: "déplacé".into(),
                 created: UNIX_EPOCH + Duration::from_secs(1_700_000_000),
             }],
-            settings: Settings { accent: 3, menu_bar: false, notify: true, animate_bg: false, retention_days: 45, app_enabled: false, launch_at_login: true },
+            settings: Settings { accent: 3, menu_bar: false, notify: true, animate_bg: false, retention_days: 45, app_enabled: false, launch_at_login: true, welcome_seen: true },
             next_id: 9,
             next_batch: 8,
             monthly_used: 42,
@@ -239,5 +242,6 @@ mod tests {
         let json = r#"{"accent":1,"menu_bar":true,"notify":true,"animate_bg":true,"retention_days":30,"app_enabled":true}"#;
         let s: Settings = serde_json::from_str(json).unwrap();
         assert!(!s.launch_at_login);
+        assert!(!s.welcome_seen);
     }
 }

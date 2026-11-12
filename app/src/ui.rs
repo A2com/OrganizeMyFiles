@@ -224,6 +224,10 @@ pub struct App {
     selected_rule: usize,
     app_enabled: bool,
     launch_at_login: bool,
+    welcome_seen: bool,
+    /// Dossiers suivis que macOS ne laisse pas lire (rafraîchi régulièrement).
+    denied_folders: Vec<PathBuf>,
+    next_access_check: f64,
     /// Surveillance automatique ; `None` en mode capture d'écran et dans les tests.
     watcher: Option<Watcher>,
     watch_key: String,
@@ -275,6 +279,9 @@ impl App {
             let ctx = cc.egui_ctx.clone();
             app.watcher = Some(Watcher::start(watcher::SETTLE, move || ctx.request_repaint()));
         }
+        if app.screenshot.is_some() && std::env::var_os("ORGANIZEMYFILES_SHOW_WELCOME").is_none() {
+            app.welcome_seen = true;
+        }
         app.tab = match tab.as_deref() {
             Some("folders") => Tab::Folders,
             Some("rules") => Tab::Rules,
@@ -306,6 +313,9 @@ impl App {
             selected_rule: 0,
             app_enabled: true,
             launch_at_login: false,
+            welcome_seen: false,
+            denied_folders: Vec::new(),
+            next_access_check: 0.0,
             watcher: None,
             watch_key: String::new(),
             logo: None,
@@ -415,6 +425,7 @@ impl App {
                 retention_days: self.retention_days,
                 app_enabled: self.app_enabled,
                 launch_at_login: self.launch_at_login,
+                welcome_seen: self.welcome_seen,
             },
             next_id: self.next_id,
             next_batch: self.next_batch,
@@ -442,6 +453,7 @@ impl App {
         self.retention_days = state.settings.retention_days.clamp(1, 365);
         self.app_enabled = state.settings.app_enabled;
         self.launch_at_login = state.settings.launch_at_login;
+        self.welcome_seen = state.settings.welcome_seen;
         self.next_id = state.next_id.max(max_id + 1);
         self.next_batch = state.next_batch.max(1);
         self.monthly_used = state.monthly_used;
@@ -549,6 +561,73 @@ impl App {
             (0, f) => format!("Annulation impossible pour {f} action(s)"),
             (d, f) => format!("{d} action(s) annulée(s), {f} impossible(s)"),
         });
+    }
+
+    /// Relit l'état d'accès des dossiers suivis (macOS peut refuser la lecture sans autorisation).
+    fn refresh_access(&mut self) {
+        self.denied_folders =
+            self.folders.iter().filter(|f| f.enabled && folder_access(&f.path) == Access::Denied).map(|f| f.path.clone()).collect();
+    }
+
+    /// Encarts affichés en haut des écrans : bienvenue (une fois) et aide sur les autorisations macOS.
+    fn notices(&mut self, ui: &mut egui::Ui) {
+        let accent = self.accent();
+        if !self.welcome_seen && self.tab == Tab::Dashboard {
+            panel_card_with(ui, Some(with_alpha(accent, 22)), 18.0, |ui| {
+                ui.label(RichText::new("Bienvenue dans OrganizeMyFiles").size(17.0).family(semibold()).color(text_primary()));
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "macOS peut demander l'autorisation d'accéder à vos dossiers (Bureau, Documents, Téléchargements). \
+                         Acceptez : sans cela, OrganizeMyFiles ne peut pas ranger vos fichiers. Si un dossier reste bloqué, \
+                         ajoutez l'appli dans Réglages Système › Confidentialité et sécurité › Accès complet au disque.",
+                    )
+                    .size(14.0)
+                    .color(text_dim()),
+                );
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if btn(ui, "Compris", Btn::Primary, accent, None).clicked() {
+                        self.welcome_seen = true;
+                    }
+                    if btn(ui, "Ouvrir les réglages de confidentialité", Btn::Ghost, accent, None).clicked() {
+                        system::open_privacy_settings();
+                    }
+                });
+            });
+            ui.add_space(14.0);
+        }
+        if self.tab == Tab::Settings {
+            return;
+        }
+        let blocked = self.denied_folders.len();
+        let refused_actions = history_view::latest_permission_failures(&self.history);
+        if blocked == 0 && refused_actions == 0 {
+            return;
+        }
+        panel_card_with(ui, Some(with_alpha(RED, 26)), 16.0, |ui| {
+            let text = match (blocked, refused_actions) {
+                (b, 0) => format!("macOS empêche OrganizeMyFiles de lire {b} dossier{} suivi{}.", if b > 1 { "s" } else { "" }, if b > 1 { "s" } else { "" }),
+                (0, a) => format!("macOS a refusé {a} action{} du dernier lot.", if a > 1 { "s" } else { "" }),
+                (b, a) => format!("macOS bloque {b} dossier{} et a refusé {a} action{} du dernier lot.", if b > 1 { "s" } else { "" }, if a > 1 { "s" } else { "" }),
+            };
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(text).size(15.0).family(semibold()).color(text_primary()));
+                    ui.label(
+                        RichText::new("Accordez l'accès dans Réglages Système › Confidentialité et sécurité, puis revenez ici.")
+                            .size(13.5)
+                            .color(text_dim()),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if btn(ui, "Ouvrir les réglages", Btn::Primary, accent, None).clicked() {
+                        system::open_privacy_settings();
+                    }
+                });
+            });
+        });
+        ui.add_space(14.0);
     }
 
     /// Les fichiers que l'appli vient de déplacer ne doivent pas être retraités par la surveillance.
@@ -1615,6 +1694,10 @@ impl eframe::App for App {
             self.sync_watcher();
             self.persist();
         }
+        if clock >= self.next_access_check {
+            self.next_access_check = clock + 5.0;
+            self.refresh_access();
+        }
         self.poll_watcher();
         self.handle_menubar(ctx);
         ctx.request_repaint_after(std::time::Duration::from_millis(1100));
@@ -1656,6 +1739,7 @@ impl eframe::App for App {
                 .show(ui, |ui| {
                     egui::Frame::none().inner_margin(egui::Margin::symmetric(28.0, 0.0)).show(ui, |ui| {
                         ui.add_space(24.0);
+                        self.notices(ui);
                         match self.tab {
                             Tab::Dashboard => self.dashboard(ui),
                             Tab::Folders => self.folders_ui(ui),
@@ -2268,6 +2352,8 @@ impl App {
                 );
                 if !exists {
                     chip(&mut right, "Introuvable", RED, with_alpha(RED, 38));
+                } else if self.denied_folders.contains(&f.path) {
+                    chip(&mut right, "Accès refusé", RED, with_alpha(RED, 38));
                 } else if f.enabled {
                     chip(&mut right, "Actif", GREEN, with_alpha(GREEN, 38));
                 } else {
@@ -2541,6 +2627,8 @@ impl App {
                         ui.horizontal(|ui| {
                             if !exists {
                                 chip(ui, "Introuvable", RED, with_alpha(RED, 38));
+                            } else if self.denied_folders.contains(&f.path) {
+                                chip(ui, "Accès refusé", RED, with_alpha(RED, 38));
                             } else if f.enabled {
                                 chip(ui, "Actif", GREEN, with_alpha(GREEN, 38));
                             } else {
