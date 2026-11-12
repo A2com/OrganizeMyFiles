@@ -791,7 +791,7 @@ pub fn expand_pattern(pattern: &str, f: &FileMeta, now: SystemTime) -> String {
 /// Destination tokens: {year} {month} {day} (0x1001e0b30).
 pub fn expand_destination(dest: &str, now: SystemTime) -> String {
     let secs = now_unix(now) as i64;
-    let (y, m, d) = crate::mechanics::month_key_parts(secs);
+    let (y, m, d, ..) = crate::mechanics::local_parts(secs);
     dest.replace("{year}", &format!("{:04}", y))
         .replace("{month}", &format!("{:02}", m))
         .replace("{day}", &format!("{:02}", d))
@@ -802,7 +802,7 @@ pub fn now_unix(t: SystemTime) -> u64 {
 }
 
 pub fn date_str(t: SystemTime) -> String {
-    let (y, m, d) = crate::mechanics::month_key_parts(now_unix(t) as i64);
+    let (y, m, d, ..) = crate::mechanics::local_parts(now_unix(t) as i64);
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
@@ -810,13 +810,13 @@ pub fn date_str(t: SystemTime) -> String {
 /// ActionExecutor.archiveFileName at 0x100140a14).
 pub fn timestamp_str(t: SystemTime) -> String {
     let secs = now_unix(t) as i64;
-    let (y, mo, d, h, mi, s) = crate::mechanics::timestamp_parts(secs);
+    let (y, mo, d, h, mi, s) = crate::mechanics::local_parts(secs);
     format!("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", y, mo, d, h, mi, s)
 }
 
 pub fn time_str(t: SystemTime) -> String {
-    let secs = now_unix(t) % 86_400;
-    format!("{:02}:{:02}", secs / 3600, (secs % 3600) / 60)
+    let (.., h, mi, _) = crate::mechanics::local_parts(now_unix(t) as i64);
+    format!("{:02}:{:02}", h, mi)
 }
 
 /// macOS filename validation (0x100138c54 family): no '/', not '.' / '..',
@@ -1384,9 +1384,40 @@ pub fn nfc(s: &str) -> String {
     s.nfc().collect()
 }
 
+/// État d'accès à un dossier suivi.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    Ok,
+    /// macOS (ou les droits Unix) refuse la lecture du dossier.
+    Denied,
+    Missing,
+}
+
+fn is_permission_io(e: &std::io::Error) -> bool {
+    // EPERM (1) est ce que renvoie macOS quand une autorisation de confidentialité manque.
+    e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(1)
+}
+
+pub fn folder_access(path: &Path) -> Access {
+    match fs::read_dir(path) {
+        Ok(_) => Access::Ok,
+        Err(e) if is_permission_io(&e) => Access::Denied,
+        Err(_) => Access::Missing,
+    }
+}
+
+/// Vrai si un message d'erreur système vient d'un accès refusé.
+pub fn is_permission_error(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("operation not permitted") || m.contains("permission denied") || m.contains("(os error 1)") || m.contains("(os error 13)")
+}
+
 /// Traduit à l'affichage les messages du moteur (valeurs d'origine, laissées intactes
 /// dans les données). Un message inconnu est rendu tel quel.
 pub fn fr_message(msg: &str) -> String {
+    if is_permission_error(msg) {
+        return "accès refusé par macOS : autorisez OrganizeMyFiles dans Réglages Système › Confidentialité et sécurité".into();
+    }
     nfc(&fr_message_raw(msg))
 }
 
@@ -1560,17 +1591,16 @@ mod tests {
     fn pattern_tokens() {
         let f = meta("old", "pdf", 2048);
         let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        // Les dates suivent l'heure locale du système : on compare au même découpage.
+        let (y, mo, d, h, mi, sec) = crate::mechanics::local_parts(1_700_000_000);
         assert_eq!(
             expand_pattern("{name}-{current_date}.{extension}", &f, now),
-            "old-2023-11-14.pdf"
+            format!("old-{y:04}-{mo:02}-{d:02}.pdf")
         );
-        assert_eq!(
-            expand_pattern("{name}-{size}.{extension}", &f, now),
-            "old-2048.pdf"
-        );
+        assert_eq!(expand_pattern("{name}-{size}.{extension}", &f, now), "old-2048.pdf");
         assert_eq!(
             expand_pattern("{timestamp}", &f, now),
-            "2023-11-14_22-13-20"
+            format!("{y:04}-{mo:02}-{d:02}_{h:02}-{mi:02}-{sec:02}")
         );
     }
 
@@ -1695,7 +1725,7 @@ mod tests {
         assert_eq!(fr_message("move → /a/b"), "déplacé → /a/b");
         assert_eq!(fr_message("serait copy vers /x"), "serait copié vers /x");
         assert_eq!(fr_message("serait addTag [a]"), "ajouterait les étiquettes [a]");
-        assert_eq!(fr_message("Permission denied (os error 13)"), "Permission denied (os error 13)");
+        assert_eq!(fr_message("No such file or directory (os error 2)"), "No such file or directory (os error 2)");
     }
 
     #[test]
@@ -1774,5 +1804,32 @@ mod tests {
         assert!(rule.matches(&f, SystemTime::now()));
         let no = rule_with(true, vec![Condition { field: Field::Contents, op: Op::Contains, value: "devis".into() }]);
         assert!(!no.matches(&f, SystemTime::now()));
+    }
+
+    #[test]
+    fn permission_errors_are_recognised_and_explained() {
+        for m in ["Operation not permitted (os error 1)", "Permission denied (os error 13)", "Destination indisponible : Operation not permitted (os error 1)"] {
+            assert!(is_permission_error(m), "{m}");
+            assert!(fr_message(m).contains("Confidentialité"), "{m}");
+        }
+        assert!(!is_permission_error("No such file or directory (os error 2)"));
+    }
+
+    #[test]
+    fn folder_access_distinguishes_ok_missing_and_denied() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("organizemyfiles-access-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(folder_access(&dir), Access::Ok);
+        assert_eq!(folder_access(&dir.join("absent")), Access::Missing);
+        let locked = dir.join("locked");
+        fs::create_dir_all(&locked).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = folder_access(&locked);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        // Un utilisateur root lit tout : on ne vérifie le refus que pour un utilisateur normal.
+        if std::env::var("USER").map(|u| u != "root").unwrap_or(true) {
+            assert_eq!(denied, Access::Denied);
+        }
     }
 }

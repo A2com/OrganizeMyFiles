@@ -155,6 +155,17 @@ pub fn is_undoable(e: &HistoryEntry) -> bool {
     e.reversible && e.status == Status::Applied
 }
 
+/// Nombre d'actions du dernier lot refusées par macOS (permissions) : de quoi afficher le bandeau d'aide.
+pub fn latest_permission_failures(history: &[HistoryEntry]) -> usize {
+    let Some(last) = history.last().map(|e| e.batch_id) else { return 0 };
+    history
+        .iter()
+        .rev()
+        .take_while(|e| e.batch_id == last)
+        .filter(|e| matches!(e.status, Status::Failed | Status::BlockedByConflict) && crate::engine::is_permission_error(&e.message))
+        .count()
+}
+
 /// Ordre d'annulation d'un lot : l'action la plus récente d'abord (un déplacement suivi d'un
 /// renommage se défait en annulant le renommage avant le déplacement).
 pub fn undo_order(history: &[HistoryEntry], entries: &[usize]) -> Vec<usize> {
@@ -232,6 +243,17 @@ mod tests {
         assert_eq!(file_name(&h[0]), "vieux.pdf");
         assert_eq!(destination_label(&h[0]), "Archives");
         assert_eq!(destination_label(&h[2]), "—", "un échec n'a pas de destination");
+    }
+
+    #[test]
+    fn permission_failures_only_count_the_latest_batch() {
+        let mut h = sample();
+        h[0].status = Status::Failed;
+        h[0].message = "Operation not permitted (os error 1)".into();
+        assert_eq!(latest_permission_failures(&h), 0, "un ancien lot ne compte pas");
+        h[3].status = Status::Failed;
+        h[3].message = "Permission denied (os error 13)".into();
+        assert_eq!(latest_permission_failures(&h), 1);
     }
 
     #[test]
