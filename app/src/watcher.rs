@@ -256,7 +256,7 @@ impl Worker {
         .ok()?;
         let mut count = 0;
         for folder in config.folders.iter().filter(|f| f.enabled) {
-            let deep = config.rules.iter().any(|r| r.folder_id == folder.id && r.enabled && r.recursion_depth > 0);
+            let deep = config.rules.iter().any(|r| r.folder_ids.contains(&folder.id) && r.enabled && r.recursion_depth > 0);
             let mode = if deep { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
             if watcher.watch(&folder.path, mode).is_ok() {
                 count += 1;
@@ -342,7 +342,7 @@ mod tests {
             folders: vec![Folder { id: 1, path: watched.to_path_buf(), enabled: true, priority: 0 }],
             rules: vec![Rule {
                 id: 2,
-                folder_id: 1,
+                folder_ids: vec![1],
                 name: "png".into(),
                 enabled: true,
                 match_all: true,

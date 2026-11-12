@@ -6,9 +6,11 @@
 //! `--screenshot <file.png>` draws ~120 frames, saves a PNG of the window and
 //! exits (used for automated checks).
 
+mod alerts;
 mod engine;
 mod login;
 mod mechanics;
+mod menubar;
 mod store;
 mod system;
 mod ui;
