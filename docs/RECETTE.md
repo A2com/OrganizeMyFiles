@@ -107,7 +107,7 @@ Version testée : 0.1.0 · Mac : ____________ · macOS : ____________ · Date : 
 | | Contrôle | État |
 |---|---|---|
 | [ ] | Réglages : la case « Jouer les sons » coupe tous les sons (intro et dashboard) | À faire |
-| [ ] | Aperçu : le bouton « Organiser maintenant » a un halo qui pulse (pas d'animation si l'appli est en veille ou si « Animer le fond » est décoché) | À faire |
+| [ ] | Aperçu : le bouton « Organiser maintenant » a une lueur externe lisse (type Photoshop) qui pulse doucement (pas d'animation si l'appli est en veille ou si « Animer le fond » est décoché) | À faire |
 | [ ] | Pastille d'état en bas : verte avec point qui pulse après un rangement réussi, rouge après une erreur ou un échec ; s'estompe seule ; un clic la ferme | À faire |
 | [x] | Pastille : durée de vie, pulsation, vert/rouge selon le lot (tests) ; captures verte et rouge | Auto (2026-11-12) |
 | [ ] | Changer la couleur d'accent ; « Animer le fond » coupe l'animation | À faire |

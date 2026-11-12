@@ -765,7 +765,17 @@ impl App {
             let slot = child.painter().add(egui::Shape::Noop);
             let run = pill(&mut child, "Commencer", accent, true, true);
             let phase = if animated && state_is_live(&self.intro) { (now / 1.8).fract() as f32 } else { 0.3 };
-            child.painter().set(slot, pulse_glow(run.rect, accent, phase, 0.22 * f.button));
+            child.painter().set(
+                slot,
+                outer_glow(
+                    &ctx,
+                    run.rect,
+                    run.rect.height() / 2.0,
+                    accent,
+                    glow_breath(phase, 0.02, 0.02) * f.button,
+                    2.0 * (phase * std::f32::consts::TAU).sin().abs(),
+                ),
+            );
             if run.clicked() {
                 start_app = true;
             }
@@ -1446,13 +1456,7 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
             with_alpha(accent, if hover { 56 } else { 34 })
         };
         if primary {
-            for (off, alpha) in [(5.0f32, 26u8), (2.0, 40)] {
-                ui.painter().rect_filled(
-                    rect.translate(Vec2::new(0.0, off)),
-                    Rounding::same(h / 2.0),
-                    Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), alpha),
-                );
-            }
+            ui.painter().add(outer_glow(ui.ctx(), rect, h / 2.0, accent, 0.03, 0.0));
         }
         ui.painter().rect_filled(rect, Rounding::same(h / 2.0), fill);
         let tc = Color32::WHITE;
@@ -1487,18 +1491,33 @@ fn toast_pill(ui: &mut egui::Ui, text: &str, kind: ToastKind, look: toast::Toast
     resp.on_hover_text("Cliquer pour fermer").clicked()
 }
 
-/// Halo qui « respire » autour d'un bouton rond : plusieurs couches arrondies dont l'écart et l'opacité suivent `phase` (0..1).
-fn pulse_glow(rect: Rect, accent: Color32, phase: f32, strength: f32) -> egui::Shape {
+/// Halo « lueur externe » lisse autour d'un bouton à coins arrondis (`radius`) : flou gaussien mis en cache, peint
+/// avec la couleur `color` à l'opacité `intensity` (0 à 1). `grow` agrandit légèrement le halo (pulsation).
+fn outer_glow(ctx: &egui::Context, rect: Rect, radius: f32, color: Color32, intensity: f32, grow: f32) -> egui::Shape {
+    type Cache = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<(u32, u32, u32), egui::TextureHandle>>>;
+    let cache: Cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("outer-glow-cache"), Cache::default).clone());
+    let key = (rect.width().round() as u32, rect.height().round() as u32, radius.round() as u32);
+    let texture = {
+        let mut textures = cache.lock().unwrap_or_else(|e| e.into_inner());
+        textures
+            .entry(key)
+            .or_insert_with(|| {
+                let map = crate::glow::glow_map(key.0 as f32, key.1 as f32, key.2 as f32, crate::glow::SOFT);
+                let pixels = map.alpha.iter().map(|a| Color32::from_white_alpha((a * 255.0).round() as u8)).collect();
+                let image = egui::ColorImage { size: [map.width, map.height], pixels };
+                ctx.load_texture("outer-glow", image, egui::TextureOptions::LINEAR)
+            })
+            .clone()
+    };
+    let margin = crate::glow::margin(crate::glow::SOFT) as f32 + grow;
+    let tint = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (intensity.clamp(0.0, 1.0) * 255.0) as u8);
+    egui::Shape::image(texture.id(), rect.expand(margin).translate(Vec2::ZERO), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint)
+}
+
+/// Intensité de la pulsation du halo (0 à 1) : « respire » doucement autour de `base` sur ± `amplitude`.
+fn glow_breath(phase: f32, base: f32, amplitude: f32) -> f32 {
     let breath = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
-    let radius = rect.height() / 2.0;
-    let layers = (0..8)
-        .map(|i| {
-            let grow = 2.0 + i as f32 * 2.6 + 7.0 * breath;
-            let alpha = (40.0 - i as f32 * 4.6) * (0.45 + 0.55 * breath) * strength;
-            egui::Shape::rect_filled(rect.expand(grow), Rounding::same(radius + grow), with_alpha(accent, alpha.max(0.0) as u8))
-        })
-        .collect();
-    egui::Shape::Vec(layers)
+    base + amplitude * breath
 }
 
 /// Vrai si l'intro avance en direct (pas figée pour une capture).
@@ -2545,7 +2564,17 @@ impl App {
                 let animated = self.animate_bg && self.app_enabled;
                 let phase = if animated { (ctx.input(|i| i.time) / 1.8).fract() as f32 } else { 0.3 };
                 if self.app_enabled {
-                    ui.painter().set(glow_slot, pulse_glow(run.rect, accent, phase, 1.0));
+                    ui.painter().set(
+                        glow_slot,
+                        outer_glow(
+                            &ctx,
+                            run.rect,
+                            run.rect.height() / 2.0,
+                            accent,
+                            glow_breath(phase, 0.02, 0.02),
+                            2.0 * (phase * std::f32::consts::TAU).sin().abs(),
+                        ),
+                    );
                 }
                 if animated {
                     ctx.request_repaint_after(std::time::Duration::from_millis(33));
