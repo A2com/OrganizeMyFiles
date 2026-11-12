@@ -50,6 +50,18 @@ pub struct DayView {
     pub batches: Vec<BatchView>,
 }
 
+/// « il y a 5 min », « hier »… à partir d'un instant passé.
+pub fn ago(t: SystemTime, now: SystemTime) -> String {
+    let secs = now.duration_since(t).map(|d| d.as_secs()).unwrap_or(0);
+    match secs {
+        0..=44 => "à l'instant".to_string(),
+        45..=3599 => format!("il y a {} min", (secs + 30) / 60),
+        3600..=86_399 => format!("il y a {} h", secs / 3600),
+        86_400..=172_799 => "hier".to_string(),
+        _ => format!("il y a {} j", secs / 86_400),
+    }
+}
+
 /// « Aujourd'hui », « Hier », sinon la date.
 pub fn day_label(created: SystemTime, now: SystemTime) -> String {
     let day = date_str(created);
@@ -201,6 +213,16 @@ mod tests {
             entry(2, t0 + DAY + 11, Status::Failed, "/in/Relevé.pdf", "/in/Relevé.pdf"),
             entry(3, t0 + 2 * DAY + 5, Status::Undone, "/in/photo.png", "/out/Images/photo.png"),
         ]
+    }
+
+    #[test]
+    fn ago_formats_relative_time() {
+        let now = SystemTime::now();
+        assert_eq!(ago(now - Duration::from_secs(10), now), "à l'instant");
+        assert_eq!(ago(now - Duration::from_secs(5 * 60), now), "il y a 5 min");
+        assert_eq!(ago(now - Duration::from_secs(3 * 3600), now), "il y a 3 h");
+        assert_eq!(ago(now - Duration::from_secs(30 * 3600), now), "hier");
+        assert_eq!(ago(now - Duration::from_secs(5 * 86_400), now), "il y a 5 j");
     }
 
     #[test]

@@ -8,9 +8,10 @@ use eframe::egui::{self, Align, Color32, Layout, Pos2, Rect, RichText, Rounding,
 
 use crate::alerts;
 use crate::engine::*;
-use crate::history_view;
+use crate::history_view::{self, ago};
 use crate::mechanics::*;
-use crate::menubar::{MenuBar, MenuCommand};
+use crate::menubar::{self, MenuBar, MenuCommand, MenuScreen};
+use crate::menubar_info::{self, MenuFolder, MenuInfo};
 use crate::store::{self, Loaded, Settings, State};
 use crate::system;
 use crate::tags;
@@ -181,8 +182,6 @@ struct UndoFolder {
 const UNDO_SECONDS: u64 = 8;
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/app-256.png");
-/// Icône de la barre des menus : le pictogramme « Dossiers suivis », monochrome.
-const TRAY_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/tray-template-44.png");
 
 fn app_icon_image() -> egui::ColorImage {
     let img = image::load_from_memory(APP_ICON_PNG).expect("icône embarquée valide").to_rgba8();
@@ -238,6 +237,8 @@ pub struct App {
     menubar_failed: bool,
     /// Vrai quand l'utilisateur a choisi « Quitter » : la fermeture n'est plus interceptée.
     quitting: bool,
+    /// La fenêtre est fermée (l'appli tourne dans la barre des menus).
+    window_hidden: bool,
     search: String,
     history_filter: history_view::StatusFilter,
     /// Nombre d'actions affichées dans l'historique (+50 à chaque « Afficher plus »).
@@ -257,7 +258,7 @@ pub struct App {
     frame: u32,
     screenshot: Option<String>,
     shot_done: bool,
-    start_minimized: bool,
+    start_hidden: bool,
 }
 
 impl App {
@@ -322,6 +323,7 @@ impl App {
             menubar: None,
             menubar_failed: false,
             quitting: false,
+            window_hidden: false,
             search: String::new(),
             history_filter: history_view::StatusFilter::All,
             history_limit: HISTORY_PAGE_SIZE,
@@ -339,7 +341,7 @@ impl App {
             frame: 0,
             screenshot,
             shot_done: false,
-            start_minimized: background,
+            start_hidden: background,
         }
     }
 
@@ -625,7 +627,42 @@ impl App {
         }
     }
 
-    /// Icône de la barre des menus, commandes du menu, et « fermer la fenêtre » = la cacher.
+    /// Ce que le menu de la barre des menus doit afficher en ce moment.
+    fn menu_info(&self) -> MenuInfo {
+        MenuInfo {
+            enabled: self.app_enabled,
+            folders: self
+                .folders
+                .iter()
+                .map(|f| MenuFolder {
+                    id: f.id,
+                    label: tags::folder_label(&self.folders, f.id),
+                    active: f.enabled,
+                    denied: self.denied_folders.contains(&f.path),
+                })
+                .collect(),
+            rules_active: self.rules.iter().filter(|r| r.enabled).count(),
+            last_batch: menubar_info::last_batch_line(&self.history, SystemTime::now()),
+        }
+    }
+
+    /// Ferme la fenêtre sans quitter : l'appli reste active dans la barre des menus, sans icône dans le Dock.
+    fn hide_window(&mut self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        menubar::set_dock_visible(false);
+        self.window_hidden = true;
+    }
+
+    /// Rouvre la fenêtre (et l'icône du Dock) au premier plan.
+    fn show_window(&mut self, ctx: &egui::Context) {
+        menubar::set_dock_visible(true);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        self.window_hidden = false;
+    }
+
+    /// Icône et menu de la barre des menus, commandes du menu, et « bouton rouge = fermer la fenêtre ».
     fn handle_menubar(&mut self, ctx: &egui::Context) {
         if self.screenshot.is_none() {
             if !self.menu_bar {
@@ -633,40 +670,56 @@ impl App {
                 self.menubar_failed = false;
             } else if self.menubar.is_none() && !self.menubar_failed {
                 let wake = ctx.clone();
-                self.menubar = MenuBar::new(TRAY_ICON_PNG, self.app_enabled, move || wake.request_repaint());
+                self.menubar = MenuBar::new(move || wake.request_repaint());
                 self.menubar_failed = self.menubar.is_none();
             }
         }
-        let commands = match &self.menubar {
-            Some(mb) => {
-                mb.set_enabled(self.app_enabled);
-                mb.poll()
+        // Sans icône dans la barre, une fenêtre cachée serait inaccessible : on la rouvre.
+        if self.window_hidden && self.menubar.is_none() {
+            self.show_window(ctx);
+        }
+        let commands = self.menubar.as_ref().map(MenuBar::poll).unwrap_or_default();
+        if self.menubar.is_some() {
+            let info = self.menu_info();
+            if let Some(bar) = &mut self.menubar {
+                bar.update(&info);
             }
-            None => Vec::new(),
-        };
+        }
         for cmd in commands {
             match cmd {
-                MenuCommand::Open => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                MenuCommand::Open(screen) => {
+                    self.tab = match screen {
+                        MenuScreen::Dashboard => Tab::Dashboard,
+                        MenuScreen::Folders => Tab::Folders,
+                        MenuScreen::Rules => Tab::Rules,
+                        MenuScreen::History => Tab::History,
+                        MenuScreen::Settings => Tab::Settings,
+                    };
+                    self.show_window(ctx);
                 }
                 MenuCommand::Organize => {
                     if self.app_enabled {
                         self.run_batch(false);
                     }
                 }
+                MenuCommand::Preview => self.run_batch(true),
                 MenuCommand::ToggleEnabled => self.app_enabled = !self.app_enabled,
+                MenuCommand::RevealFolder(id) => {
+                    if let Some(f) = self.folders.iter().find(|f| f.id == id) {
+                        system::reveal_in_finder(&f.path);
+                    }
+                }
                 MenuCommand::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             }
         }
-        // Avec l'icône dans la barre des menus, fermer la fenêtre la réduit : l'appli et la surveillance continuent.
-        // (Masquer la fenêtre, `Visible(false)`, fait quitter l'appli sur macOS : constaté, d'où la réduction.)
+        // Bouton rouge : avec l'icône dans la barre des menus, la fenêtre se ferme mais l'appli (et la
+        // surveillance) continue ; sans l'icône, c'est la fin de l'appli. « Quitter » arrête vraiment.
         if self.menubar.is_some() && !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            self.hide_window(ctx);
         }
     }
 
@@ -1500,18 +1553,6 @@ fn section_title(ui: &mut egui::Ui, icon: Icon, title: &str) {
     ui.label(RichText::new(title).size(15.0).family(semibold()).color(Color32::WHITE));
 }
 
-/// « il y a 5 min », « hier »… à partir d'un instant passé.
-fn ago(t: SystemTime, now: SystemTime) -> String {
-    let secs = now.duration_since(t).map(|d| d.as_secs()).unwrap_or(0);
-    match secs {
-        0..=44 => "à l'instant".to_string(),
-        45..=3599 => format!("il y a {} min", (secs + 30) / 60),
-        3600..=86_399 => format!("il y a {} h", secs / 3600),
-        86_400..=172_799 => "hier".to_string(),
-        _ => format!("il y a {} j", secs / 86_400),
-    }
-}
-
 /// Ce que l'écran Aperçu met en avant selon l'état de l'appli.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum HeroState {
@@ -1614,9 +1655,6 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame += 1;
-        if self.start_minimized && self.frame == 2 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-        }
 
         // --screenshot: draw ~120 frames, save the window as PNG, exit.
         if self.screenshot.is_some() {
@@ -1658,6 +1696,16 @@ impl eframe::App for App {
         }
         self.poll_watcher();
         self.handle_menubar(ctx);
+        // Démarrage à l'ouverture de session : fenêtre fermée d'emblée, l'appli vit dans la barre des menus.
+        if self.start_hidden && self.frame >= 2 {
+            if self.menubar.is_some() {
+                self.hide_window(ctx);
+                self.start_hidden = false;
+            } else if self.frame > 30 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                self.start_hidden = false;
+            }
+        }
         ctx.request_repaint_after(std::time::Duration::from_millis(1100));
 
         let screen = ctx.screen_rect();
@@ -3385,7 +3433,6 @@ fn save_png(path: &str, shot: &egui::ColorImage) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn shorten_handles_home_and_outside_home() {
@@ -3393,16 +3440,6 @@ mod tests {
         assert_eq!(shorten_with_home("/Users/a", "/Users/a"), "~");
         assert_eq!(shorten_with_home("/tmp", "/Users/a"), "/tmp");
         assert_eq!(shorten_with_home("/Users/ab/x", "/Users/a"), "/Users/ab/x");
-    }
-
-    #[test]
-    fn ago_formats_relative_time() {
-        let now = SystemTime::now();
-        assert_eq!(ago(now - Duration::from_secs(10), now), "à l'instant");
-        assert_eq!(ago(now - Duration::from_secs(5 * 60), now), "il y a 5 min");
-        assert_eq!(ago(now - Duration::from_secs(3 * 3600), now), "il y a 3 h");
-        assert_eq!(ago(now - Duration::from_secs(30 * 3600), now), "hier");
-        assert_eq!(ago(now - Duration::from_secs(5 * 86_400), now), "il y a 5 j");
     }
 
     #[test]

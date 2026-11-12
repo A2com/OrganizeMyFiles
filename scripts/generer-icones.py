@@ -2,7 +2,7 @@
 """Génère toutes les icônes de l'appli depuis icon/icon.png (à lancer sur le Mac : Pillow + iconutil).
 
 Sorties dans assets/icons/ (versionnées, pour que le build n'ait pas besoin de Pillow) :
-  macos/AppIcon.icns, tray-template-44.png (barre des menus), windows/OrganizeMyFiles.ico, linux/hicolor/<n>x<n>/apps/organizemyfiles.png, app-256.png
+  macos/AppIcon.icns, tray-template-44.png et tray-template-veille-44.png (barre des menus), menu/*.png (icônes du menu), windows/OrganizeMyFiles.ico, linux/hicolor/<n>x<n>/apps/organizemyfiles.png, app-256.png
 """
 import shutil
 import subprocess
@@ -36,14 +36,31 @@ def render(src: Image.Image, size: int, body: float = 1.0) -> Image.Image:
     return out
 
 
-def tray_template(size: int = 44) -> Image.Image:
-    """Pictogramme noir sur fond transparent : macOS le teinte selon le mode clair ou sombre."""
+def glyph(char: str, size: int, opacity: float = 1.0) -> Image.Image:
+    """Pictogramme noir sur fond transparent : macOS le teinte selon le mode clair ou sombre (« template »)."""
     font = ImageFont.truetype(str(SYMBOLS_FONT), round(size * 0.9))
     mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).text((size / 2, size / 2), FOLDER_MANAGED, font=font, fill=255, anchor="mm")
+    ImageDraw.Draw(mask).text((size / 2, size / 2), char, font=font, fill=round(255 * opacity), anchor="mm")
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     out.putalpha(mask)
     return out
+
+
+# Pictogrammes du menu de la barre des menus (même jeu Material Symbols que l'appli).
+MENU_GLYPHS = {
+    "ouvrir": "\ue871",  # dashboard
+    "organiser": "\uea0b",  # bolt
+    "apercu": "\ue8f4",  # visibility
+    "veille": "\uf8c7",  # power_settings_new
+    "dossiers": FOLDER_MANAGED,
+    "dossier": "\ue2c8",  # folder_open
+    "regles": "\uf1c2",  # rule
+    "historique": "\ue8b3",  # history
+    "reglages": "\ue429",  # tune
+    "quitter": "\ue5cd",  # close
+    "actif": "\uf0be",  # check_circle
+    "pause": "\uefd6",  # schedule
+}
 
 
 def main() -> None:
@@ -74,7 +91,11 @@ def main() -> None:
 
     # Icône embarquée dans le programme (fenêtre, barre latérale)
     render(src, 256).save(OUT / "app-256.png")
-    tray_template().save(OUT / "tray-template-44.png")
+    glyph(FOLDER_MANAGED, 44).save(OUT / "tray-template-44.png")
+    glyph(FOLDER_MANAGED, 44, 0.45).save(OUT / "tray-template-veille-44.png")
+    (OUT / "menu").mkdir()
+    for name, char in MENU_GLYPHS.items():
+        glyph(char, 36).save(OUT / "menu" / f"{name}.png")
     print("OK :", OUT)
 
 
