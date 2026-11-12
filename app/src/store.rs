@@ -28,6 +28,13 @@ pub struct Settings {
     /// La carte de bienvenue (explication des autorisations macOS) a déjà été montrée.
     #[serde(default)]
     pub welcome_seen: bool,
+    /// L'écran d'introduction a déjà été montré (absent des anciens fichiers : on le considère comme vu).
+    #[serde(default = "default_true")]
+    pub intro_seen: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Tout ce qui doit survivre à la fermeture de l'appli.
@@ -181,6 +188,7 @@ mod tests {
                 app_enabled: false,
                 launch_at_login: true,
                 welcome_seen: true,
+                intro_seen: true,
             },
             next_id: 9,
             next_batch: 8,
@@ -255,5 +263,6 @@ mod tests {
         let s: Settings = serde_json::from_str(json).unwrap();
         assert!(!s.launch_at_login);
         assert!(!s.welcome_seen);
+        assert!(s.intro_seen, "un ancien fichier ne remontre pas l'introduction");
     }
 }

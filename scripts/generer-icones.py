@@ -2,7 +2,7 @@
 """Génère toutes les icônes de l'appli depuis icon/icon.png (à lancer sur le Mac : Pillow + iconutil).
 
 Sorties dans assets/icons/ (versionnées, pour que le build n'ait pas besoin de Pillow) :
-  macos/AppIcon.icns, tray-template-44.png et tray-template-veille-44.png (barre des menus), menu/*.png (icônes du menu), windows/OrganizeMyFiles.ico, linux/hicolor/<n>x<n>/apps/organizemyfiles.png, app-256.png
+  macos/AppIcon.icns, tray-template-44.png et tray-template-veille-44.png (barre des menus), menu/*.png (icônes du menu), windows/OrganizeMyFiles.ico, linux/hicolor/<n>x<n>/apps/organizemyfiles.png, app-256.png, intro-600.png (écran d'introduction)
 """
 import shutil
 import subprocess
@@ -91,6 +91,7 @@ def main() -> None:
 
     # Icône embarquée dans le programme (fenêtre, barre latérale)
     render(src, 256).save(OUT / "app-256.png")
+    render(src, 600).save(OUT / "intro-600.png")
     glyph(FOLDER_MANAGED, 44).save(OUT / "tray-template-44.png")
     glyph(FOLDER_MANAGED, 44, 0.45).save(OUT / "tray-template-veille-44.png")
     (OUT / "menu").mkdir()
