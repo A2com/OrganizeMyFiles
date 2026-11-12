@@ -80,6 +80,25 @@ impl FileMeta {
     }
 }
 
+/// Types proposés par la condition « Type » : (valeur enregistrée, libellé affiché). Les valeurs restent celles
+/// de l'appli d'origine ; seul le libellé est en français.
+pub const KIND_CHOICES: &[(&str, &str)] = &[
+    ("document", "Document"),
+    ("image", "Image"),
+    ("video", "Vidéo"),
+    ("audio", "Audio"),
+    ("archive", "Archive"),
+    ("folder", "Dossier"),
+    ("app", "Application"),
+    ("other", "Autre"),
+];
+
+/// Libellé français d'une valeur de type enregistrée, `None` si elle n'est pas reconnue.
+pub fn kind_label(value: &str) -> Option<&'static str> {
+    let v = value.trim().to_lowercase();
+    KIND_CHOICES.iter().find(|(k, _)| *k == v).map(|(_, l)| *l)
+}
+
 fn dir_size(p: &Path) -> u64 {
     let mut total = 0;
     if let Ok(rd) = fs::read_dir(p) {
@@ -1631,6 +1650,29 @@ mod tests {
         let out = runner.run(&folders, &[rule], SystemTime::now());
         assert_eq!(out.matched, 2, "un fichier par dossier ciblé");
         assert_eq!(fs::read_dir(&dest).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn kind_choices_match_what_kind_can_return() {
+        for (value, label) in KIND_CHOICES {
+            assert_eq!(kind_label(value), Some(*label));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for e in ["app", "zip", "png", "mp4", "mp3", "pdf", "xyz"] {
+            let mut m = meta("a", e, 1);
+            m.ext = e.into();
+            seen.insert(m.kind());
+        }
+        m_is_dir(&mut seen);
+        assert!(seen.iter().all(|k| kind_label(k).is_some()), "{seen:?}");
+        assert_eq!(kind_label(" Folder "), Some("Dossier"));
+        assert_eq!(kind_label("dossier"), None);
+    }
+
+    fn m_is_dir(seen: &mut std::collections::HashSet<&'static str>) {
+        let mut m = meta("d", "", 1);
+        m.is_dir = true;
+        seen.insert(m.kind());
     }
 
     fn kind_rule(value: &str) -> Rule {
