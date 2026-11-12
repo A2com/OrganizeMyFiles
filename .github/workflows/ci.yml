@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  verification:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chaîne Rust (stable, avec rustfmt et clippy)
+        run: |
+          rustup update stable
+          rustup component add rustfmt clippy
+
+      - name: Bibliothèques système (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev
+
+      - name: Cache des dépendances
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('app/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Programme de lecture des PDF et images (macOS)
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: ./scripts/construire-omf-extract.sh debug
+
+      - name: Mise en forme (cargo fmt)
+        run: cargo fmt --check
+
+      - name: Lint (cargo clippy, avertissements = erreurs)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release

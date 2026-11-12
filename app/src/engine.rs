@@ -31,18 +31,9 @@ pub struct FileMeta {
 impl FileMeta {
     pub fn read(path: &Path) -> std::io::Result<Self> {
         let md = fs::metadata(path)?;
-        let name = path
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let ext = path
-            .extension()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let stem = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| name.clone());
+        let name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let ext = path.extension().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| name.clone());
         let is_dir = md.is_dir();
         let size = if is_dir { dir_size(path) } else { md.len() };
         let tags = read_tags(path);
@@ -88,13 +79,6 @@ impl FileMeta {
             "other"
         }
     }
-
-    /// Kinds whose text extraction is a local text-recognition step.
-    /// Every capability is unlocked in this build (no accounts), so content
-    /// matching is never blocked; image OCR depends on extracted text only.
-    pub fn needs_ocr(&self) -> bool {
-        matches!(self.kind(), "image")
-    }
 }
 
 fn dir_size(p: &Path) -> u64 {
@@ -130,14 +114,7 @@ fn read_tags(path: &Path) -> Vec<String> {
             let sz = libc_getxattr(cpath.as_ptr(), cname.as_ptr(), std::ptr::null_mut(), 0, 0, 0);
             if sz > 0 {
                 let mut buf = vec![0u8; sz as usize];
-                let r = libc_getxattr(
-                    cpath.as_ptr(),
-                    cname.as_ptr(),
-                    buf.as_mut_ptr() as *mut _,
-                    buf.len(),
-                    0,
-                    0,
-                );
+                let r = libc_getxattr(cpath.as_ptr(), cname.as_ptr(), buf.as_mut_ptr() as *mut _, buf.len(), 0, 0);
                 if r >= 0 {
                     // Best-effort parse of the binary plist as raw text runs.
                     let raw = String::from_utf8_lossy(&buf);
@@ -161,45 +138,17 @@ fn read_tags(path: &Path) -> Vec<String> {
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn libc_getxattr(
-    p: *const i8,
-    n: *const i8,
-    v: *mut std::ffi::c_void,
-    s: usize,
-    pos: u32,
-    opts: i32,
-) -> isize {
+unsafe fn libc_getxattr(p: *const i8, n: *const i8, v: *mut std::ffi::c_void, s: usize, pos: u32, opts: i32) -> isize {
     extern "C" {
-        fn getxattr(
-            path: *const i8,
-            name: *const i8,
-            value: *mut std::ffi::c_void,
-            size: usize,
-            position: u32,
-            options: i32,
-        ) -> isize;
+        fn getxattr(path: *const i8, name: *const i8, value: *mut std::ffi::c_void, size: usize, position: u32, options: i32) -> isize;
     }
     getxattr(p, n, v, s, pos, opts)
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn libc_setxattr(
-    p: *const i8,
-    n: *const i8,
-    v: *const std::ffi::c_void,
-    s: usize,
-    pos: u32,
-    opts: i32,
-) -> i32 {
+unsafe fn libc_setxattr(p: *const i8, n: *const i8, v: *const std::ffi::c_void, s: usize, pos: u32, opts: i32) -> i32 {
     extern "C" {
-        fn setxattr(
-            path: *const i8,
-            name: *const i8,
-            value: *const std::ffi::c_void,
-            size: usize,
-            position: u32,
-            options: i32,
-        ) -> i32;
+        fn setxattr(path: *const i8, name: *const i8, value: *const std::ffi::c_void, size: usize, position: u32, options: i32) -> i32;
     }
     setxattr(p, n, v, s, pos, opts)
 }
@@ -218,14 +167,7 @@ fn write_tags(path: &Path, tags: &[String]) {
             if tags.is_empty() {
                 libc_setxattr(cpath.as_ptr(), cname.as_ptr(), std::ptr::null(), 0, 0, 0);
             } else {
-                libc_setxattr(
-                    cpath.as_ptr(),
-                    cname.as_ptr(),
-                    joined.as_ptr() as *const _,
-                    joined.len(),
-                    0,
-                    0,
-                );
+                libc_setxattr(cpath.as_ptr(), cname.as_ptr(), joined.as_ptr() as *const _, joined.len(), 0, 0);
             }
         }
     }
@@ -249,16 +191,8 @@ pub enum Field {
     Contents,
 }
 
-pub const FIELDS: &[Field] = &[
-    Field::Name,
-    Field::Extension,
-    Field::Size,
-    Field::DateAdded,
-    Field::DateModified,
-    Field::Kind,
-    Field::Tag,
-    Field::Contents,
-];
+pub const FIELDS: &[Field] =
+    &[Field::Name, Field::Extension, Field::Size, Field::DateAdded, Field::DateModified, Field::Kind, Field::Tag, Field::Contents];
 
 impl Field {
     pub fn label(&self) -> &'static str {
@@ -271,19 +205,6 @@ impl Field {
             Field::Kind => "Type",
             Field::Tag => "Étiquette",
             Field::Contents => "Contenu",
-        }
-    }
-    /// Raw kind value used by the original condition table (`kind` column).
-    pub fn raw(&self) -> &'static str {
-        match self {
-            Field::Name => "name",
-            Field::Extension => "extension",
-            Field::Size => "size_bytes",
-            Field::DateAdded => "date_added",
-            Field::DateModified => "date_modified",
-            Field::Kind => "kind",
-            Field::Tag => "tag",
-            Field::Contents => "contents",
         }
     }
     pub fn ops(&self) -> &'static [Op] {
@@ -333,24 +254,6 @@ impl Op {
             Op::After => "est après",
             Op::WithinLast => "est dans les derniers",
             Op::NotWithinLast => "n'est pas dans les derniers",
-        }
-    }
-    /// Raw operator value from the condition table.
-    pub fn raw(&self) -> &'static str {
-        match self {
-            Op::Contains => "contains",
-            Op::Equals => "equals",
-            Op::StartsWith => "startsWith",
-            Op::EndsWith => "endsWith",
-            Op::Matches => "matches",
-            Op::Is => "is",
-            Op::IsNot => "isNot",
-            Op::Greater => "greater",
-            Op::Less => "less",
-            Op::Before => "before",
-            Op::After => "after",
-            Op::WithinLast => "within_last",
-            Op::NotWithinLast => "not_within_last",
         }
     }
 }
@@ -437,7 +340,7 @@ impl Condition {
                 let tags: Vec<String> = f.tags.iter().map(|t| nfc(t).to_lowercase()).collect();
                 match self.op {
                     Op::Contains => tags.iter().any(|t| t.contains(&lv)),
-                    Op::Equals => tags.iter().any(|t| *t == lv),
+                    Op::Equals => tags.contains(&lv),
                     _ => false,
                 }
             }
@@ -614,10 +517,9 @@ impl ActionKind {
     /// Param keys the editor shows for this action.
     pub fn params(&self) -> &'static [(&'static str, &'static str)] {
         match self {
-            ActionKind::Move | ActionKind::Copy => &[
-                ("destination", "Dossier de destination"),
-                ("on_conflict", "conflit : replace | skip"),
-            ],
+            ActionKind::Move | ActionKind::Copy => {
+                &[("destination", "Dossier de destination"), ("on_conflict", "conflit : replace | skip")]
+            }
             ActionKind::Rename => &[("pattern", "Motif, ex. {name}-{current_date}.{extension}")],
             ActionKind::Compress => &[
                 ("pattern", "Nom de l'archive, ex. {name}-{timestamp}.zip"),
@@ -647,10 +549,7 @@ impl Action {
         Action { kind, params }
     }
     pub fn param(&self, k: &str) -> String {
-        self.params
-            .get(k)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default()
+        self.params.get(k).map(|s| s.trim().to_string()).unwrap_or_default()
     }
     /// Placeholder values that were never edited count as empty.
     pub fn param_real(&self, k: &str, placeholder: &str) -> String {
@@ -735,15 +634,6 @@ impl Status {
             Status::Undone => "annulé",
         }
     }
-    pub fn raw(&self) -> &'static str {
-        match self {
-            Status::Applied => "applied",
-            Status::Failed => "failed",
-            Status::BlockedByConflict => "blocked_by_conflict",
-            Status::DryRun => "dry_run",
-            Status::Undone => "undone",
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -792,9 +682,7 @@ pub fn expand_pattern(pattern: &str, f: &FileMeta, now: SystemTime) -> String {
 pub fn expand_destination(dest: &str, now: SystemTime) -> String {
     let secs = now_unix(now) as i64;
     let (y, m, d, ..) = crate::mechanics::local_parts(secs);
-    dest.replace("{year}", &format!("{:04}", y))
-        .replace("{month}", &format!("{:02}", m))
-        .replace("{day}", &format!("{:02}", d))
+    dest.replace("{year}", &format!("{:04}", y)).replace("{month}", &format!("{:02}", m)).replace("{day}", &format!("{:02}", d))
 }
 
 pub fn now_unix(t: SystemTime) -> u64 {
@@ -862,12 +750,7 @@ impl Runner {
     /// Every folder and every action runs — this build has no plan limits.
     /// Dry Run previews without touching files and stops at
     /// `PREVIEW_MATCH_LIMIT` matches (0x1001df4f0).
-    pub fn run(
-        &mut self,
-        folders: &[Folder],
-        rules: &[Rule],
-        now: SystemTime,
-    ) -> RunOutcome {
+    pub fn run(&mut self, folders: &[Folder], rules: &[Rule], now: SystemTime) -> RunOutcome {
         let mut history = Vec::new();
         let mut matched = 0usize;
         let mut scanned = 0usize;
@@ -914,15 +797,13 @@ impl Runner {
                     matched += 1;
                     let mut current = meta.path.clone();
                     let mut applied_any = false;
-                    for (pos, action) in rule.actions.iter().enumerate() {
-                        let entry = self.run_action(rule, action, pos, &meta, &current, now);
+                    for action in rule.actions.iter() {
+                        let entry = self.run_action(rule, action, &meta, &current, now);
                         let stops_chain = matches!(action.kind, ActionKind::Trash | ActionKind::Delete);
                         if entry.status == Status::Applied {
                             current = entry.result_path.clone();
                             applied_any = true;
-                        } else if entry.status == Status::BlockedByConflict
-                            || entry.status == Status::Failed
-                        {
+                        } else if entry.status == Status::BlockedByConflict || entry.status == Status::Failed {
                             history.push(entry);
                             break;
                         }
@@ -942,32 +823,20 @@ impl Runner {
         RunOutcome { matched, history, scanned }
     }
 
-    fn run_action(
-        &self,
-        rule: &Rule,
-        action: &Action,
-        pos: usize,
-        meta: &FileMeta,
-        current: &Path,
-        now: SystemTime,
-    ) -> HistoryEntry {
+    fn run_action(&self, rule: &Rule, action: &Action, meta: &FileMeta, current: &Path, now: SystemTime) -> HistoryEntry {
         let label = action.kind.label().to_string();
-        let base = |status: Status, message: String, result: PathBuf, undo: Option<Undo>| {
-            HistoryEntry {
-                batch_id: self.batch_id,
-                rule_name: rule.name.clone(),
-                action_label: label.clone(),
-                original_path: meta.path.clone(),
-                result_path: result,
-                undo,
-                reversible: matches!(status, Status::Applied) && matches!(
-                    action.kind,
-                    ActionKind::Move | ActionKind::Copy | ActionKind::Rename | ActionKind::Compress
-                ),
-                status,
-                message,
-                created: now,
-            }
+        let base = |status: Status, message: String, result: PathBuf, undo: Option<Undo>| HistoryEntry {
+            batch_id: self.batch_id,
+            rule_name: rule.name.clone(),
+            action_label: label.clone(),
+            original_path: meta.path.clone(),
+            result_path: result,
+            undo,
+            reversible: matches!(status, Status::Applied)
+                && matches!(action.kind, ActionKind::Move | ActionKind::Copy | ActionKind::Rename | ActionKind::Compress),
+            status,
+            message,
+            created: now,
         };
 
         if action.kind.requires_pro() {
@@ -976,7 +845,7 @@ impl Runner {
         }
 
         if self.dry_run {
-            return self.preview_action(rule, action, pos, meta, current, now, &base);
+            return self.preview_action(action, meta, current, now, &base);
         }
 
         match action.kind {
@@ -1022,11 +891,7 @@ impl Runner {
                         Status::Applied,
                         format!("{} → {}", action.kind.raw(), target.display()),
                         target.clone(),
-                        Some(Undo {
-                            kind: action.kind.clone(),
-                            from: target,
-                            to: current.to_path_buf(),
-                        }),
+                        Some(Undo { kind: action.kind.clone(), from: target, to: current.to_path_buf() }),
                     ),
                     Err(e) => base(Status::Failed, e.to_string(), current.to_path_buf(), None),
                 }
@@ -1061,7 +926,11 @@ impl Runner {
                     "{name}.zip".into()
                 } else {
                     let n = expand_pattern(&pattern, meta, now);
-                    if n.to_lowercase().ends_with(".zip") { n } else { format!("{n}.zip") }
+                    if n.to_lowercase().ends_with(".zip") {
+                        n
+                    } else {
+                        format!("{n}.zip")
+                    }
                 };
                 let dest_raw = action.param_real("destination", "Archive destination (empty = next to source)");
                 let dest_dir = if dest_raw.is_empty() {
@@ -1069,8 +938,7 @@ impl Runner {
                 } else {
                     PathBuf::from(shim_expand(&expand_destination(&dest_raw, now)))
                 };
-                let delete_source =
-                    action.param_real("delete_source_after_compression", "delete_source: true | false") == "true";
+                let delete_source = action.param_real("delete_source_after_compression", "delete_source: true | false") == "true";
                 if delete_source && dest_dir.starts_with(current.parent().unwrap_or(Path::new(""))) {
                     // A ZIP inside the source folder would include itself.
                 }
@@ -1141,12 +1009,7 @@ impl Runner {
                     }
                 }
                 write_tags(current, &tags);
-                base(
-                    Status::Applied,
-                    format!("étiquettes maintenant [{}]", tags.join(", ")),
-                    current.to_path_buf(),
-                    None,
-                )
+                base(Status::Applied, format!("étiquettes maintenant [{}]", tags.join(", ")), current.to_path_buf(), None)
             }
             ActionKind::OpenApplication => {
                 let app = action.param_real("application_path", "Application path");
@@ -1155,12 +1018,7 @@ impl Runner {
                 }
                 let p = PathBuf::from(shim_expand(&app));
                 if !p.exists() {
-                    return base(
-                        Status::Failed,
-                        format!("Application introuvable à {}", p.display()),
-                        current.to_path_buf(),
-                        None,
-                    );
+                    return base(Status::Failed, format!("Application introuvable à {}", p.display()), current.to_path_buf(), None);
                 }
                 let args = system::open_application_args(&p.to_string_lossy(), &current.to_string_lossy());
                 self.run_command("open", &args, |_| format!("ouvert avec {}", p.display()), &base, current)
@@ -1168,12 +1026,7 @@ impl Runner {
             ActionKind::RunShortcut => {
                 let name = action.param_real("shortcut_name", "Shortcut name");
                 if name.is_empty() {
-                    return base(
-                        Status::Failed,
-                        "RunShortcut requires 'shortcut_name' param".into(),
-                        current.to_path_buf(),
-                        None,
-                    );
+                    return base(Status::Failed, "RunShortcut requires 'shortcut_name' param".into(), current.to_path_buf(), None);
                 }
                 let args = system::run_shortcut_args(&name, &current.to_string_lossy());
                 self.run_command("shortcuts", &args, |_| format!("raccourci \"{name}\" exécuté"), &base, current)
@@ -1204,15 +1057,12 @@ impl Runner {
 
     fn preview_action(
         &self,
-        _rule: &Rule,
         action: &Action,
-        pos: usize,
         meta: &FileMeta,
         current: &Path,
         now: SystemTime,
         base: &dyn Fn(Status, String, PathBuf, Option<Undo>) -> HistoryEntry,
     ) -> HistoryEntry {
-        let _ = pos;
         match action.kind {
             ActionKind::Move | ActionKind::Copy => {
                 let dest_raw = action.param_real("destination", "Destination folder");
@@ -1229,12 +1079,7 @@ impl Runner {
                         None,
                     );
                 }
-                base(
-                    Status::DryRun,
-                    format!("serait {} vers {}", action.kind.raw(), target.display()),
-                    target,
-                    None,
-                )
+                base(Status::DryRun, format!("serait {} vers {}", action.kind.raw(), target.display()), target, None)
             }
             ActionKind::Rename => {
                 let pattern = action.param_real("pattern", "Pattern, e.g. {name}-{current_date}.{extension}");
@@ -1257,16 +1102,9 @@ impl Runner {
             ActionKind::Delete => base(Status::DryRun, "serait supprimé définitivement".into(), current.to_path_buf(), None),
             ActionKind::AddTag | ActionKind::RemoveTag => {
                 let tags = action.param_real("tags", "Tags (comma separated)");
-                base(
-                    Status::DryRun,
-                    format!("serait {} [{}]", action.kind.raw(), tags),
-                    current.to_path_buf(),
-                    None,
-                )
+                base(Status::DryRun, format!("serait {} [{}]", action.kind.raw(), tags), current.to_path_buf(), None)
             }
-            ActionKind::OpenApplication => {
-                base(Status::DryRun, "ouvrirait l'application".into(), current.to_path_buf(), None)
-            }
+            ActionKind::OpenApplication => base(Status::DryRun, "ouvrirait l'application".into(), current.to_path_buf(), None),
             ActionKind::RunShortcut => {
                 let name = action.param_real("shortcut_name", "Shortcut name");
                 base(Status::DryRun, format!("lancerait le raccourci \"{name}\""), current.to_path_buf(), None)
@@ -1341,11 +1179,7 @@ fn numbered_path(target: &Path) -> PathBuf {
 
 /// Existing archives are kept; new ones are numbered (0x1001e0820).
 fn unique_zip_path(dir: &Path, name: &str) -> PathBuf {
-    let name = if name.to_lowercase().ends_with(".zip") {
-        name.to_string()
-    } else {
-        format!("{name}.zip")
-    };
+    let name = if name.to_lowercase().ends_with(".zip") { name.to_string() } else { format!("{name}.zip") };
     let base = name.trim_end_matches(".zip").to_string();
     let mut target = dir.join(&name);
     let mut n = 2;
@@ -1372,9 +1206,7 @@ fn collect_files(root: &Path, depth: usize, out: &mut Vec<PathBuf>) {
 
 /// How many folder levels below `root` this file sits (0 = root's own files).
 fn rel_depth(root: &Path, file: &Path) -> usize {
-    file.strip_prefix(root)
-        .map(|rel| rel.components().count().saturating_sub(1))
-        .unwrap_or(0)
+    file.strip_prefix(root).map(|rel| rel.components().count().saturating_sub(1)).unwrap_or(0)
 }
 
 /// Texte en forme composée (NFC) : macOS donne souvent les noms de fichiers en forme décomposée
@@ -1491,10 +1323,8 @@ fn finder_color_tag(tag: &str) -> Option<String> {
     // FinderTags.setColorLabel (0x100154104) writes "<Name>\n<index>": the
     // first letter uppercased, the rest lowercased, then the label index.
     let mut chars = t.chars();
-    let name = match chars.next() {
-        Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
-        None => return None,
-    };
+    let first = chars.next()?;
+    let name = first.to_ascii_uppercase().to_string() + chars.as_str();
     Some(format!("{name}\n{idx}"))
 }
 
@@ -1564,17 +1394,9 @@ mod tests {
     fn date_within_last() {
         let f = meta("a", "pdf", 1);
         let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
-        let c = Condition {
-            field: Field::DateModified,
-            op: Op::WithinLast,
-            value: "30 days".into(),
-        };
+        let c = Condition { field: Field::DateModified, op: Op::WithinLast, value: "30 days".into() };
         assert!(!c.evaluate(&f, now)); // modified long before `now`
-        let c = Condition {
-            field: Field::DateModified,
-            op: Op::NotWithinLast,
-            value: "30 days".into(),
-        };
+        let c = Condition { field: Field::DateModified, op: Op::NotWithinLast, value: "30 days".into() };
         assert!(c.evaluate(&f, now));
     }
 
@@ -1593,15 +1415,9 @@ mod tests {
         let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         // Les dates suivent l'heure locale du système : on compare au même découpage.
         let (y, mo, d, h, mi, sec) = crate::mechanics::local_parts(1_700_000_000);
-        assert_eq!(
-            expand_pattern("{name}-{current_date}.{extension}", &f, now),
-            format!("old-{y:04}-{mo:02}-{d:02}.pdf")
-        );
+        assert_eq!(expand_pattern("{name}-{current_date}.{extension}", &f, now), format!("old-{y:04}-{mo:02}-{d:02}.pdf"));
         assert_eq!(expand_pattern("{name}-{size}.{extension}", &f, now), "old-2048.pdf");
-        assert_eq!(
-            expand_pattern("{timestamp}", &f, now),
-            format!("{y:04}-{mo:02}-{d:02}_{h:02}-{mi:02}-{sec:02}")
-        );
+        assert_eq!(expand_pattern("{timestamp}", &f, now), format!("{y:04}-{mo:02}-{d:02}_{h:02}-{mi:02}-{sec:02}"));
     }
 
     #[test]
@@ -1653,16 +1469,28 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    fn system_action_entry(kind: ActionKind, key: &str, value: &str, fake: &std::rc::Rc<crate::system::fake::FakeCommands>) -> HistoryEntry {
+    fn system_action_entry(
+        kind: ActionKind,
+        key: &str,
+        value: &str,
+        fake: &std::rc::Rc<crate::system::fake::FakeCommands>,
+    ) -> HistoryEntry {
         let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(fake.clone()), only_paths: None };
         let rule = Rule {
-            id: 1, folder_ids: vec![1], name: "r".into(), enabled: true, match_all: true,
-            recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
+            id: 1,
+            folder_ids: vec![1],
+            name: "r".into(),
+            enabled: true,
+            match_all: true,
+            recursion_depth: 0,
+            priority: 0,
+            conditions: vec![],
+            actions: vec![],
         };
         let mut action = Action::new(kind);
         action.params.insert(key.into(), value.into());
         let file = meta("photo", "jpg", 10);
-        runner.run_action(&rule, &action, 0, &file, &file.path, SystemTime::now())
+        runner.run_action(&rule, &action, &file, &file.path, SystemTime::now())
     }
 
     #[test]
@@ -1701,13 +1529,20 @@ mod tests {
         let fake = std::rc::Rc::new(crate::system::fake::FakeCommands::ok());
         let runner = Runner { monthly_used: 0, batch_id: 1, dry_run: true, commands: Box::new(fake.clone()), only_paths: None };
         let rule = Rule {
-            id: 1, folder_ids: vec![1], name: "r".into(), enabled: true, match_all: true,
-            recursion_depth: 0, priority: 0, conditions: vec![], actions: vec![],
+            id: 1,
+            folder_ids: vec![1],
+            name: "r".into(),
+            enabled: true,
+            match_all: true,
+            recursion_depth: 0,
+            priority: 0,
+            conditions: vec![],
+            actions: vec![],
         };
         let mut action = Action::new(ActionKind::RunShortcut);
         action.params.insert("shortcut_name".into(), "X".into());
         let file = meta("a", "jpg", 1);
-        let e = runner.run_action(&rule, &action, 0, &file, &file.path, SystemTime::now());
+        let e = runner.run_action(&rule, &action, &file, &file.path, SystemTime::now());
         assert_eq!(e.status, Status::DryRun);
         assert!(fake.calls.borrow().is_empty());
     }
@@ -1750,8 +1585,10 @@ mod tests {
 
     #[test]
     fn one_rule_applies_to_every_folder_it_targets() {
-        let (a, b) = (std::env::temp_dir().join(format!("organizemyfiles-multi-a-{}", std::process::id())),
-                      std::env::temp_dir().join(format!("organizemyfiles-multi-b-{}", std::process::id())));
+        let (a, b) = (
+            std::env::temp_dir().join(format!("organizemyfiles-multi-a-{}", std::process::id())),
+            std::env::temp_dir().join(format!("organizemyfiles-multi-b-{}", std::process::id())),
+        );
         for d in [&a, &b] {
             fs::create_dir_all(d).unwrap();
             fs::write(d.join("x.png"), b"x").unwrap();
@@ -1761,7 +1598,13 @@ mod tests {
         act.params.insert("destination".into(), dest.to_string_lossy().into_owned());
         act.params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_NUMBER.into());
         let rule = Rule {
-            id: 1, folder_ids: vec![1, 2], name: "r".into(), enabled: true, match_all: true, recursion_depth: 0, priority: 0,
+            id: 1,
+            folder_ids: vec![1, 2],
+            name: "r".into(),
+            enabled: true,
+            match_all: true,
+            recursion_depth: 0,
+            priority: 0,
             conditions: vec![Condition { field: Field::Extension, op: Op::Equals, value: ".png".into() }],
             actions: vec![act],
         };
@@ -1769,14 +1612,25 @@ mod tests {
             Folder { id: 1, path: a.clone(), enabled: true, priority: 0 },
             Folder { id: 2, path: b.clone(), enabled: true, priority: 1 },
         ];
-        let mut runner = Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(crate::system::SystemCommands), only_paths: None };
+        let mut runner =
+            Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(crate::system::SystemCommands), only_paths: None };
         let out = runner.run(&folders, &[rule], SystemTime::now());
         assert_eq!(out.matched, 2, "un fichier par dossier ciblé");
         assert_eq!(fs::read_dir(&dest).unwrap().count(), 2);
     }
 
     fn rule_with(match_all: bool, conditions: Vec<Condition>) -> Rule {
-        Rule { id: 1, folder_ids: vec![1], name: "r".into(), enabled: true, match_all, recursion_depth: 0, priority: 0, conditions, actions: vec![] }
+        Rule {
+            id: 1,
+            folder_ids: vec![1],
+            name: "r".into(),
+            enabled: true,
+            match_all,
+            recursion_depth: 0,
+            priority: 0,
+            conditions,
+            actions: vec![],
+        }
     }
 
     #[test]
@@ -1808,7 +1662,11 @@ mod tests {
 
     #[test]
     fn permission_errors_are_recognised_and_explained() {
-        for m in ["Operation not permitted (os error 1)", "Permission denied (os error 13)", "Destination indisponible : Operation not permitted (os error 1)"] {
+        for m in [
+            "Operation not permitted (os error 1)",
+            "Permission denied (os error 13)",
+            "Destination indisponible : Operation not permitted (os error 1)",
+        ] {
             assert!(is_permission_error(m), "{m}");
             assert!(fr_message(m).contains("Confidentialité"), "{m}");
         }

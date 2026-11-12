@@ -51,7 +51,10 @@ pub enum Loaded {
     Fresh,
     Restored(Box<State>),
     /// Fichier illisible ou d'une version plus récente : mis de côté, l'appli démarre vide.
-    Unreadable { backup: PathBuf, reason: String },
+    Unreadable {
+        backup: PathBuf,
+        reason: String,
+    },
 }
 
 /// Dossier de données de l'appli (`ORGANIZEMYFILES_STATE_DIR` permet de le rediriger, par exemple pour les tests).
@@ -169,7 +172,16 @@ mod tests {
                 message: "déplacé".into(),
                 created: UNIX_EPOCH + Duration::from_secs(1_700_000_000),
             }],
-            settings: Settings { accent: 3, menu_bar: false, notify: true, animate_bg: false, retention_days: 45, app_enabled: false, launch_at_login: true, welcome_seen: true },
+            settings: Settings {
+                accent: 3,
+                menu_bar: false,
+                notify: true,
+                animate_bg: false,
+                retention_days: 45,
+                app_enabled: false,
+                launch_at_login: true,
+                welcome_seen: true,
+            },
             next_id: 9,
             next_batch: 8,
             monthly_used: 42,

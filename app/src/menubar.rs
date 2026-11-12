@@ -1,6 +1,7 @@
 //! Icône et menu dans la barre des menus de macOS. Ailleurs : pas d'icône (`MenuBar::new` renvoie `None`).
 
-/// Ce que l'utilisateur a demandé dans le menu.
+/// Ce que l'utilisateur a demandé dans le menu (construit seulement sur macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuCommand {
     Open,

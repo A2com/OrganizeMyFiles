@@ -49,6 +49,7 @@ pub struct Watcher {
     config: Arc<Mutex<WatchConfig>>,
     tx: Sender<Msg>,
     results: Receiver<WatchResult>,
+    #[cfg_attr(not(test), allow(dead_code))]
     watched: Arc<AtomicUsize>,
 }
 
@@ -59,12 +60,7 @@ impl Watcher {
         let watched = Arc::new(AtomicUsize::new(0));
         let (tx, rx) = channel();
         let (res_tx, results) = channel();
-        let worker = Worker {
-            config: config.clone(),
-            watched: watched.clone(),
-            events: tx.clone(),
-            settle,
-        };
+        let worker = Worker { config: config.clone(), watched: watched.clone(), events: tx.clone(), settle };
         std::thread::spawn(move || worker.run(rx, res_tx, wake));
         Watcher { config, tx, results, watched }
     }
@@ -84,7 +80,8 @@ impl Watcher {
         self.results.try_recv().ok()
     }
 
-    /// Nombre de dossiers réellement écoutés en ce moment.
+    /// Nombre de dossiers réellement écoutés en ce moment (sert aux tests : savoir quand l'écoute est prête).
+    #[cfg(test)]
     pub fn watched_folders(&self) -> usize {
         self.watched.load(Ordering::Relaxed)
     }
@@ -135,12 +132,8 @@ impl Debouncer {
     /// Chemins calmes depuis `settle`. `size_of` donne la taille actuelle : si elle a changé
     /// depuis le dernier événement, le fichier grossit encore et on repart pour une attente.
     pub fn take_ready(&mut self, now: Instant, size_of: impl Fn(&Path) -> Option<u64>) -> Vec<PathBuf> {
-        let due: Vec<PathBuf> = self
-            .pending
-            .iter()
-            .filter(|(_, (t, _))| now.duration_since(*t) >= self.settle)
-            .map(|(p, _)| p.clone())
-            .collect();
+        let due: Vec<PathBuf> =
+            self.pending.iter().filter(|(_, (t, _))| now.duration_since(*t) >= self.settle).map(|(p, _)| p.clone()).collect();
         let mut ready = Vec::new();
         for p in due {
             let (_, seen) = self.pending[&p];
@@ -220,11 +213,8 @@ impl Worker {
                 continue;
             }
             let now = Instant::now();
-            let ready: Vec<PathBuf> = debouncer
-                .take_ready(now, file_size)
-                .into_iter()
-                .filter(|p| p.is_file() && !own.contains(p, now))
-                .collect();
+            let ready: Vec<PathBuf> =
+                debouncer.take_ready(now, file_size).into_iter().filter(|p| p.is_file() && !own.contains(p, now)).collect();
             if ready.is_empty() {
                 continue;
             }
@@ -281,12 +271,7 @@ fn process(config: &WatchConfig, files: Vec<PathBuf>) -> WatchResult {
         only_paths: Some(files.into_iter().collect::<HashSet<_>>()),
     };
     let outcome = runner.run(&config.folders, &config.rules, SystemTime::now());
-    WatchResult {
-        matched: outcome.matched,
-        scanned: outcome.scanned,
-        history: outcome.history,
-        monthly_delta: runner.monthly_used,
-    }
+    WatchResult { matched: outcome.matched, scanned: outcome.scanned, history: outcome.history, monthly_delta: runner.monthly_used }
 }
 
 #[cfg(test)]

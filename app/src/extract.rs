@@ -201,6 +201,7 @@ mod tests {
         assert!(fake.calls.borrow().is_empty());
     }
 
+    #[cfg(target_os = "macos")]
     fn fixture(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
     }
