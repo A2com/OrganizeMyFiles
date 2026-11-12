@@ -137,7 +137,7 @@ fn read_text_content(path: &Path) -> Option<String> {
     {
         None
     } else {
-        Some(text.to_lowercase())
+        Some(nfc(&text).to_lowercase())
     }
 }
 
@@ -396,11 +396,12 @@ pub struct Condition {
 
 impl Condition {
     pub fn evaluate(&self, f: &FileMeta, now: SystemTime) -> bool {
-        let v = self.value.trim();
+        let value = nfc(self.value.trim());
+        let v = value.as_str();
         let lv = v.to_lowercase();
         match self.field {
             Field::Name => {
-                let n = f.name.to_lowercase();
+                let n = nfc(&f.name).to_lowercase();
                 match self.op {
                     Op::Contains => n.contains(&lv),
                     Op::Equals => n == lv,
@@ -465,7 +466,7 @@ impl Condition {
                 }
             }
             Field::Tag => {
-                let tags: Vec<String> = f.tags.iter().map(|t| t.to_lowercase()).collect();
+                let tags: Vec<String> = f.tags.iter().map(|t| nfc(t).to_lowercase()).collect();
                 match self.op {
                     Op::Contains => tags.iter().any(|t| t.contains(&lv)),
                     Op::Equals => tags.iter().any(|t| *t == lv),
@@ -1382,9 +1383,20 @@ fn rel_depth(root: &Path, file: &Path) -> usize {
         .unwrap_or(0)
 }
 
+/// Texte en forme composée (NFC) : macOS donne souvent les noms de fichiers en forme décomposée
+/// (« e » + accent séparé), qui s'affiche mal et ne correspond pas à ce que l'utilisateur tape.
+pub fn nfc(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    s.nfc().collect()
+}
+
 /// Traduit à l'affichage les messages du moteur (valeurs d'origine, laissées intactes
 /// dans les données). Un message inconnu est rendu tel quel.
 pub fn fr_message(msg: &str) -> String {
+    nfc(&fr_message_raw(msg))
+}
+
+fn fr_message_raw(msg: &str) -> String {
     match msg {
         "A file already exists at the destination." => return "un fichier existe déjà à la destination".into(),
         "restored" => return "restauré".into(),
@@ -1698,5 +1710,15 @@ mod tests {
         assert_eq!(fr_message("serait copy vers /x"), "serait copié vers /x");
         assert_eq!(fr_message("serait addTag [a]"), "ajouterait les étiquettes [a]");
         assert_eq!(fr_message("Permission denied (os error 13)"), "Permission denied (os error 13)");
+    }
+
+    #[test]
+    fn decomposed_accents_match_and_display_composed() {
+        let nfd = "Releve\u{301}s e\u{301}te\u{301}"; // « Relevés été » en forme décomposée
+        assert_eq!(nfc(nfd), "Relevés été");
+        let f = meta(nfd, "pdf", 1);
+        let c = Condition { field: Field::Name, op: Op::Contains, value: "relevés".into() };
+        assert!(c.evaluate(&f, SystemTime::now()));
+        assert_eq!(fr_message("move → /a/Releve\u{301}s"), "déplacé → /a/Relevés");
     }
 }
