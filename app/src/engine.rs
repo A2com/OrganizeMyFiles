@@ -1736,6 +1736,45 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn every_kind_choice_finds_exactly_its_example() {
+        let root = std::env::temp_dir().join(format!("organizemyfiles-allkinds-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("Projet")).unwrap();
+        fs::create_dir_all(root.join("Truc.app")).unwrap();
+        for f in ["a.pdf", "b.png", "c.mp4", "d.mp3", "e.zip", "f.xyz"] {
+            fs::write(root.join(f), "x").unwrap();
+        }
+        let expected = [
+            ("document", "a.pdf"),
+            ("image", "b.png"),
+            ("video", "c.mp4"),
+            ("audio", "d.mp3"),
+            ("archive", "e.zip"),
+            ("folder", "Projet"),
+            ("app", "Truc.app"),
+            ("other", "f.xyz"),
+        ];
+        for (value, _) in KIND_CHOICES {
+            assert!(expected.iter().any(|(v, _)| v == value), "pas d'exemple pour le type « {value} »");
+        }
+        for (value, example) in expected {
+            let out = run_dry(&root, kind_rule(value));
+            let found: Vec<String> =
+                out.history.iter().map(|h| h.original_path.file_name().unwrap().to_string_lossy().into_owned()).collect();
+            assert_eq!(found, vec![example.to_string()], "type « {value} »");
+        }
+        // « n'est pas Image » : tout sauf l'image, et jamais de dossier (règle de sécurité).
+        let mut not_image = kind_rule("image");
+        not_image.conditions[0].op = Op::IsNot;
+        let out = run_dry(&root, not_image);
+        let mut found: Vec<String> =
+            out.history.iter().map(|h| h.original_path.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        found.sort();
+        assert_eq!(found, vec!["a.pdf", "c.mp4", "d.mp3", "e.zip", "f.xyz"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
     fn kind_rule(value: &str) -> Rule {
         let mut r = rule_with(true, vec![Condition { field: Field::Kind, op: Op::Is, value: value.into() }]);
         r.recursion_depth = 1;
