@@ -99,6 +99,36 @@ pub fn kind_label(value: &str) -> Option<&'static str> {
     KIND_CHOICES.iter().find(|(k, _)| *k == v).map(|(_, l)| *l)
 }
 
+/// Copie un fichier ou un dossier (récursivement) : `fs::copy` seul refuse les dossiers.
+fn copy_path(from: &Path, to: &Path) -> std::io::Result<()> {
+    if from.is_dir() {
+        fs::create_dir_all(to)?;
+        for e in fs::read_dir(from)? {
+            let e = e?;
+            copy_path(&e.path(), &to.join(e.file_name()))?;
+        }
+        Ok(())
+    } else {
+        fs::copy(from, to).map(|_| ())
+    }
+}
+
+/// Déplace un fichier ou un dossier. Si `rename` échoue (autre disque), copie puis supprime la source,
+/// et ne supprime la source que si la copie a réussi.
+fn move_path(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::rename(from, to).or_else(|_| {
+        if let Err(e) = copy_path(from, to) {
+            let _ = if to.is_dir() { fs::remove_dir_all(to) } else { fs::remove_file(to) };
+            return Err(e);
+        }
+        if from.is_dir() {
+            fs::remove_dir_all(from)
+        } else {
+            fs::remove_file(from)
+        }
+    })
+}
+
 fn dir_size(p: &Path) -> u64 {
     let mut total = 0;
     if let Ok(rd) = fs::read_dir(p) {
@@ -905,14 +935,7 @@ impl Runner {
                         );
                     }
                 }
-                let r = if action.kind == ActionKind::Move {
-                    fs::rename(current, &target).or_else(|_| {
-                        fs::copy(current, &target).map(|_| ())?;
-                        fs::remove_file(current)
-                    })
-                } else {
-                    fs::copy(current, &target).map(|_| ())
-                };
+                let r = if action.kind == ActionKind::Move { move_path(current, &target) } else { copy_path(current, &target) };
                 match r {
                     Ok(_) => base(
                         Status::Applied,
@@ -1332,7 +1355,7 @@ pub fn undo_entry(e: &HistoryEntry) -> Result<(), String> {
                 fs::create_dir_all(parent).map_err(|x| x.to_string())?;
             }
             if undo.from.exists() && !undo.to.exists() {
-                fs::rename(&undo.from, &undo.to).map_err(|x| x.to_string())
+                move_path(&undo.from, &undo.to).map_err(|x| x.to_string())
             } else if undo.from.exists() {
                 fs::remove_file(&undo.from).map_err(|x| x.to_string())
             } else {
@@ -1673,6 +1696,44 @@ mod tests {
         let mut m = meta("d", "", 1);
         m.is_dir = true;
         seen.insert(m.kind());
+    }
+
+    #[test]
+    fn copy_path_copies_directories_recursively() {
+        let root = std::env::temp_dir().join(format!("organizemyfiles-copydir-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src/sub")).unwrap();
+        fs::write(root.join("src/a.txt"), "a").unwrap();
+        fs::write(root.join("src/sub/b.txt"), "b").unwrap();
+        copy_path(&root.join("src"), &root.join("dst")).unwrap();
+        assert_eq!(fs::read_to_string(root.join("dst/sub/b.txt")).unwrap(), "b");
+        assert!(root.join("src/a.txt").exists(), "la copie garde la source");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn move_action_moves_a_folder_with_its_content() {
+        let root = std::env::temp_dir().join(format!("organizemyfiles-movedir-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("in/Projet")).unwrap();
+        fs::write(root.join("in/Projet/x.txt"), "x").unwrap();
+        let mut act = Action::new(ActionKind::Move);
+        act.params.insert("destination".into(), root.join("out").to_string_lossy().into_owned());
+        let mut rule = kind_rule("folder");
+        rule.actions = vec![act];
+        let folders = vec![Folder { id: 1, path: root.join("in"), enabled: true, priority: 0 }];
+        let mut runner =
+            Runner { monthly_used: 0, batch_id: 1, dry_run: false, commands: Box::new(crate::system::SystemCommands), only_paths: None };
+        let out = runner.run(&folders, &[rule], SystemTime::now());
+        assert_eq!(out.matched, 1);
+        assert!(
+            out.history.iter().all(|h| h.status == Status::Applied),
+            "{:?}",
+            out.history.iter().map(|h| &h.message).collect::<Vec<_>>()
+        );
+        assert!(root.join("out/Projet/x.txt").exists());
+        assert!(!root.join("in/Projet").exists());
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn kind_rule(value: &str) -> Rule {
