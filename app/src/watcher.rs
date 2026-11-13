@@ -26,6 +26,8 @@ pub struct WatchConfig {
     pub rules: Vec<Rule>,
     /// `false` = appli « en veille » : on n'applique rien.
     pub enabled: bool,
+    /// Passage complet sur les fichiers déjà présents, au lancement puis à cet intervalle ; `None` = désactivé.
+    pub auto_every: Option<Duration>,
 }
 
 /// Résultat d'un traitement automatique, à ajouter à l'historique par l'interface.
@@ -184,6 +186,8 @@ impl Worker {
     fn run(self, rx: Receiver<Msg>, results: Sender<WatchResult>, wake: impl Fn()) {
         let mut debouncer = Debouncer::new(self.settle);
         let mut own = OwnOutputs::new(OWN_OUTPUT_TTL);
+        let mut last_full: Option<Instant> = None;
+        let mut last_every: Option<Duration> = None;
         // Garder l'écouteur en vie : le lâcher arrête l'écoute (aussi à la sortie de la boucle).
         let mut _fs_watcher: Option<notify::RecommendedWatcher> = None;
         loop {
@@ -204,6 +208,27 @@ impl Worker {
                 }
                 Err(RecvTimeoutError::Timeout) => {}
             }
+            let (enabled, auto_every) = self.config.lock().map(|c| (c.enabled, c.auto_every)).unwrap_or_default();
+            if auto_every != last_every {
+                last_every = auto_every;
+                last_full = None; // nouvel intervalle (ou option activée) : passage immédiat
+            }
+            if let (true, Some(every)) = (enabled, auto_every) {
+                let now = Instant::now();
+                if last_full.is_none_or(|t| now.duration_since(t) >= every) {
+                    last_full = Some(now);
+                    let config = self.config.lock().map(|c| c.clone()).unwrap_or_default();
+                    let outcome = process(&config, None);
+                    for e in &outcome.history {
+                        own.add(e.original_path.clone(), now);
+                        own.add(e.result_path.clone(), now);
+                    }
+                    if !outcome.history.is_empty() {
+                        let _ = results.send(outcome);
+                        wake();
+                    }
+                }
+            }
             if debouncer.is_empty() {
                 continue;
             }
@@ -218,7 +243,7 @@ impl Worker {
             if ready.is_empty() {
                 continue;
             }
-            let outcome = process(&config, ready);
+            let outcome = process(&config, Some(ready));
             for e in &outcome.history {
                 own.add(e.original_path.clone(), now);
                 own.add(e.result_path.clone(), now);
@@ -261,14 +286,14 @@ fn file_size(p: &Path) -> Option<u64> {
     std::fs::metadata(p).ok().map(|m| m.len())
 }
 
-/// Applique les règles aux seuls fichiers donnés.
-fn process(config: &WatchConfig, files: Vec<PathBuf>) -> WatchResult {
+/// Applique les règles aux seuls fichiers donnés, ou à tout le contenu des dossiers suivis si `files` est `None`.
+fn process(config: &WatchConfig, files: Option<Vec<PathBuf>>) -> WatchResult {
     let mut runner = Runner {
         monthly_used: 0,
         batch_id: 0,
         dry_run: false,
         commands: Box::new(SystemCommands),
-        only_paths: Some(files.into_iter().collect::<HashSet<_>>()),
+        only_paths: files.map(|f| f.into_iter().collect::<HashSet<_>>()),
     };
     let outcome = runner.run(&config.folders, &config.rules, SystemTime::now());
     WatchResult { matched: outcome.matched, scanned: outcome.scanned, history: outcome.history, monthly_delta: runner.monthly_used }
@@ -337,6 +362,7 @@ mod tests {
                 actions: vec![act],
             }],
             enabled,
+            auto_every: None,
         }
     }
 
@@ -368,6 +394,30 @@ mod tests {
         assert_eq!(result.history.len(), 1);
         assert_eq!(result.history[0].status, Status::Applied);
         assert!(watched.join("notes.txt").exists(), "un fichier hors règle ne doit pas bouger");
+    }
+
+    #[test]
+    fn existing_files_are_organised_when_auto_is_on() {
+        let (watched, dest) = (test_dir("in-auto"), test_dir("out-auto"));
+        std::fs::write(watched.join("deja.png"), b"x").unwrap();
+        let w = Watcher::start(Duration::from_millis(300), || {});
+        let mut config = png_config(&watched, &dest, true);
+        config.auto_every = Some(Duration::from_secs(3600));
+        w.set_config(config);
+        assert!(wait_for(|| dest.join("deja.png").exists()), "le fichier déjà présent n'a pas été rangé");
+    }
+
+    #[test]
+    fn existing_files_stay_put_when_auto_is_off() {
+        let (watched, dest) = (test_dir("in-noauto"), test_dir("out-noauto"));
+        std::fs::write(watched.join("deja.png"), b"x").unwrap();
+        // macOS (FSEvents) peut rejouer la création d'un fichier écrit juste avant le démarrage : on laisse passer ce délai.
+        std::thread::sleep(Duration::from_millis(2500));
+        let w = Watcher::start(Duration::from_millis(300), || {});
+        w.set_config(png_config(&watched, &dest, true));
+        assert!(wait_for(|| w.watched_folders() == 1));
+        std::thread::sleep(Duration::from_millis(1200));
+        assert!(watched.join("deja.png").exists());
     }
 
     #[test]

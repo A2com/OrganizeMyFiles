@@ -250,6 +250,8 @@ pub struct App {
     selected_rule: usize,
     app_enabled: bool,
     launch_at_login: bool,
+    /// Passage complet automatique toutes les N minutes ; 0 = désactivé.
+    auto_organize_minutes: u32,
     welcome_seen: bool,
     /// Écran d'introduction en cours (premier lancement, ou « Revoir l'introduction »).
     intro: Option<IntroState>,
@@ -358,6 +360,7 @@ impl App {
             selected_rule: 0,
             app_enabled: true,
             launch_at_login: false,
+            auto_organize_minutes: 0,
             welcome_seen: false,
             intro: None,
             intro_seen: true,
@@ -476,6 +479,7 @@ impl App {
                 retention_days: self.retention_days,
                 app_enabled: self.app_enabled,
                 launch_at_login: self.launch_at_login,
+                auto_organize_minutes: self.auto_organize_minutes,
                 welcome_seen: self.welcome_seen,
                 intro_seen: self.intro_seen,
                 sounds: self.sounds_on,
@@ -500,6 +504,7 @@ impl App {
         self.retention_days = state.settings.retention_days.clamp(1, 365);
         self.app_enabled = state.settings.app_enabled;
         self.launch_at_login = state.settings.launch_at_login;
+        self.auto_organize_minutes = state.settings.auto_organize_minutes;
         self.welcome_seen = state.settings.welcome_seen;
         self.intro_seen = state.settings.intro_seen;
         self.sounds_on = state.settings.sounds;
@@ -1016,10 +1021,16 @@ impl App {
     /// Envoie à la surveillance les dossiers et règles actuels, seulement s'ils ont changé.
     fn sync_watcher(&mut self) {
         let Some(w) = &self.watcher else { return };
-        let key = serde_json::to_string(&(&self.folders, &self.rules, self.app_enabled)).unwrap_or_default();
+        let key = serde_json::to_string(&(&self.folders, &self.rules, self.app_enabled, self.auto_organize_minutes)).unwrap_or_default();
         if key != self.watch_key {
             self.watch_key = key;
-            w.set_config(WatchConfig { folders: self.folders.clone(), rules: self.rules.clone(), enabled: self.app_enabled });
+            w.set_config(WatchConfig {
+                folders: self.folders.clone(),
+                rules: self.rules.clone(),
+                enabled: self.app_enabled,
+                auto_every: (self.auto_organize_minutes > 0)
+                    .then(|| std::time::Duration::from_secs(u64::from(self.auto_organize_minutes) * 60)),
+            });
         }
     }
 
@@ -1995,6 +2006,9 @@ fn status_color(s: Status) -> Color32 {
         Status::Failed => Color32::from_rgb(0xe0, 0x5c, 0x5c),
     }
 }
+
+/// Intervalles proposés pour « Organiser automatiquement » : (minutes, libellé).
+const AUTO_ORGANIZE_CHOICES: &[(u32, &str)] = &[(15, "15 minutes"), (60, "1 heure"), (360, "6 heures"), (1440, "1 jour")];
 
 fn combo(ui: &mut egui::Ui, id: &str, current: &str, options: &[impl AsRef<str>]) -> Option<String> {
     let mut chosen = None;
@@ -3760,7 +3774,7 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 352.0), |ui| {
+        card(ui, Vec2::new(756.0, 420.0), |ui| {
             let before = self.launch_at_login;
             check_box(ui, &mut self.launch_at_login, "Lancement au démarrage", accent);
             if self.launch_at_login != before {
@@ -3777,6 +3791,27 @@ impl App {
             check_box(ui, &mut self.animate_bg, "Animer le fond", accent);
             ui.add_space(8.0);
             check_box(ui, &mut self.sounds_on, "Jouer les sons", accent);
+            ui.add_space(8.0);
+            let mut auto_on = self.auto_organize_minutes > 0;
+            check_box(ui, &mut auto_on, "Organiser automatiquement les dossiers suivis", accent);
+            if auto_on != (self.auto_organize_minutes > 0) {
+                self.auto_organize_minutes = if auto_on { AUTO_ORGANIZE_CHOICES[1].0 } else { 0 };
+            }
+            if auto_on {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Au lancement, puis toutes les").size(13.5).color(text_dim()));
+                    let current = AUTO_ORGANIZE_CHOICES
+                        .iter()
+                        .find(|(m, _)| *m == self.auto_organize_minutes)
+                        .map_or_else(|| format!("{} min", self.auto_organize_minutes), |(_, l)| (*l).to_string());
+                    let labels: Vec<&str> = AUTO_ORGANIZE_CHOICES.iter().map(|(_, l)| *l).collect();
+                    if let Some(pick) = combo(ui, "auto-organize", &current, &labels) {
+                        if let Some((m, _)) = AUTO_ORGANIZE_CHOICES.iter().find(|(_, l)| *l == pick) {
+                            self.auto_organize_minutes = *m;
+                        }
+                    }
+                });
+            }
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Garder l'historique").size(14.5).color(text_primary()));
