@@ -34,6 +34,9 @@ pub struct Settings {
     /// Jouer les sons de l'appli (absent des anciens fichiers : oui).
     #[serde(default = "default_true")]
     pub sounds: bool,
+    /// Passage complet automatique (au lancement puis tous les N minutes) ; 0 = désactivé (absent des anciens fichiers).
+    #[serde(default)]
+    pub auto_organize_minutes: u32,
 }
 
 fn default_true() -> bool {
@@ -193,6 +196,7 @@ mod tests {
                 welcome_seen: true,
                 intro_seen: true,
                 sounds: true,
+                auto_organize_minutes: 60,
             },
             next_id: 9,
             next_batch: 8,
