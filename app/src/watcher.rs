@@ -411,6 +411,8 @@ mod tests {
     fn existing_files_stay_put_when_auto_is_off() {
         let (watched, dest) = (test_dir("in-noauto"), test_dir("out-noauto"));
         std::fs::write(watched.join("deja.png"), b"x").unwrap();
+        // macOS (FSEvents) peut rejouer la création d'un fichier écrit juste avant le démarrage : on laisse passer ce délai.
+        std::thread::sleep(Duration::from_millis(2500));
         let w = Watcher::start(Duration::from_millis(300), || {});
         w.set_config(png_config(&watched, &dest, true));
         assert!(wait_for(|| w.watched_folders() == 1));
