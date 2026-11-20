@@ -195,8 +195,12 @@ fn app_icon_image() -> egui::ColorImage {
     egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
 }
 
-/// Icône de la fenêtre (Dock, barre des tâches).
+/// Icône de la fenêtre (barre des tâches). Sous macOS, on n'en impose aucune : le Dock affiche l'icône du `.app`,
+/// qui respecte le gabarit Apple (corps de 824 px sur 1024) ; l'image pleine taille la ferait paraître trop grosse.
 pub fn app_icon() -> egui::IconData {
+    if cfg!(target_os = "macos") {
+        return egui::IconData::default();
+    }
     let img = image::load_from_memory(APP_ICON_PNG).expect("icône embarquée valide").to_rgba8();
     egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() }
 }
