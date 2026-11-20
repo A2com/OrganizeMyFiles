@@ -897,7 +897,17 @@ impl App {
                 ),
             };
             ui.horizontal(|ui| {
+                // Réserve la largeur exacte du bouton : les textes se replient
+                // au lieu de passer dessous en fenêtre étroite.
+                let btn_w = ui
+                    .painter()
+                    .layout_no_wrap("Ouvrir les réglages".to_string(), egui::FontId::new(14.5, semibold()), Color32::WHITE)
+                    .size()
+                    .x
+                    + 28.0;
+                let text_w = (ui.available_width() - btn_w - 20.0).max(120.0);
                 ui.vertical(|ui| {
+                    ui.set_width(text_w);
                     ui.label(RichText::new(text).size(15.0).family(semibold()).color(text_primary()));
                     ui.label(
                         RichText::new("Accordez l'accès dans Réglages Système › Confidentialité et sécurité, puis revenez ici.")
@@ -1553,6 +1563,22 @@ fn radial_glow(painter: &egui::Painter, center: Pos2, radius: f32, color: Color3
     painter.add(egui::Shape::mesh(mesh));
 }
 
+/// Tronque `text` avec « … » pour qu'il tienne dans `max_w` (mesure de la fonte réelle).
+fn ellipsize(painter: &egui::Painter, text: &str, font: &egui::FontId, max_w: f32) -> String {
+    let width = |s: String| painter.layout_no_wrap(s, font.clone(), Color32::WHITE).size().x;
+    if width(text.to_string()) <= max_w {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    for c in text.chars() {
+        if width(format!("{out}{c}…")) > max_w {
+            return format!("{}…", out.trim_end());
+        }
+        out.push(c);
+    }
+    text.to_string()
+}
+
 fn lighten(c: Color32, d: u8) -> Color32 {
     Color32::from_rgb(c.r().saturating_add(d), c.g().saturating_add(d), c.b().saturating_add(d))
 }
@@ -1693,6 +1719,24 @@ fn slim_slider(ui: &mut egui::Ui, value: &mut u32, min: u32, max: u32, accent: C
     ui.painter().circle_filled(knob + Vec2::new(0.0, 1.0), 8.5, Color32::from_rgba_unmultiplied(0, 0, 0, 70));
     ui.painter().circle_filled(knob, 8.0, Color32::WHITE);
     changed
+}
+
+/// Sélecteur « TOUTES / AU MOINS UNE condition » d'une règle.
+fn rule_match_selector(ui: &mut egui::Ui, rule: &mut Rule, rid: u64) {
+    let current = if rule.match_all { 0 } else { 1 };
+    if let Some(i) = segmented(ui, egui::Id::new(("match", rid)), &["TOUTES les conditions", "AU MOINS UNE condition"], current, SKY_DEEP) {
+        rule.match_all = i == 0;
+    }
+}
+
+/// Réglette « Récursion » : profondeur de sous-dossiers prise en compte par la règle.
+fn recursion_control(ui: &mut egui::Ui, rule: &mut Rule, accent: Color32) {
+    ui.label(caps("RÉCURSION"));
+    let mut depth = rule.recursion_depth;
+    if slim_slider(ui, &mut depth, 0, 8, accent) {
+        rule.recursion_depth = depth;
+    }
+    chip(ui, &rule.recursion_depth.to_string(), accent, with_alpha(accent, 38));
 }
 
 fn toggle(ui: &mut egui::Ui, on: &mut bool, accent: Color32) -> egui::Response {
@@ -1985,6 +2029,9 @@ fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub
     let tile = Rect::from_min_size(r.min + Vec2::new(20.0, 20.0), Vec2::splat(34.0));
     p.rect_filled(tile, Rounding::same(10.0), with_alpha(accent, 70));
     draw_icon(&p, tile.center(), icon, Color32::WHITE, 17.0);
+    // Les textes sont tronqués à la largeur disponible : en fenêtre étroite,
+    // ils dépassaient de la tuile (peints sans limite de largeur).
+    let label = ellipsize(&p, label, &egui::FontId::new(12.5, semibold()), (r.right() - 16.0 - (tile.right() + 10.0)).max(20.0));
     p.text(
         Pos2::new(tile.right() + 10.0, tile.center().y),
         egui::Align2::LEFT_CENTER,
@@ -1992,7 +2039,9 @@ fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub
         egui::FontId::new(12.5, semibold()),
         text_label(),
     );
+    let value = ellipsize(&p, value, &egui::FontId::new(38.0, bold()), (w - 32.0).max(20.0));
     p.text(Pos2::new(r.left() + 20.0, r.top() + 86.0), egui::Align2::LEFT_CENTER, value, egui::FontId::new(38.0, bold()), Color32::WHITE);
+    let sub = ellipsize(&p, sub, &egui::FontId::proportional(14.5), (w - 32.0).max(20.0));
     p.text(Pos2::new(r.left() + 20.0, r.bottom() - 20.0), egui::Align2::LEFT_CENTER, sub, egui::FontId::proportional(14.5), text_dim());
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -2911,18 +2960,42 @@ impl App {
             ui.add_space(14.0);
             ui.label(caps("RACCOURCIS"));
             ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                for (label, dir) in SHORTCUTS {
-                    let path = PathBuf::from(format!("{}/{}", home_dir(), dir));
-                    let tracked = self.folders.iter().any(|f| f.path == path);
-                    ui.add_enabled_ui(!tracked, |ui| {
-                        let icon = if tracked { Icon::Tick } else { Icon::Add };
-                        if btn(ui, label, Btn::Ghost, accent, Some(icon)).clicked() {
-                            picked.push(path.clone());
-                        }
-                    });
+            // Répartition en lignes mesurée à la main : horizontal_wrapped ne détectait
+            // pas le dépassement à travers add_enabled_ui et le dernier raccourci
+            // sortait de la carte en fenêtre étroite.
+            let max_w = ui.available_width();
+            let gap = ui.spacing().item_spacing.x;
+            let mut lines: Vec<Vec<(&str, &str)>> = Vec::new();
+            let mut current: Vec<(&str, &str)> = Vec::new();
+            let mut used = 0.0_f32;
+            for (label, dir) in SHORTCUTS {
+                // Même mesure que btn : texte 14.5 semibold + 28 de padding + 20 d'icône.
+                let w = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::new(14.5, semibold()), Color32::WHITE).size().x + 48.0;
+                let extra = if current.is_empty() { w } else { w + gap };
+                if !current.is_empty() && used + extra > max_w {
+                    lines.push(std::mem::take(&mut current));
+                    used = 0.0;
                 }
-            });
+                used += if current.is_empty() { w } else { w + gap };
+                current.push((label, dir));
+            }
+            if !current.is_empty() {
+                lines.push(current);
+            }
+            for line in lines {
+                ui.horizontal(|ui| {
+                    for (label, dir) in line {
+                        let path = PathBuf::from(format!("{}/{}", home_dir(), dir));
+                        let tracked = self.folders.iter().any(|f| f.path == path);
+                        ui.add_enabled_ui(!tracked, |ui| {
+                            let icon = if tracked { Icon::Tick } else { Icon::Add };
+                            if btn(ui, label, Btn::Ghost, accent, Some(icon)).clicked() {
+                                picked.push(path.clone());
+                            }
+                        });
+                    }
+                });
+            }
             ui.add_space(10.0);
             let toggle_label = if self.show_path_input { "Masquer la saisie" } else { "Saisir un chemin" };
             let link = ui.add(egui::Label::new(RichText::new(toggle_label).size(14.0).color(accent)).sense(egui::Sense::click()));
@@ -3322,21 +3395,18 @@ impl App {
                 moved = true;
             }
             ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                let current = if self.rules[idx].match_all { 0 } else { 1 };
-                if let Some(i) =
-                    segmented(ui, egui::Id::new(("match", rid)), &["TOUTES les conditions", "AU MOINS UNE condition"], current, SKY_DEEP)
-                {
-                    self.rules[idx].match_all = i == 0;
-                }
-                ui.add_space(20.0);
-                ui.label(caps("RÉCURSION"));
-                let mut depth = self.rules[idx].recursion_depth;
-                if slim_slider(ui, &mut depth, 0, 8, accent) {
-                    self.rules[idx].recursion_depth = depth;
-                }
-                chip(ui, &depth.to_string(), accent, with_alpha(accent, 38));
-            });
+            // Fenêtre étroite : la réglette passe sur sa propre ligne au lieu de sortir de la carte.
+            if ui.available_width() < 700.0 {
+                rule_match_selector(ui, &mut self.rules[idx], rid);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| recursion_control(ui, &mut self.rules[idx], accent));
+            } else {
+                ui.horizontal(|ui| {
+                    rule_match_selector(ui, &mut self.rules[idx], rid);
+                    ui.add_space(20.0);
+                    recursion_control(ui, &mut self.rules[idx], accent);
+                });
+            }
             ui.add_space(4.0);
             ui.label(RichText::new("0 = premier niveau seulement ; n = n niveaux de plus.").size(13.5).color(text_dim()));
         });
@@ -3887,6 +3957,22 @@ fn save_png(path: &str, shot: &egui::ColorImage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ellipsize_truncates_to_width() {
+        let ctx = egui::Context::default();
+        ctx.begin_pass(Default::default());
+        let p = egui::Painter::new(ctx.clone(), egui::LayerId::background(), egui::Rect::EVERYTHING);
+        let font = egui::FontId::proportional(14.0);
+        assert_eq!(ellipsize(&p, "ok", &font, 500.0), "ok", "un texte qui tient est inchangé");
+        let long = ellipsize(&p, "actions au dernier passage", &font, 60.0);
+        assert!(long.ends_with('…') && long.len() < "actions au dernier passage".len(), "tronqué avec ellipse : {long}");
+        assert!(p.layout_no_wrap(long.clone(), font.clone(), Color32::WHITE).size().x <= 60.0, "le texte tronqué tient dans 60 px");
+        // Accents : pas de coupe au milieu d'un caractère UTF-8.
+        let accented = ellipsize(&p, "RÈGLES ACTIVES", &font, 40.0);
+        assert!(accented.ends_with('…'));
+        let _ = ctx.end_pass();
+    }
 
     #[test]
     fn shorten_handles_home_and_outside_home() {
