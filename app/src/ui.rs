@@ -14,7 +14,7 @@ use crate::mechanics::*;
 use crate::menubar::{self, MenuBar, MenuCommand, MenuScreen};
 use crate::menubar_info::{self, MenuFolder, MenuInfo};
 use crate::sound::{Sound, Sounds};
-use crate::store::{self, Loaded, Settings, State};
+use crate::store::{self, Loaded, RulesMode, Settings, State};
 use crate::system;
 use crate::tags;
 use crate::toast::{self, Toast, ToastKind};
@@ -255,6 +255,8 @@ pub struct App {
     launch_at_login: bool,
     /// Passage complet automatique toutes les N minutes ; 0 = désactivé.
     auto_organize_minutes: u32,
+    /// Écran Règles : assistant simple ou écran complet.
+    rules_mode: RulesMode,
     welcome_seen: bool,
     /// Écran d'introduction en cours (premier lancement, ou « Revoir l'introduction »).
     intro: Option<IntroState>,
@@ -364,6 +366,7 @@ impl App {
             app_enabled: true,
             launch_at_login: false,
             auto_organize_minutes: 0,
+            rules_mode: RulesMode::Simple,
             welcome_seen: false,
             intro: None,
             intro_seen: true,
@@ -483,6 +486,7 @@ impl App {
                 app_enabled: self.app_enabled,
                 launch_at_login: self.launch_at_login,
                 auto_organize_minutes: self.auto_organize_minutes,
+                rules_mode: self.rules_mode,
                 welcome_seen: self.welcome_seen,
                 intro_seen: self.intro_seen,
                 sounds: self.sounds_on,
@@ -508,6 +512,7 @@ impl App {
         self.app_enabled = state.settings.app_enabled;
         self.launch_at_login = state.settings.launch_at_login;
         self.auto_organize_minutes = state.settings.auto_organize_minutes;
+        self.rules_mode = state.settings.rules_mode;
         self.welcome_seen = state.settings.welcome_seen;
         self.intro_seen = state.settings.intro_seen;
         self.sounds_on = state.settings.sounds;

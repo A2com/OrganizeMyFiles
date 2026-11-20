@@ -37,6 +37,17 @@ pub struct Settings {
     /// Passage complet automatique (au lancement puis tous les N minutes) ; 0 = désactivé (absent des anciens fichiers).
     #[serde(default)]
     pub auto_organize_minutes: u32,
+    /// Présentation de l'écran Règles (absent des anciens fichiers : avancé, pour ne rien changer aux habitués).
+    #[serde(default)]
+    pub rules_mode: RulesMode,
+}
+
+/// Présentation de l'écran Règles : assistant en trois étapes ou écran complet.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RulesMode {
+    Simple,
+    #[default]
+    Advanced,
 }
 
 fn default_true() -> bool {
@@ -197,6 +208,7 @@ mod tests {
                 intro_seen: true,
                 sounds: true,
                 auto_organize_minutes: 60,
+                rules_mode: RulesMode::Simple,
             },
             next_id: 9,
             next_batch: 8,
@@ -273,5 +285,6 @@ mod tests {
         assert!(!s.welcome_seen);
         assert!(s.intro_seen, "un ancien fichier ne remontre pas l'introduction");
         assert!(s.sounds, "un ancien fichier garde les sons activés");
+        assert_eq!(s.rules_mode, RulesMode::Advanced, "un ancien fichier garde l'écran Règles complet");
     }
 }
