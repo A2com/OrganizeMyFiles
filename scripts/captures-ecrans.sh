@@ -10,6 +10,9 @@ cargo build --release >/dev/null
 BIN="$ROOT/app/target/release/OrganizeMyFiles"
 OUT="$ROOT/captures"
 STATE="$(mktemp -d)"
+# Taille de fenêtre : 1180x780 par défaut, 980x640 pour tester la largeur minimale.
+SIZE="${OMF_CAPTURE_SIZE:-1180x780}"
+WANT_W="${SIZE%%x*}"
 rm -rf "$OUT" && mkdir -p "$OUT"
 
 # État « erreur » : un dossier illisible, une action refusée par macOS, un échec.
@@ -38,16 +41,16 @@ PY
 
 fail=0
 for tab in dashboard folders rules history settings; do
-  "$BIN" --tab "$tab" --empty --screenshot "$OUT/$tab-vide.png" >/dev/null
-  "$BIN" --tab "$tab" --screenshot "$OUT/$tab-demo.png" >/dev/null
-  ORGANIZEMYFILES_STATE_DIR="$STATE/state" "$BIN" --tab "$tab" --screenshot "$OUT/$tab-erreur.png" >/dev/null
+  "$BIN" --size "$SIZE" --tab "$tab" --empty --screenshot "$OUT/$tab-vide.png" >/dev/null
+  "$BIN" --size "$SIZE" --tab "$tab" --screenshot "$OUT/$tab-demo.png" >/dev/null
+  ORGANIZEMYFILES_STATE_DIR="$STATE/state" "$BIN" --size "$SIZE" --tab "$tab" --screenshot "$OUT/$tab-erreur.png" >/dev/null
 done
 chmod 755 "$STATE/locked"
 
 for f in "$OUT"/*.png; do
   size=$(stat -f %z "$f")
   width=$(sips -g pixelWidth "$f" | awk '/pixelWidth/ {print $2}')
-  if [ "$size" -lt 20000 ] || [ "$width" -lt 1000 ]; then
+  if [ "$size" -lt 20000 ] || [ "$width" -lt $((WANT_W - 20)) ]; then
     echo "ÉCHEC : $f ($size octets, $width px)"; fail=1
   fi
 done

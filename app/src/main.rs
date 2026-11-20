@@ -4,6 +4,7 @@
 //! `--intro` : montre l'écran d'introduction ; `--intro-time <s>` le fige à cet instant (captures).
 //! `--bg-time <s>` : décale l'horloge du fond animé (captures à différents instants).
 //! `--empty` : avec --screenshot, capture l'appli sans données de démonstration.
+//! `--size 980x640` : taille de la fenêtre (défaut 1180x780 ; la taille minimale reste 980x640).
 //! `--screenshot <file.png>` draws ~120 frames, saves a PNG of the window and
 //! exits (used for automated checks).
 
@@ -33,6 +34,7 @@ fn main() -> eframe::Result {
     let mut empty = false;
     let background = args.iter().any(|a| a == "--arriere-plan");
     let mut bg_time = 0.0f64;
+    let mut size = [1180.0f32, 780.0f32];
     let show_intro = args.iter().any(|a| a == "--intro");
     let mut intro_time: Option<f64> = None;
     let mut i = 1;
@@ -52,6 +54,13 @@ fn main() -> eframe::Result {
         } else if args[i] == "--tab" {
             tab = args.get(i + 1).cloned();
             i += 2;
+        } else if args[i] == "--size" {
+            if let Some((w, h)) = args.get(i + 1).and_then(|v| v.split_once('x')) {
+                if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                    size = [w, h];
+                }
+            }
+            i += 2;
         } else {
             i += 1;
         }
@@ -59,7 +68,7 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([1180.0, 780.0])
+            .with_inner_size(size)
             .with_min_inner_size([980.0, 640.0])
             .with_title("OrganizeMyFiles")
             .with_icon(ui::app_icon())
