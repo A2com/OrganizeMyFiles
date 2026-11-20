@@ -259,6 +259,8 @@ pub struct App {
     auto_organize_minutes: u32,
     /// Écran Règles : assistant simple ou écran complet.
     rules_mode: RulesMode,
+    /// Chercher les mises à jour automatiquement.
+    check_updates: bool,
     welcome_seen: bool,
     /// Écran d'introduction en cours (premier lancement, ou « Revoir l'introduction »).
     intro: Option<IntroState>,
@@ -376,6 +378,7 @@ impl App {
             launch_at_login: false,
             auto_organize_minutes: 0,
             rules_mode: RulesMode::Simple,
+            check_updates: true,
             welcome_seen: false,
             intro: None,
             intro_seen: true,
@@ -496,6 +499,7 @@ impl App {
                 launch_at_login: self.launch_at_login,
                 auto_organize_minutes: self.auto_organize_minutes,
                 rules_mode: self.rules_mode,
+                check_updates: self.check_updates,
                 welcome_seen: self.welcome_seen,
                 intro_seen: self.intro_seen,
                 sounds: self.sounds_on,
@@ -522,6 +526,7 @@ impl App {
         self.launch_at_login = state.settings.launch_at_login;
         self.auto_organize_minutes = state.settings.auto_organize_minutes;
         self.rules_mode = state.settings.rules_mode;
+        self.check_updates = state.settings.check_updates;
         self.welcome_seen = state.settings.welcome_seen;
         self.intro_seen = state.settings.intro_seen;
         self.sounds_on = state.settings.sounds;
