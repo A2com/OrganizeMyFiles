@@ -219,3 +219,59 @@ fn an_advanced_rule_is_left_untouched_in_simple_mode() {
     draw_rules(&mut app, &ctx);
     assert_eq!(format!("{:?}", app.rules[0]), before);
 }
+
+fn release(version: &str) -> update::Release {
+    update::Release { version: version.into(), page_url: "https://example.org".into(), notes: String::new(), dmg_url: None, sha256: None }
+}
+
+#[test]
+fn update_answers_drive_the_state_and_the_banner_draws() {
+    let mut app = blank_app();
+    let ctx = egui::Context::default();
+    load_fonts(&ctx);
+    apply_theme(&ctx);
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.update_rx = Some(rx);
+
+    // Vérification automatique sans réseau : silence.
+    tx.send(update::Msg::Checked { manual: false, result: Err("réseau".into()) }).unwrap();
+    app.poll_update();
+    assert_eq!(app.update, update::State::Idle);
+
+    // Vérification manuelle sans réseau : l'erreur est dite.
+    tx.send(update::Msg::Checked { manual: true, result: Err("réseau".into()) }).unwrap();
+    app.poll_update();
+    assert_eq!(app.update, update::State::Failed("réseau".into()));
+
+    // Nouvelle version : le bandeau se dessine sur tous les écrans ; « Plus tard » ne remet rien en cause.
+    tx.send(update::Msg::Checked { manual: false, result: Ok(Some(release("9.9.9"))) }).unwrap();
+    app.poll_update();
+    assert!(matches!(app.update, update::State::Available(_)));
+    for tab in [Tab::Dashboard, Tab::Rules, Tab::Settings] {
+        app.tab = tab;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.notices(ui);
+                if tab == Tab::Settings {
+                    app.settings_ui(ui);
+                }
+            });
+        });
+    }
+
+    // Déjà à jour.
+    tx.send(update::Msg::Checked { manual: true, result: Ok(None) }).unwrap();
+    app.poll_update();
+    assert_eq!(app.update, update::State::UpToDate);
+}
+
+#[test]
+fn update_check_setting_is_remembered() {
+    let mut app = blank_app();
+    assert!(app.check_updates);
+    app.check_updates = false;
+    let state = app.snapshot();
+    let mut again = blank_app();
+    again.restore(state);
+    assert!(!again.check_updates);
+}

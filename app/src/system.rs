@@ -86,6 +86,19 @@ pub fn open_privacy_settings() {
     });
 }
 
+/// Ouvre une page web dans le navigateur par défaut. Sans effet hors macOS.
+pub fn open_url(url: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        let url = url.to_string();
+        std::thread::spawn(move || {
+            let _ = SystemCommands.run("open", &[url], Duration::from_secs(10));
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = url;
+}
+
 pub fn open_application_args(app: &str, file: &str) -> Vec<String> {
     vec!["-a".into(), app.into(), file.into()]
 }

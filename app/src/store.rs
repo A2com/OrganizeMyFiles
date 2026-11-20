@@ -40,6 +40,9 @@ pub struct Settings {
     /// Présentation de l'écran Règles (absent des anciens fichiers : avancé, pour ne rien changer aux habitués).
     #[serde(default)]
     pub rules_mode: RulesMode,
+    /// Chercher les nouvelles versions au lancement puis une fois par jour (absent des anciens fichiers : oui).
+    #[serde(default = "default_true")]
+    pub check_updates: bool,
 }
 
 /// Présentation de l'écran Règles : assistant en trois étapes ou écran complet.
@@ -209,6 +212,7 @@ mod tests {
                 sounds: true,
                 auto_organize_minutes: 60,
                 rules_mode: RulesMode::Simple,
+                check_updates: false,
             },
             next_id: 9,
             next_batch: 8,
@@ -286,5 +290,6 @@ mod tests {
         assert!(s.intro_seen, "un ancien fichier ne remontre pas l'introduction");
         assert!(s.sounds, "un ancien fichier garde les sons activés");
         assert_eq!(s.rules_mode, RulesMode::Advanced, "un ancien fichier garde l'écran Règles complet");
+        assert!(s.check_updates, "un ancien fichier cherche les mises à jour");
     }
 }

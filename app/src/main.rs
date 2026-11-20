@@ -24,6 +24,7 @@ mod system;
 mod tags;
 mod toast;
 mod ui;
+mod update;
 mod watcher;
 mod zipmini;
 

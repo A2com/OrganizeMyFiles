@@ -53,6 +53,15 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [ ] | Bascule Simple / Avancé : mémorisée au redémarrage ; une règle avancée (récursion, plusieurs actions…) affiche « réglages avancés » sans être modifiée | À faire (Andy, Mac) |
 | [x] | Les 3 étapes et la carte « réglages avancés » se dessinent en 980×640 et 1180×780 | Captures relues (2026-11-20) |
 
+## 3 bis. Mises à jour
+| | Contrôle | État |
+|---|---|---|
+| [ ] | Réglages › À propos › « Rechercher des mises à jour » : « Vous avez la dernière version » quand il n'y a rien de plus récent | À faire (Andy, Mac, après la release) |
+| [ ] | Avec une version plus ancienne installée : bandeau « Version X disponible » → « Installer et redémarrer » → l'appli se relance dans la nouvelle version | À faire (Andy, Mac) |
+| [ ] | « Plus tard » masque le bandeau ; « Notes de version » ouvre la page GitHub | À faire (Andy, Mac) |
+| [ ] | Sans connexion : la vérification automatique est silencieuse, la vérification manuelle explique l'échec | À faire (Andy, Mac) |
+| [ ] | Appli installée dans Applications : le remplacement fonctionne (sinon message « glissez la nouvelle version ») | À faire (Andy, Mac) |
+
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
 |---|---|---|
