@@ -2035,6 +2035,18 @@ fn ring(painter: &egui::Painter, center: Pos2, radius: f32, frac: f32, accent: C
     }
 }
 
+/// Largeur de fenêtre sous laquelle la rangée KPI passe de 4 à 2 tuiles.
+const KPI_FOUR_COLUMNS_MIN_W: f32 = 1200.0;
+
+/// Nombre de colonnes de la rangée KPI : 2 sous 1200 px de fenêtre, 4 au-dessus.
+fn kpi_columns(window_w: f32) -> usize {
+    if window_w < KPI_FOUR_COLUMNS_MIN_W {
+        2
+    } else {
+        4
+    }
+}
+
 /// Tuile de chiffre cliquable : pastille d'icône, grand chiffre, légende ; s'élève au survol.
 fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub: &str, accent: Color32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 134.0), egui::Sense::click());
@@ -2717,49 +2729,41 @@ impl App {
 
         // ---------------------------------------------------------------- tuiles
         let gap = GAP;
-        let w = ((avail - 3.0 * gap) / 4.0).max(120.0);
+        let cols = kpi_columns(ctx.screen_rect().width());
+        let w = ((avail - (cols - 1) as f32 * gap) / cols as f32).max(120.0);
         let (matched_actions, actions_sub) = match self.last_run {
-            Some((_, actions, _)) => (count(actions).to_string(), "actions au dernier passage"),
-            None => ("—".to_string(), "aucun passage"),
+            Some((_, actions, _)) => (count(actions).to_string(), "actions au dernier passage".to_string()),
+            None => ("—".to_string(), "aucun passage".to_string()),
         };
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            if kpi_tile(
-                ui,
-                w,
+        let tiles = [
+            (
                 Icon::Folder,
                 "DOSSIERS ACTIFS",
-                &count(folders_active).to_string(),
-                &format!("sur {folders_total} suivi{}", if folders_total > 1 { "s" } else { "" }),
-                accent,
-            )
-            .clicked()
-            {
-                go = Some(Tab::Folders);
-            }
-            if kpi_tile(
-                ui,
-                w,
+                count(folders_active).to_string(),
+                format!("sur {folders_total} suivi{}", if folders_total > 1 { "s" } else { "" }),
+                Tab::Folders,
+            ),
+            (
                 Icon::List,
                 "RÈGLES ACTIVES",
-                &count(rules_active).to_string(),
-                &format!("sur {rules_total} règle{}", if rules_total > 1 { "s" } else { "" }),
-                accent,
-            )
-            .clicked()
-            {
-                go = Some(Tab::Rules);
-            }
-            if kpi_tile(ui, w, Icon::Clock, "FICHIERS CE MOIS", &count(self.monthly_used as usize).to_string(), "organisés", accent)
-                .clicked()
-            {
-                go = Some(Tab::History);
-            }
-            if kpi_tile(ui, w, Icon::Bolt, "DERNIER LOT", &matched_actions, actions_sub, accent).clicked() {
-                go = Some(Tab::History);
-            }
-        });
-        ui.add_space(vgap);
+                count(rules_active).to_string(),
+                format!("sur {rules_total} règle{}", if rules_total > 1 { "s" } else { "" }),
+                Tab::Rules,
+            ),
+            (Icon::Clock, "FICHIERS CE MOIS", count(self.monthly_used as usize).to_string(), "organisés".to_string(), Tab::History),
+            (Icon::Bolt, "DERNIER LOT", matched_actions, actions_sub, Tab::History),
+        ];
+        for row in tiles.chunks(cols) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for (icon, label, value, sub, tab) in row {
+                    if kpi_tile(ui, w, *icon, label, value, sub, accent).clicked() {
+                        go = Some(*tab);
+                    }
+                }
+            });
+            ui.add_space(vgap);
+        }
 
         // ---------------------------------------------------------- dossiers + activité
         if avail >= 760.0 {
@@ -4103,6 +4107,14 @@ mod tests {
         assert_eq!(hero_state(2, 0, false), HeroState::NoRule);
         assert_eq!(hero_state(2, 3, false), HeroState::Ready);
         assert_eq!(hero_state(2, 3, true), HeroState::Done);
+    }
+
+    #[test]
+    fn kpi_columns_switches_at_1200() {
+        assert_eq!(kpi_columns(980.0), 2);
+        assert_eq!(kpi_columns(1199.9), 2);
+        assert_eq!(kpi_columns(1200.0), 4);
+        assert_eq!(kpi_columns(1280.0), 4);
     }
 
     fn rule_on(id: u64, folders: &[u64]) -> Rule {
