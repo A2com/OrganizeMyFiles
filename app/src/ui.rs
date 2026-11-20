@@ -251,6 +251,8 @@ pub struct App {
     retention_days: u32,
     add_folder_text: String,
     selected_rule: usize,
+    /// Étape courante de l'assistant du mode simple (1 à 3).
+    simple_step: u8,
     app_enabled: bool,
     launch_at_login: bool,
     /// Passage complet automatique toutes les N minutes ; 0 = désactivé.
@@ -363,6 +365,7 @@ impl App {
             retention_days: HISTORY_RETENTION_DEFAULT_DAYS,
             add_folder_text: String::new(),
             selected_rule: 0,
+            simple_step: 1,
             app_enabled: true,
             launch_at_login: false,
             auto_organize_minutes: 0,
@@ -2429,6 +2432,12 @@ impl App {
         let count = self.rules.iter().filter(|r| r.folder_ids.contains(&folder_id)).count();
         let id = self.next_id;
         self.next_id += 1;
+        // En mode simple, la règle démarre sans condition (l'assistant les propose) et garde les deux fichiers en cas de doublon.
+        let simple = self.rules_mode == RulesMode::Simple;
+        let mut action = Action::new(ActionKind::Move);
+        if simple {
+            action.params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_NUMBER.into());
+        }
         self.rules.push(Rule {
             id,
             folder_ids: vec![folder_id],
@@ -2437,9 +2446,10 @@ impl App {
             match_all: true,
             recursion_depth: 0,
             priority: count as i64,
-            conditions: vec![Condition { field: Field::Extension, op: Op::Equals, value: String::new() }],
-            actions: vec![Action::new(ActionKind::Move)],
+            conditions: if simple { vec![] } else { vec![Condition { field: Field::Extension, op: Op::Equals, value: String::new() }] },
+            actions: vec![action],
         });
+        self.simple_step = 1;
         self.selected_rule = self.rule_order().iter().position(|r| *r == id).unwrap_or(0);
         self.tab = Tab::Rules;
     }
@@ -3373,10 +3383,20 @@ impl App {
                 if btn(ui, "Nouvelle règle", Btn::Sky, accent, Some(Icon::Add)).clicked() {
                     self.new_rule();
                 }
+                ui.add_space(8.0);
+                let current = if self.rules_mode == RulesMode::Simple { 0 } else { 1 };
+                if let Some(i) = segmented(ui, egui::Id::new("rules-mode"), &["Simple", "Avancé"], current, SKY_DEEP) {
+                    self.rules_mode = if i == 0 { RulesMode::Simple } else { RulesMode::Advanced };
+                    self.simple_step = 1;
+                }
             });
         });
         ui.add_space(2.0);
-        ui.label(RichText::new("Conditions remplies : actions dans l'ordre.").size(15.0).color(text_dim()));
+        let subtitle = match self.rules_mode {
+            RulesMode::Simple => "Dites en trois étapes quels fichiers ranger, et comment.",
+            RulesMode::Advanced => "Conditions remplies : actions dans l'ordre.",
+        };
+        ui.label(RichText::new(subtitle).size(15.0).color(text_dim()));
         ui.add_space(16.0);
 
         if self.folders.is_empty() {
@@ -3407,6 +3427,7 @@ impl App {
                 let name: String = r.name.chars().take(32).collect();
                 if rule_tab(ui, &format!("Règle {} : {}", i + 1, name), i == sel, r.enabled, accent).clicked() {
                     self.selected_rule = i;
+                    self.simple_step = 1;
                 }
             }
         });
@@ -3443,33 +3464,35 @@ impl App {
                     }
                 });
             });
-            ui.add_space(12.0);
-            if self.target_folders_ui(ui, idx, accent) {
-                moved = true;
-            }
-            ui.add_space(14.0);
-            // Fenêtre étroite : la réglette passe sur sa propre ligne au lieu de sortir de la carte.
-            if ui.available_width() < 700.0 {
-                rule_match_selector(ui, &mut self.rules[idx], rid);
-                ui.add_space(8.0);
-                ui.horizontal(|ui| recursion_control(ui, &mut self.rules[idx], accent));
-            } else {
-                ui.horizontal(|ui| {
+            if self.rules_mode == RulesMode::Advanced {
+                ui.add_space(12.0);
+                if self.target_folders_ui(ui, idx, accent) {
+                    moved = true;
+                }
+                ui.add_space(14.0);
+                // Fenêtre étroite : la réglette passe sur sa propre ligne au lieu de sortir de la carte.
+                if ui.available_width() < 700.0 {
                     rule_match_selector(ui, &mut self.rules[idx], rid);
-                    ui.add_space(20.0);
-                    recursion_control(ui, &mut self.rules[idx], accent);
-                });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| recursion_control(ui, &mut self.rules[idx], accent));
+                } else {
+                    ui.horizontal(|ui| {
+                        rule_match_selector(ui, &mut self.rules[idx], rid);
+                        ui.add_space(20.0);
+                        recursion_control(ui, &mut self.rules[idx], accent);
+                    });
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "Jusqu'où chercher dans les sous-dossiers : 0 = seulement les fichiers posés dans le dossier ; \
+                         1 = aussi ceux de ses sous-dossiers ; 2 = un niveau de plus, etc. \
+                         Exemple avec 1 : un fichier dans « Téléchargements/Photos » est traité aussi.",
+                    )
+                    .size(13.5)
+                    .color(text_dim()),
+                );
             }
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new(
-                    "Jusqu'où chercher dans les sous-dossiers : 0 = seulement les fichiers posés dans le dossier ; \
-                     1 = aussi ceux de ses sous-dossiers ; 2 = un niveau de plus, etc. \
-                     Exemple avec 1 : un fichier dans « Téléchargements/Photos » est traité aussi.",
-                )
-                .size(13.5)
-                .color(text_dim()),
-            );
         });
 
         if deleted {
@@ -3481,6 +3504,13 @@ impl App {
             self.selected_rule = self.rule_order().iter().position(|r| *r == rid).unwrap_or(0);
         }
         ui.add_space(14.0);
+
+        if self.rules_mode == RulesMode::Simple {
+            if self.simple_rules_ui(ui, idx) {
+                self.selected_rule = self.rule_order().iter().position(|r| *r == rid).unwrap_or(0);
+            }
+            return;
+        }
 
         // ---- conditions
         let mut reorder_cond: Option<(usize, usize)> = None;
@@ -4203,8 +4233,6 @@ mod tests {
     }
 }
 
-// Les fonctions de l'assistant sont branchées dans le commit suivant.
-#[allow(dead_code)]
 mod simple_rules;
 
 #[cfg(test)]
