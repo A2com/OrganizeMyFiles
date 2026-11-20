@@ -18,6 +18,7 @@ use crate::store::{self, Loaded, RulesMode, Settings, State};
 use crate::system;
 use crate::tags;
 use crate::toast::{self, Toast, ToastKind};
+use crate::update;
 use crate::watcher::{self, WatchConfig, Watcher};
 
 // ------------------------------------------------------------------- theme
@@ -261,6 +262,11 @@ pub struct App {
     rules_mode: RulesMode,
     /// Chercher les mises à jour automatiquement.
     check_updates: bool,
+    update: update::State,
+    update_rx: Option<std::sync::mpsc::Receiver<update::Msg>>,
+    /// Version que l'utilisateur a repoussée (« Plus tard ») : le bandeau ne la remontre pas avant le prochain lancement.
+    update_dismissed: Option<String>,
+    next_update_check: f64,
     welcome_seen: bool,
     /// Écran d'introduction en cours (premier lancement, ou « Revoir l'introduction »).
     intro: Option<IntroState>,
@@ -379,6 +385,10 @@ impl App {
             auto_organize_minutes: 0,
             rules_mode: RulesMode::Simple,
             check_updates: true,
+            update: update::State::Idle,
+            update_rx: None,
+            update_dismissed: None,
+            next_update_check: 0.0,
             welcome_seen: false,
             intro: None,
             intro_seen: true,
@@ -871,6 +881,7 @@ impl App {
     /// Encarts affichés en haut des écrans : bienvenue (une fois) et aide sur les autorisations macOS.
     fn notices(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
+        self.update_banner(ui, accent);
         if !self.welcome_seen && self.tab == Tab::Dashboard {
             panel_card_with(ui, Some(with_alpha(accent, 22)), 18.0, |ui| {
                 ui.label(RichText::new("Bienvenue dans OrganizeMyFiles").size(17.0).family(semibold()).color(text_primary()));
@@ -2171,6 +2182,7 @@ impl eframe::App for App {
             self.refresh_access();
         }
         self.poll_watcher();
+        self.update_tick(ctx, clock);
         self.handle_menubar(ctx);
         self.sound_tick(ctx);
         // Démarrage à l'ouverture de session : fenêtre fermée d'emblée, l'appli vit dans la barre des menus.
@@ -4004,18 +4016,20 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 150.0), |ui| {
+        card(ui, Vec2::new(756.0, 290.0), |ui| {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             ui.label(RichText::new(format!("OrganizeMyFiles · version {}", env!("CARGO_PKG_VERSION"))).size(14.5).color(text_primary()));
             ui.add_space(4.0);
             ui.label(
-                RichText::new("Outil libre et open source. Tout reste sur ton Mac : aucun envoi de données.").size(13.5).color(text_dim()),
+                RichText::new("Outil libre et open source. Tout reste sur ton Mac : aucun envoi de données (seule la recherche de mises à jour contacte GitHub).").size(13.5).color(text_dim()),
             );
             ui.add_space(8.0);
             if btn(ui, "Revoir l'introduction", Btn::Ghost, accent, None).clicked() {
                 self.intro = Some(IntroState::new(None));
             }
+            ui.add_space(12.0);
+            self.update_settings(ui, accent);
         });
         let _ = accent;
     }
@@ -4245,6 +4259,7 @@ mod tests {
 }
 
 mod simple_rules;
+mod update_ui;
 
 #[cfg(test)]
 mod e2e;

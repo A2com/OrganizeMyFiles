@@ -24,8 +24,6 @@ mod system;
 mod tags;
 mod toast;
 mod ui;
-// Branché sur l'interface dans le commit suivant.
-#[allow(dead_code)]
 mod update;
 mod watcher;
 mod zipmini;

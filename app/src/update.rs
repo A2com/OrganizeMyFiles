@@ -64,6 +64,25 @@ pub fn bundle_path(exe: &Path) -> Option<PathBuf> {
     exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app")).map(Path::to_path_buf)
 }
 
+/// Où en est la mise à jour, pour l'interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum State {
+    Idle,
+    Checking,
+    UpToDate,
+    Available(Release),
+    /// Étape en cours (« Téléchargement… »).
+    Installing(String),
+    Failed(String),
+}
+
+/// Messages envoyés par les fils de travail à l'interface.
+pub enum Msg {
+    Checked { manual: bool, result: Result<Option<Release>, String> },
+    Progress(String),
+    Installed(Result<(), String>),
+}
+
 /// Interroge GitHub. `Ok(None)` : déjà à jour.
 pub fn check(runner: &dyn CommandRunner, current: &str) -> Result<Option<Release>, String> {
     let args = ["-fsSL", "-m", "10", "-H", "Accept: application/vnd.github+json", LATEST_RELEASE_URL].map(String::from);
