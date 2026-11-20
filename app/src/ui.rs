@@ -1960,7 +1960,15 @@ fn link(ui: &mut egui::Ui, text: &str, color: Color32) -> bool {
 
 /// Anneau de progression : piste de verre + arc accent aux extrémités arrondies.
 fn ring(painter: &egui::Painter, center: Pos2, radius: f32, frac: f32, accent: Color32) {
-    painter.circle_stroke(center, radius, Stroke::new(10.0f32, glass(44)));
+    // Piste en trait CENTRÉ sur le rayon, comme l'arc : `circle_stroke` d'epaint
+    // dessine son trait à l'extérieur du rayon, ce qui décalait la piste de 5 px.
+    let track: Vec<Pos2> = (0..96)
+        .map(|i| {
+            let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * (i as f32 / 96.0);
+            center + Vec2::angled(a) * radius
+        })
+        .collect();
+    painter.add(egui::Shape::closed_line(track, Stroke::new(10.0f32, glass(44))));
     if frac > 0.0 {
         let steps = ((frac * 72.0).ceil() as usize).max(2);
         let pts: Vec<Pos2> = (0..=steps)
@@ -2529,17 +2537,20 @@ impl App {
         let state = hero_state(folders_total, rules_active, self.last_run.is_some() && !self.last_run_dry);
 
         // ---------------------------------------------------------------- héros
-        let (title, sub) = match state {
-            HeroState::NoFolder => ("Commençons".to_string(), "Ajoutez un dossier à surveiller.".to_string()),
-            HeroState::NoRule => ("Aucune règle active".to_string(), "Créez une règle pour ranger vos fichiers.".to_string()),
+        // `subs` : une ligne par information ; deux labels distincts quand tout est prêt.
+        let (title, subs) = match state {
+            HeroState::NoFolder => ("Commençons".to_string(), vec!["Ajoutez un dossier à surveiller.".to_string()]),
+            HeroState::NoRule => ("Aucune règle active".to_string(), vec!["Créez une règle pour ranger vos fichiers.".to_string()]),
             HeroState::Ready | HeroState::Done => (
                 if state == HeroState::Done { "Tout est en ordre" } else { "Prêt à organiser" }.to_string(),
-                format!(
-                    "{folders_active} dossier{} · {rules_active} règle{} active{}",
-                    if folders_active > 1 { "s" } else { "" },
-                    if rules_active > 1 { "s" } else { "" },
-                    if rules_active > 1 { "s" } else { "" },
-                ),
+                vec![
+                    format!("{folders_active} dossier{}", if folders_active > 1 { "s" } else { "" }),
+                    format!(
+                        "{rules_active} règle{} active{}",
+                        if rules_active > 1 { "s" } else { "" },
+                        if rules_active > 1 { "s" } else { "" }
+                    ),
+                ],
             ),
         };
         let avail = ui.available_width();
@@ -2570,7 +2581,14 @@ impl App {
         c.add_space(4.0);
         c.label(RichText::new(&title).size(34.0).family(bold()).color(Color32::WHITE));
         c.add_space(2.0);
-        c.label(RichText::new(&sub).size(16.0).color(text_dim()));
+        c.horizontal(|ui| {
+            for (i, s) in subs.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(16.0);
+                }
+                ui.label(RichText::new(s).size(16.0).color(text_dim()));
+            }
+        });
         c.add_space(18.0);
         c.horizontal(|ui| match state {
             HeroState::NoFolder => {
