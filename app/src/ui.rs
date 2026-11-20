@@ -4016,7 +4016,7 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 290.0), |ui| {
+        card(ui, Vec2::new(756.0, 275.0), |ui| {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             ui.label(RichText::new(format!("OrganizeMyFiles · version {}", env!("CARGO_PKG_VERSION"))).size(14.5).color(text_primary()));
