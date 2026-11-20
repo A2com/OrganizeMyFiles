@@ -15,6 +15,8 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 - Interface : champs de saisie toujours sombres même en mode clair macOS (#37).
 - Aperçu : labels « N dossiers » et « N règles actives » distincts, anneau de progression aligné (#39).
+- Aperçu : fond coloré discret derrière les labels « N dossiers » et « N règles actives » (#43).
+- Aperçu : tuiles KPI sur deux lignes sous 1200 px, plus de texte tronqué (#43).
 - Règles : aide « Récursion » compréhensible par un novice (#40).
 - Interface : les textes ne sortent plus des cartes en fenêtre étroite (#41).
 

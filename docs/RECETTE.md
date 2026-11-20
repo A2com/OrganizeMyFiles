@@ -108,6 +108,8 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 |---|---|---|
 | [x] | Réglages : la case « Jouer les sons » coupe tous les sons (intro et dashboard) | Validé par Andy (2026-11-12) |
 | [x] | Aperçu : le bouton « Organiser maintenant » a une lueur externe lisse (type Photoshop) qui pulse doucement (pas d'animation si l'appli est en veille ou si « Animer le fond » est décoché) | Validé par Andy (2026-11-12) |
+| [ ] | Aperçu : les labels « N dossiers » et « N règles actives » ont un fond coloré discret identique ; aucun fond dans les états à sous-titre unique (premier lancement) | À faire |
+| [ ] | Aperçu : sous 1200 px de fenêtre, les 4 tuiles KPI passent en 2 × 2 sans texte coupé ; à 1200 px et plus, 4 en ligne (essayer 980, 1199 et 1200 px) | À faire |
 | [x] | Pastille d'état en bas : verte avec point qui pulse après un rangement réussi, rouge après une erreur ou un échec ; s'estompe seule ; un clic la ferme | Validé par Andy (2026-11-12) |
 | [x] | Pastille : durée de vie, pulsation, vert/rouge selon le lot (tests) ; captures verte et rouge | Auto (2026-11-12) |
 | [x] | Changer la couleur d'accent ; « Animer le fond » coupe l'animation | Validé par Andy (2026-11-12) |
@@ -121,6 +123,10 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 cd app && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ./scripts/construire-omf-extract.sh debug      # pour les tests PDF/OCR réels (macOS)
 ./scripts/captures-ecrans.sh                   # 15 captures (5 écrans × vide / démo / erreur) dans captures/
+OMF_CAPTURE_SIZE=980x640 ./scripts/captures-ecrans.sh   # même série en largeur minimale
+for s in 1199x780 1200x780 1280x780; do        # seuil des tuiles KPI
+  app/target/release/OrganizeMyFiles --size "$s" --tab dashboard --screenshot "captures/apercu-$s.png" >/dev/null
+done
 ./scripts/emballer-mac.sh                      # .app et .dmg dans dist/
 ```
 La CI (GitHub Actions) exécute les trois premières commandes sur chaque pull request.

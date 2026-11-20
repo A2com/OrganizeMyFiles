@@ -1665,6 +1665,14 @@ fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Respon
     resp
 }
 
+/// Pastille discrète d'un libellé du héros : fond accent translucide, texte secondaire inchangé.
+fn hero_sub_pill(ui: &mut egui::Ui, text: &str, accent: Color32) {
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(16.0), text_dim());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(galley.size().x + 20.0, 26.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, Rounding::same(13.0), with_alpha(accent, 30));
+    ui.painter().galley(Pos2::new(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0), galley, text_dim());
+}
+
 /// Pastille cliquable (22 px) : même rendu que `chip`, avec survol.
 fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Response {
     let font = egui::FontId::new(14.0, semibold());
@@ -2024,6 +2032,18 @@ fn ring(painter: &egui::Painter, center: Pos2, radius: f32, frac: f32, accent: C
         painter.circle_filled(pts[0], 5.0, accent);
         painter.circle_filled(pts[pts.len() - 1], 5.0, accent);
         painter.add(egui::Shape::line(pts, Stroke::new(10.0f32, accent)));
+    }
+}
+
+/// Largeur de fenêtre sous laquelle la rangée KPI passe de 4 à 2 tuiles.
+const KPI_FOUR_COLUMNS_MIN_W: f32 = 1200.0;
+
+/// Nombre de colonnes de la rangée KPI : 2 sous 1200 px de fenêtre, 4 au-dessus.
+fn kpi_columns(window_w: f32) -> usize {
+    if window_w < KPI_FOUR_COLUMNS_MIN_W {
+        2
+    } else {
+        4
     }
 }
 
@@ -2630,15 +2650,20 @@ impl App {
         c.add_space(4.0);
         c.label(RichText::new(&title).size(34.0).family(bold()).color(Color32::WHITE));
         c.add_space(2.0);
+        let badge = subs.len() > 1;
         c.horizontal(|ui| {
             for (i, s) in subs.iter().enumerate() {
                 if i > 0 {
-                    ui.add_space(16.0);
+                    ui.add_space(8.0);
                 }
-                ui.label(RichText::new(s).size(16.0).color(text_dim()));
+                if badge {
+                    hero_sub_pill(ui, s, accent);
+                } else {
+                    ui.label(RichText::new(s).size(16.0).color(text_dim()));
+                }
             }
         });
-        c.add_space(18.0);
+        c.add_space(12.0);
         c.horizontal(|ui| match state {
             HeroState::NoFolder => {
                 if pill(ui, "Ajouter un dossier", accent, true, true).clicked() {
@@ -2704,49 +2729,41 @@ impl App {
 
         // ---------------------------------------------------------------- tuiles
         let gap = GAP;
-        let w = ((avail - 3.0 * gap) / 4.0).max(120.0);
+        let cols = kpi_columns(ctx.screen_rect().width());
+        let w = ((avail - (cols - 1) as f32 * gap) / cols as f32).max(120.0);
         let (matched_actions, actions_sub) = match self.last_run {
-            Some((_, actions, _)) => (count(actions).to_string(), "actions au dernier passage"),
-            None => ("—".to_string(), "aucun passage"),
+            Some((_, actions, _)) => (count(actions).to_string(), "actions au dernier passage".to_string()),
+            None => ("—".to_string(), "aucun passage".to_string()),
         };
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
-            if kpi_tile(
-                ui,
-                w,
+        let tiles = [
+            (
                 Icon::Folder,
                 "DOSSIERS ACTIFS",
-                &count(folders_active).to_string(),
-                &format!("sur {folders_total} suivi{}", if folders_total > 1 { "s" } else { "" }),
-                accent,
-            )
-            .clicked()
-            {
-                go = Some(Tab::Folders);
-            }
-            if kpi_tile(
-                ui,
-                w,
+                count(folders_active).to_string(),
+                format!("sur {folders_total} suivi{}", if folders_total > 1 { "s" } else { "" }),
+                Tab::Folders,
+            ),
+            (
                 Icon::List,
                 "RÈGLES ACTIVES",
-                &count(rules_active).to_string(),
-                &format!("sur {rules_total} règle{}", if rules_total > 1 { "s" } else { "" }),
-                accent,
-            )
-            .clicked()
-            {
-                go = Some(Tab::Rules);
-            }
-            if kpi_tile(ui, w, Icon::Clock, "FICHIERS CE MOIS", &count(self.monthly_used as usize).to_string(), "organisés", accent)
-                .clicked()
-            {
-                go = Some(Tab::History);
-            }
-            if kpi_tile(ui, w, Icon::Bolt, "DERNIER LOT", &matched_actions, actions_sub, accent).clicked() {
-                go = Some(Tab::History);
-            }
-        });
-        ui.add_space(vgap);
+                count(rules_active).to_string(),
+                format!("sur {rules_total} règle{}", if rules_total > 1 { "s" } else { "" }),
+                Tab::Rules,
+            ),
+            (Icon::Clock, "FICHIERS CE MOIS", count(self.monthly_used as usize).to_string(), "organisés".to_string(), Tab::History),
+            (Icon::Bolt, "DERNIER LOT", matched_actions, actions_sub, Tab::History),
+        ];
+        for row in tiles.chunks(cols) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for (icon, label, value, sub, tab) in row {
+                    if kpi_tile(ui, w, *icon, label, value, sub, accent).clicked() {
+                        go = Some(*tab);
+                    }
+                }
+            });
+            ui.add_space(vgap);
+        }
 
         // ---------------------------------------------------------- dossiers + activité
         if avail >= 760.0 {
@@ -4090,6 +4107,14 @@ mod tests {
         assert_eq!(hero_state(2, 0, false), HeroState::NoRule);
         assert_eq!(hero_state(2, 3, false), HeroState::Ready);
         assert_eq!(hero_state(2, 3, true), HeroState::Done);
+    }
+
+    #[test]
+    fn kpi_columns_switches_at_1200() {
+        assert_eq!(kpi_columns(980.0), 2);
+        assert_eq!(kpi_columns(1199.9), 2);
+        assert_eq!(kpi_columns(1200.0), 4);
+        assert_eq!(kpi_columns(1280.0), 4);
     }
 
     fn rule_on(id: u64, folders: &[u64]) -> Rule {
