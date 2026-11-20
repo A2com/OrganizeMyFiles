@@ -1,0 +1,731 @@
+//! Mode simple de l'écran Règles : un assistant en trois étapes (dossiers, conditions, action).
+//! Première partie : logique pure (compatibilité, raccourcis, étapes, phrase récapitulative), testée sans fenêtre.
+//! Seconde partie : affichage egui de l'assistant.
+
+use eframe::egui::{self, RichText};
+
+use super::*;
+use crate::engine::{Action, ActionKind, Condition, Field, Folder, Op, Rule};
+use crate::mechanics::{parse_size, parse_span};
+use crate::tags;
+
+/// Étape de l'assistant : 1 = dossiers, 2 = conditions, 3 = action.
+pub const LAST_STEP: u8 = 3;
+
+/// Actions proposées en mode simple : celles qui ne détruisent rien de façon irréversible.
+pub const SIMPLE_ACTIONS: &[ActionKind] =
+    &[ActionKind::Move, ActionKind::Copy, ActionKind::Rename, ActionKind::Trash, ActionKind::AddTag, ActionKind::Compress];
+
+/// Raccourci de condition : un libellé de carte et la condition qu'il ajoute.
+pub struct Preset {
+    pub label: &'static str,
+    pub make: fn() -> Condition,
+}
+
+fn cond(field: Field, op: Op, value: &str) -> Condition {
+    Condition { field, op, value: value.into() }
+}
+
+pub const PRESETS: &[Preset] = &[
+    Preset { label: "C'est une image", make: || cond(Field::Kind, Op::Is, "image") },
+    Preset { label: "C'est un PDF", make: || cond(Field::Extension, Op::Is, "pdf") },
+    Preset { label: "C'est une vidéo", make: || cond(Field::Kind, Op::Is, "video") },
+    Preset { label: "C'est un document", make: || cond(Field::Kind, Op::Is, "document") },
+    Preset { label: "Plus ancien que 30 jours", make: || cond(Field::DateModified, Op::NotWithinLast, "30 days") },
+    Preset { label: "Le nom contient…", make: || cond(Field::Name, Op::Contains, "") },
+    Preset { label: "Plus gros que…", make: || cond(Field::Size, Op::Greater, "100 MB") },
+];
+
+/// Opérateurs proposés en mode simple : tout sauf l'expression régulière (« correspond à »).
+pub fn simple_ops(field: Field) -> Vec<Op> {
+    field.ops().iter().copied().filter(|op| *op != Op::Matches).collect()
+}
+
+/// Libellé d'un opérateur pour les novices (plus parlant que « est supérieur à »).
+pub fn simple_op_label(field: Field, op: Op) -> &'static str {
+    match (field, op) {
+        (Field::Size, Op::Greater) => "plus gros que",
+        (Field::Size, Op::Less) => "plus petit que",
+        (Field::Size, Op::Equals) => "exactement",
+        (Field::DateAdded | Field::DateModified, Op::NotWithinLast) => "il y a plus de",
+        (Field::DateAdded | Field::DateModified, Op::WithinLast) => "dans les derniers",
+        (Field::DateAdded | Field::DateModified, Op::Before) => "avant le",
+        (Field::DateAdded | Field::DateModified, Op::After) => "après le",
+        _ => op.label(),
+    }
+}
+
+/// Libellé d'une action pour les novices.
+pub fn simple_action_label(kind: &ActionKind) -> &'static str {
+    match kind {
+        ActionKind::Move => "Déplacer",
+        ActionKind::Copy => "Copier",
+        ActionKind::Rename => "Renommer",
+        ActionKind::Trash => "Mettre à la corbeille",
+        ActionKind::AddTag => "Ajouter une étiquette",
+        ActionKind::Compress => "Compresser en ZIP",
+        other => other.label(),
+    }
+}
+
+/// La règle tient-elle dans l'assistant ? Sinon on la laisse intacte et on propose le mode avancé.
+pub fn is_simple_compatible(rule: &Rule) -> bool {
+    let one_condition = rule.conditions.len() <= 1;
+    rule.recursion_depth == 0
+        && (rule.match_all || one_condition)
+        && rule.conditions.iter().all(|c| c.op != Op::Matches)
+        && rule.actions.len() <= 1
+        && rule.actions.iter().all(|a| SIMPLE_ACTIONS.contains(&a.kind))
+}
+
+/// L'étape est-elle complète ? Sinon : la phrase qui dit quoi faire.
+pub fn step_ready(step: u8, rule: &Rule) -> Result<(), &'static str> {
+    match step {
+        1 if rule.folder_ids.is_empty() => Err("Choisissez au moins un dossier."),
+        1 => Ok(()),
+        2 => conditions_ready(&rule.conditions),
+        _ => action_ready(&rule.actions),
+    }
+}
+
+fn conditions_ready(conditions: &[Condition]) -> Result<(), &'static str> {
+    if conditions.is_empty() {
+        return Err("Ajoutez au moins une condition.");
+    }
+    for c in conditions {
+        let value = c.value.trim();
+        if value.is_empty() {
+            return Err("Complétez chaque condition.");
+        }
+        let understood = match (c.field, c.op) {
+            (Field::Size, _) => parse_size(value).is_some(),
+            (Field::DateAdded | Field::DateModified, Op::WithinLast | Op::NotWithinLast) => parse_span(value).is_some(),
+            _ => true,
+        };
+        if !understood {
+            return Err("Une valeur n'est pas comprise : vérifiez-la.");
+        }
+    }
+    Ok(())
+}
+
+fn action_ready(actions: &[Action]) -> Result<(), &'static str> {
+    let [action] = actions else { return Err("Choisissez ce qu'il faut faire des fichiers.") };
+    let missing = |key: &str| action.param(key).is_empty();
+    match action.kind {
+        ActionKind::Move | ActionKind::Copy if missing("destination") => Err("Choisissez le dossier de destination."),
+        ActionKind::Rename if missing("pattern") => Err("Indiquez le nouveau nom."),
+        ActionKind::AddTag if missing("tags") => Err("Indiquez l'étiquette à ajouter."),
+        _ => Ok(()),
+    }
+}
+
+/// « 30 days » → (« 30 », « jours ») ; « 100 MB » → (« 100 », « MB »). Sert aux champs « nombre + unité ».
+pub fn split_amount(value: &str) -> (String, String) {
+    let t = value.trim();
+    let end = t.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ',')).unwrap_or(t.len());
+    (t[..end].trim().to_string(), t[end..].trim().to_string())
+}
+
+fn unit_fr(unit: &str, plural: bool) -> String {
+    let base = match unit.to_lowercase().trim_end_matches('s') {
+        "day" | "" => "jour",
+        "week" => "semaine",
+        "month" => "mois",
+        "year" => return if plural { "ans".into() } else { "an".into() },
+        _ => return unit.to_string(),
+    };
+    if plural && base != "mois" {
+        format!("{base}s")
+    } else {
+        base.to_string()
+    }
+}
+
+fn span_fr(value: &str) -> String {
+    let (n, unit) = split_amount(value);
+    let plural = n.replace(',', ".").parse::<f64>().map_or(true, |x| x > 1.0);
+    format!("{n} {}", unit_fr(&unit, plural))
+}
+
+fn kind_phrase(value: &str, negative: bool) -> String {
+    let noun = match value.trim().to_lowercase().as_str() {
+        "image" => "une image",
+        "document" => "un document",
+        "video" => "une vidéo",
+        "audio" => "de type audio",
+        "archive" => "une archive",
+        "folder" => "un dossier",
+        "app" => "une application",
+        "other" => "d'un autre type",
+        other => return format!("{} {other}", if negative { "n'est pas du type" } else { "est du type" }),
+    };
+    format!("{} {noun}", if negative { "n'est pas" } else { "est" })
+}
+
+/// Une condition en français, au début de « quand un fichier … ».
+pub fn condition_phrase(c: &Condition) -> String {
+    let v = c.value.trim();
+    let shown = if v.is_empty() { "…" } else { v };
+    match (c.field, c.op) {
+        (Field::Kind, Op::Is) => kind_phrase(v, false),
+        (Field::Kind, Op::IsNot) => kind_phrase(v, true),
+        (Field::Extension, Op::IsNot) => format!("n'a pas l'extension {shown}"),
+        (Field::Extension, _) if shown.contains(',') => format!("a l'une des extensions {shown}"),
+        (Field::Extension, _) => format!("a l'extension {shown}"),
+        (Field::Name, Op::Contains) => format!("a un nom qui contient « {shown} »"),
+        (Field::Name, Op::StartsWith) => format!("a un nom qui commence par « {shown} »"),
+        (Field::Name, Op::EndsWith) => format!("a un nom qui finit par « {shown} »"),
+        (Field::Name, _) => format!("s'appelle « {shown} »"),
+        (Field::Size, Op::Greater) => format!("pèse plus de {shown}"),
+        (Field::Size, Op::Less) => format!("pèse moins de {shown}"),
+        (Field::Size, _) => format!("pèse exactement {shown}"),
+        (Field::DateAdded | Field::DateModified, Op::WithinLast | Op::NotWithinLast) => {
+            let verb = if c.field == Field::DateAdded { "a été ajouté" } else { "a été modifié" };
+            if c.op == Op::NotWithinLast {
+                format!("{verb} il y a plus de {}", span_fr(shown))
+            } else {
+                format!("{verb} dans les {} derniers", span_fr(shown))
+            }
+        }
+        (Field::DateAdded | Field::DateModified, op) => {
+            let what = if c.field == Field::DateAdded { "a été ajouté" } else { "a été modifié" };
+            format!("{what} {} {shown}", if op == Op::Before { "avant le" } else { "après le" })
+        }
+        (Field::Tag, _) => format!("porte l'étiquette « {shown} »"),
+        (Field::Contents, _) => format!("contient le texte « {shown} »"),
+        (field, op) => format!("{} {} {shown}", field.label().to_lowercase(), op.label()),
+    }
+}
+
+/// Une action en français, après « … , ».
+pub fn action_phrase(a: &Action) -> String {
+    let quoted = |key: &str| {
+        let v = a.param(key);
+        if v.is_empty() {
+            "…".to_string()
+        } else {
+            format!("« {v} »")
+        }
+    };
+    match a.kind {
+        ActionKind::Move => format!("le déplacer vers {}", quoted("destination")),
+        ActionKind::Copy => format!("le copier vers {}", quoted("destination")),
+        ActionKind::Rename => format!("le renommer avec le motif {}", quoted("pattern")),
+        ActionKind::Trash => "le mettre à la corbeille".into(),
+        ActionKind::AddTag => format!("lui ajouter l'étiquette {}", quoted("tags")),
+        ActionKind::Compress => "le compresser en archive ZIP".into(),
+        _ => a.kind.label().to_lowercase(),
+    }
+}
+
+/// La règle en une phrase : « Dans Téléchargements, quand un fichier est une image, le déplacer vers « Images ». »
+pub fn rule_sentence(rule: &Rule, folders: &[Folder]) -> String {
+    let names: Vec<String> = rule.folder_ids.iter().map(|id| tags::folder_label(folders, *id)).filter(|n| !n.is_empty()).collect();
+    let place = match names.as_slice() {
+        [] => "…".to_string(),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} et {last}", init.join(", ")),
+    };
+    let when = if rule.conditions.is_empty() {
+        "…".to_string()
+    } else {
+        rule.conditions.iter().map(condition_phrase).collect::<Vec<_>>().join(" et ")
+    };
+    let what = rule.actions.first().map_or_else(|| "…".to_string(), action_phrase);
+    let prefix = if names.len() > 1 { "Dans les dossiers" } else { "Dans" };
+    format!("{prefix} {place}, quand un fichier {when}, {what}.")
+}
+
+// ------------------------------------------------------------------ affichage
+
+const STEP_NAMES: [&str; 3] = ["Dossiers", "Conditions", "Action"];
+const SIZE_UNITS: [&str; 3] = ["KB", "MB", "GB"];
+const SPAN_UNITS: [(&str, &str); 3] = [("days", "jours"), ("weeks", "semaines"), ("months", "mois")];
+const CONFLICT_CHOICES: [(&str, &str); 3] = [(CONFLICT_NUMBER, "Garder les deux"), ("skip", "Ne rien faire"), ("replace", "Remplacer")];
+
+fn step_title(ui: &mut egui::Ui, title: &str, hint: &str) {
+    ui.label(RichText::new(title).size(19.0).family(semibold()).color(text_primary()));
+    ui.add_space(2.0);
+    ui.label(RichText::new(hint).size(14.5).color(text_dim()));
+    ui.add_space(12.0);
+}
+
+impl App {
+    /// Corps de l'écran Règles en mode simple : frise, étape courante, navigation, phrase récapitulative.
+    /// Renvoie vrai si les dossiers cibles ont changé (l'ordre des onglets peut en dépendre).
+    pub(super) fn simple_rules_ui(&mut self, ui: &mut egui::Ui, idx: usize) -> bool {
+        let accent = self.accent();
+        if !is_simple_compatible(&self.rules[idx]) {
+            self.advanced_only_card(ui, idx, accent);
+            return false;
+        }
+        let step = self.simple_step.clamp(1, LAST_STEP);
+        self.step_bar(ui, idx, step, accent);
+        ui.add_space(14.0);
+
+        let mut moved = false;
+        panel_card(ui, |ui| match step {
+            1 => moved = self.step_folders(ui, idx, accent),
+            2 => self.step_conditions(ui, idx, accent),
+            _ => self.step_action(ui, idx, accent),
+        });
+        ui.add_space(14.0);
+
+        let ready = step_ready(step, &self.rules[idx]);
+        ui.horizontal(|ui| {
+            if step > 1 && btn(ui, "Précédent", Btn::Ghost, accent, None).clicked() {
+                self.simple_step = step - 1;
+            }
+            if step < LAST_STEP {
+                ui.add_enabled_ui(ready.is_ok(), |ui| {
+                    if btn(ui, "Suivant", Btn::Primary, accent, None).clicked() {
+                        self.simple_step = step + 1;
+                    }
+                });
+            } else {
+                ui.add_enabled_ui(ready.is_ok(), |ui| {
+                    if btn(ui, "Terminer", Btn::Primary, accent, Some(Icon::Tick)).clicked() {
+                        self.toast("Règle enregistrée : elle s'applique dès maintenant.".to_string());
+                        self.simple_step = 1;
+                    }
+                });
+            }
+            if let Err(why) = ready {
+                ui.add_space(8.0);
+                ui.label(RichText::new(why).size(14.5).color(text_dim()));
+            }
+        });
+        ui.add_space(14.0);
+        let sentence = rule_sentence(&self.rules[idx], &self.folders);
+        panel_card(ui, |ui| {
+            ui.label(caps("EN RÉSUMÉ"));
+            ui.add_space(4.0);
+            ui.label(RichText::new(sentence).size(16.0).color(text_primary()));
+            if step == LAST_STEP {
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(
+                        "Rien n'est perdu : chaque rangement apparaît dans l'Historique et, le plus souvent, peut être annulé. \
+                         Vous pouvez d'abord faire un essai : rien ne bouge, le résultat s'affiche dans l'Historique.",
+                    )
+                    .size(14.0)
+                    .color(text_dim()),
+                );
+                ui.add_space(8.0);
+                if btn(ui, "Tester sans rien toucher", Btn::Sky, accent, None).clicked() {
+                    self.run_batch(true);
+                }
+            }
+        });
+        ui.add_space(14.0);
+        moved
+    }
+
+    /// Règle qui utilise des réglages que l'assistant ne sait pas présenter : on la laisse intacte.
+    fn advanced_only_card(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) {
+        let sentence = rule_sentence(&self.rules[idx], &self.folders);
+        panel_card(ui, |ui| {
+            ui.label(RichText::new("Cette règle utilise des réglages avancés").size(18.0).family(semibold()).color(text_primary()));
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(
+                    "Elle fonctionne comme avant et n'a pas été modifiée. Pour la changer, passez en mode avancé : \
+                     vous y retrouvez tous ses réglages.",
+                )
+                .size(14.5)
+                .color(text_dim()),
+            );
+            ui.add_space(10.0);
+            ui.label(RichText::new(sentence).size(15.0).color(text_primary()));
+            ui.add_space(12.0);
+            if btn(ui, "Modifier en mode avancé", Btn::Sky, accent, None).clicked() {
+                self.rules_mode = RulesMode::Advanced;
+            }
+        });
+    }
+
+    /// Frise « 1 Dossiers · 2 Conditions · 3 Action » : on revient en arrière librement, on avance étape par étape.
+    fn step_bar(&mut self, ui: &mut egui::Ui, idx: usize, step: u8, accent: Color32) {
+        ui.horizontal_wrapped(|ui| {
+            for (i, name) in STEP_NAMES.iter().enumerate() {
+                let n = i as u8 + 1;
+                let (fg, bg) = if n == step { (accent, with_alpha(accent, 50)) } else { (text_dim(), glass(14)) };
+                if chip_button(ui, &format!("{n}  {name}"), fg, bg).clicked() {
+                    let reachable = (1..n).all(|s| step_ready(s, &self.rules[idx]).is_ok());
+                    if reachable {
+                        self.simple_step = n;
+                    }
+                }
+                if n < LAST_STEP {
+                    ui.label(RichText::new("›").size(16.0).color(text_dim()));
+                }
+            }
+        });
+    }
+
+    fn step_folders(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) -> bool {
+        step_title(
+            ui,
+            "Quels dossiers voulez-vous ranger ?",
+            "Choisissez les dossiers à surveiller. Vos fichiers ne bougent que si les conditions de l'étape suivante sont remplies.",
+        );
+        self.target_folders_ui(ui, idx, accent)
+    }
+
+    fn step_conditions(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) {
+        step_title(
+            ui,
+            "Quels fichiers sont concernés ?",
+            "Cliquez sur un modèle, ou ajoutez votre propre critère. Un fichier est rangé seulement s'il remplit toutes les conditions.",
+        );
+        ui.label(caps("MODÈLES"));
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            for preset in PRESETS {
+                if btn(ui, preset.label, Btn::Sky, accent, None).clicked() {
+                    self.rules[idx].conditions.push((preset.make)());
+                }
+            }
+        });
+        ui.add_space(12.0);
+
+        let rid = self.rules[idx].id;
+        let mut remove: Option<usize> = None;
+        for ci in 0..self.rules[idx].conditions.len() {
+            row_frame(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if self.simple_condition_row(ui, idx, ci, rid, accent) {
+                        remove = Some(ci);
+                    }
+                });
+            });
+            ui.add_space(6.0);
+        }
+        if let Some(ci) = remove {
+            self.rules[idx].conditions.remove(ci);
+        }
+        if btn(ui, "+ Autre critère", Btn::Ghost, accent, None).clicked() {
+            self.rules[idx].conditions.push(Condition { field: Field::Name, op: Op::Contains, value: String::new() });
+        }
+    }
+
+    /// Une ligne « champ · opérateur · valeur ». Renvoie vrai si la croix est cliquée.
+    fn simple_condition_row(&mut self, ui: &mut egui::Ui, idx: usize, ci: usize, rid: u64, accent: Color32) -> bool {
+        let field = self.rules[idx].conditions[ci].field;
+        if let Some(pick) = combo(ui, &format!("sf-{idx}-{ci}"), field.label(), &FIELDS.iter().map(|f| f.label()).collect::<Vec<_>>()) {
+            if let Some(f) = FIELDS.iter().find(|f| f.label() == pick) {
+                let c = &mut self.rules[idx].conditions[ci];
+                c.field = *f;
+                c.op = simple_ops(*f)[0];
+                c.value = match f {
+                    Field::Kind => KIND_CHOICES[0].0.into(),
+                    Field::Size => "100 MB".into(),
+                    Field::DateAdded | Field::DateModified => "30 days".into(),
+                    _ => String::new(),
+                };
+            }
+        }
+        let field = self.rules[idx].conditions[ci].field;
+        let op = self.rules[idx].conditions[ci].op;
+        let ops = simple_ops(field);
+        let labels: Vec<&str> = ops.iter().map(|o| simple_op_label(field, *o)).collect();
+        if let Some(pick) = combo(ui, &format!("so-{idx}-{ci}"), simple_op_label(field, op), &labels) {
+            if let Some(o) = ops.iter().find(|o| simple_op_label(field, **o) == pick) {
+                self.rules[idx].conditions[ci].op = *o;
+            }
+        }
+        let value = self.rules[idx].conditions[ci].value.clone();
+        let width = (ui.available_width() - 60.0).max(80.0);
+        let new_value = match (field, op) {
+            (Field::Extension, _) => extension_tags(ui, egui::Id::new(("sext", rid, ci)), &value, width, accent),
+            (Field::Kind, _) => {
+                let current = kind_label(&value).unwrap_or("Autre");
+                let labels: Vec<&str> = KIND_CHOICES.iter().map(|(_, l)| *l).collect();
+                combo(ui, &format!("sk-{idx}-{ci}"), current, &labels)
+                    .and_then(|pick| KIND_CHOICES.iter().find(|(_, l)| *l == pick).map(|(v, _)| (*v).to_string()))
+            }
+            (Field::Size, _) => amount_editor(ui, &format!("ss-{idx}-{ci}"), &value, &SIZE_UNITS.map(|u| (u, u))),
+            (Field::DateAdded | Field::DateModified, Op::WithinLast | Op::NotWithinLast) => {
+                amount_editor(ui, &format!("sd-{idx}-{ci}"), &value, &SPAN_UNITS)
+            }
+            _ => {
+                let mut text = value.clone();
+                let hint = match field {
+                    Field::DateAdded | Field::DateModified => "2024-01-31",
+                    Field::Contents => "texte à chercher",
+                    _ => "mot ou début de nom",
+                };
+                let edited = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut text)
+                            .margin(egui::Margin::symmetric(8.0, 7.0))
+                            .desired_width(width)
+                            .hint_text(hint),
+                    )
+                    .changed();
+                edited.then_some(text)
+            }
+        };
+        if let Some(v) = new_value {
+            self.rules[idx].conditions[ci].value = v;
+        }
+        cross_button(ui, "Retirer cette condition")
+    }
+
+    fn step_action(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) {
+        step_title(ui, "Que faire de ces fichiers ?", "Une seule action suffit pour commencer. Rien n'est supprimé définitivement.");
+        let current = self.rules[idx].actions.first().map(|a| a.kind.clone());
+        ui.horizontal_wrapped(|ui| {
+            for kind in SIMPLE_ACTIONS {
+                let on = current.as_ref() == Some(kind);
+                let (fg, bg) = if on { (accent, with_alpha(accent, 50)) } else { (text_dim(), glass(14)) };
+                if chip_button(ui, simple_action_label(kind), fg, bg).clicked() && !on {
+                    let mut action = Action::new(kind.clone());
+                    if matches!(kind, ActionKind::Move | ActionKind::Copy) {
+                        action.params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_NUMBER.into());
+                    }
+                    self.rules[idx].actions = vec![action];
+                }
+            }
+        });
+        let Some(kind) = self.rules[idx].actions.first().map(|a| a.kind.clone()) else { return };
+        ui.add_space(12.0);
+        match kind {
+            ActionKind::Move | ActionKind::Copy => self.destination_fields(ui, idx, accent),
+            ActionKind::Rename => {
+                ui.label(caps("NOUVEAU NOM"));
+                self.param_field(ui, idx, "pattern", "{name}-{current_date}.{extension}");
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("{name} = nom actuel · {extension} = extension · {current_date} = date du jour.")
+                        .size(13.5)
+                        .color(text_dim()),
+                );
+            }
+            ActionKind::AddTag => {
+                ui.label(caps("ÉTIQUETTE"));
+                self.param_field(ui, idx, "tags", "ex. Factures");
+            }
+            ActionKind::Trash => {
+                ui.label(RichText::new("Les fichiers vont dans la corbeille : vous pouvez les récupérer.").size(14.5).color(text_dim()));
+            }
+            ActionKind::Compress => {
+                ui.label(
+                    RichText::new("Chaque fichier est compressé dans une archive ZIP, posée à côté de lui.").size(14.5).color(text_dim()),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn param_field(&mut self, ui: &mut egui::Ui, idx: usize, key: &str, hint: &str) {
+        let entry = self.rules[idx].actions[0].params.entry(key.to_string()).or_default();
+        ui.add(
+            egui::TextEdit::singleline(entry)
+                .margin(egui::Margin::symmetric(8.0, 7.0))
+                .desired_width((ui.available_width() - 24.0).max(120.0))
+                .hint_text(hint),
+        );
+    }
+
+    fn destination_fields(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) {
+        ui.label(caps("DOSSIER DE DESTINATION"));
+        ui.horizontal(|ui| {
+            let entry = self.rules[idx].actions[0].params.entry("destination".to_string()).or_default();
+            ui.add(
+                egui::TextEdit::singleline(entry)
+                    .margin(egui::Margin::symmetric(8.0, 7.0))
+                    .desired_width((ui.available_width() - 110.0).max(120.0))
+                    .hint_text("ex. ~/Images"),
+            );
+            if btn(ui, "Choisir…", Btn::Ghost, accent, None).clicked() {
+                if let Some(dir) = rfd::FileDialog::new().set_directory(home_dir()).pick_folder() {
+                    entry.clear();
+                    entry.push_str(&dir.to_string_lossy());
+                }
+            }
+        });
+        ui.add_space(10.0);
+        ui.label(caps("SI UN FICHIER DU MÊME NOM EXISTE DÉJÀ LÀ-BAS"));
+        ui.add_space(4.0);
+        let stored = self.rules[idx].actions[0].param(ON_CONFLICT_PARAM_KEY);
+        let current = CONFLICT_CHOICES.iter().position(|(v, _)| *v == stored).unwrap_or(1);
+        let labels: Vec<&str> = CONFLICT_CHOICES.iter().map(|(_, l)| *l).collect();
+        if let Some(i) = segmented(ui, egui::Id::new(("sconflict", self.rules[idx].id)), &labels, current, SKY_DEEP) {
+            self.rules[idx].actions[0].params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_CHOICES[i].0.into());
+        }
+    }
+}
+
+/// Champ « nombre + unité » : renvoie la nouvelle valeur enregistrée (« 30 days », « 100 MB ») si elle change.
+fn amount_editor(ui: &mut egui::Ui, id: &str, value: &str, units: &[(&str, &str)]) -> Option<String> {
+    let (mut number, unit) = split_amount(value);
+    let stored_unit = units.iter().find(|(raw, _)| raw.eq_ignore_ascii_case(unit.trim_end_matches('s')) || raw.eq_ignore_ascii_case(&unit));
+    let (raw_unit, shown_unit) = stored_unit.copied().unwrap_or(units[0]);
+    let mut out = None;
+    if ui.add(egui::TextEdit::singleline(&mut number).margin(egui::Margin::symmetric(8.0, 7.0)).desired_width(70.0)).changed() {
+        out = Some(format!("{} {raw_unit}", number.trim()));
+    }
+    let labels: Vec<&str> = units.iter().map(|(_, l)| *l).collect();
+    if let Some(pick) = combo(ui, id, shown_unit, &labels) {
+        if let Some((raw, _)) = units.iter().find(|(_, l)| *l == pick) {
+            out = Some(format!("{} {raw}", number.trim()));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn folder(id: u64, path: &str) -> Folder {
+        Folder { id, path: PathBuf::from(path), enabled: true, priority: 0 }
+    }
+
+    fn rule(conditions: Vec<Condition>, actions: Vec<Action>) -> Rule {
+        Rule {
+            id: 1,
+            folder_ids: vec![1],
+            name: "r".into(),
+            enabled: true,
+            match_all: true,
+            recursion_depth: 0,
+            priority: 0,
+            conditions,
+            actions,
+        }
+    }
+
+    fn move_to(dest: &str) -> Action {
+        let mut a = Action::new(ActionKind::Move);
+        a.params.insert("destination".into(), dest.into());
+        a
+    }
+
+    #[test]
+    fn a_plain_rule_fits_the_simple_mode() {
+        assert!(is_simple_compatible(&rule(vec![(PRESETS[0].make)()], vec![move_to("/x")])));
+        assert!(is_simple_compatible(&rule(vec![], vec![])), "une règle vide se remplit dans l'assistant");
+    }
+
+    #[test]
+    fn advanced_settings_keep_a_rule_out_of_the_simple_mode() {
+        let base = || rule(vec![(PRESETS[0].make)()], vec![move_to("/x")]);
+        let mut r = base();
+        r.recursion_depth = 1;
+        assert!(!is_simple_compatible(&r), "récursion");
+        let mut r = base();
+        r.conditions.push((PRESETS[1].make)());
+        r.match_all = false;
+        assert!(!is_simple_compatible(&r), "au moins une condition parmi plusieurs");
+        let mut r = base();
+        r.match_all = false;
+        assert!(is_simple_compatible(&r), "avec une seule condition, le choix n'a pas d'effet");
+        let mut r = base();
+        r.conditions[0] = cond(Field::Name, Op::Matches, "^a");
+        assert!(!is_simple_compatible(&r), "expression régulière");
+        let mut r = base();
+        r.actions.push(Action::new(ActionKind::Trash));
+        assert!(!is_simple_compatible(&r), "plusieurs actions");
+        let mut r = base();
+        r.actions = vec![Action::new(ActionKind::Delete)];
+        assert!(!is_simple_compatible(&r), "suppression définitive");
+    }
+
+    #[test]
+    fn simple_actions_never_include_the_irreversible_ones() {
+        assert!(!SIMPLE_ACTIONS.contains(&ActionKind::Delete));
+        assert!(SIMPLE_ACTIONS.contains(&ActionKind::Trash));
+    }
+
+    #[test]
+    fn simple_operators_drop_regular_expressions() {
+        assert!(!simple_ops(Field::Name).contains(&Op::Matches));
+        assert!(simple_ops(Field::Name).contains(&Op::Contains));
+        assert!(!simple_ops(Field::Contents).contains(&Op::Matches));
+    }
+
+    #[test]
+    fn every_preset_builds_a_condition_the_engine_understands() {
+        for p in PRESETS {
+            let c = (p.make)();
+            assert!(c.field.ops().contains(&c.op), "{} : opérateur invalide", p.label);
+            assert_ne!(c.op, Op::Matches);
+        }
+    }
+
+    #[test]
+    fn steps_say_what_is_missing() {
+        let mut r = rule(vec![], vec![]);
+        assert!(step_ready(1, &r).is_ok());
+        r.folder_ids.clear();
+        assert_eq!(step_ready(1, &r), Err("Choisissez au moins un dossier."));
+        assert_eq!(step_ready(2, &r), Err("Ajoutez au moins une condition."));
+        r.conditions.push(cond(Field::Name, Op::Contains, "  "));
+        assert_eq!(step_ready(2, &r), Err("Complétez chaque condition."));
+        r.conditions[0].value = "facture".into();
+        assert!(step_ready(2, &r).is_ok());
+        r.conditions.push(cond(Field::Size, Op::Greater, "beaucoup"));
+        assert_eq!(step_ready(2, &r), Err("Une valeur n'est pas comprise : vérifiez-la."));
+        r.conditions[1].value = "50 MB".into();
+        assert!(step_ready(2, &r).is_ok());
+        assert_eq!(step_ready(3, &r), Err("Choisissez ce qu'il faut faire des fichiers."));
+        r.actions = vec![Action::new(ActionKind::Move)];
+        assert_eq!(step_ready(3, &r), Err("Choisissez le dossier de destination."));
+        r.actions = vec![move_to("/Images")];
+        assert!(step_ready(3, &r).is_ok());
+        r.actions = vec![Action::new(ActionKind::Trash)];
+        assert!(step_ready(3, &r).is_ok(), "la corbeille n'a pas de réglage");
+    }
+
+    #[test]
+    fn amounts_split_into_number_and_unit() {
+        assert_eq!(split_amount("30 days"), ("30".into(), "days".into()));
+        assert_eq!(split_amount("100MB"), ("100".into(), "MB".into()));
+        assert_eq!(split_amount("1.5 gb"), ("1.5".into(), "gb".into()));
+        assert_eq!(split_amount(""), (String::new(), String::new()));
+    }
+
+    #[test]
+    fn the_sentence_reads_like_french() {
+        let folders = vec![folder(1, "/Users/a/Téléchargements"), folder(2, "/Users/a/Bureau")];
+        let r = rule(vec![(PRESETS[0].make)()], vec![move_to("/Users/a/Images")]);
+        assert_eq!(
+            rule_sentence(&r, &folders),
+            "Dans Téléchargements, quand un fichier est une image, le déplacer vers « /Users/a/Images »."
+        );
+        let mut r = rule(vec![(PRESETS[4].make)(), (PRESETS[6].make)()], vec![Action::new(ActionKind::Trash)]);
+        r.folder_ids = vec![1, 2];
+        assert_eq!(
+            rule_sentence(&r, &folders),
+            "Dans les dossiers Téléchargements et Bureau, quand un fichier a été modifié il y a plus de 30 jours et pèse plus de 100 MB, le mettre à la corbeille."
+        );
+    }
+
+    #[test]
+    fn an_unfinished_rule_shows_dots_instead_of_panicking() {
+        let r = rule(vec![], vec![]);
+        assert_eq!(rule_sentence(&r, &[folder(1, "/a/Docs")]), "Dans Docs, quand un fichier …, ….");
+    }
+
+    #[test]
+    fn labels_are_friendly() {
+        assert_eq!(simple_op_label(Field::Size, Op::Greater), "plus gros que");
+        assert_eq!(simple_op_label(Field::DateModified, Op::NotWithinLast), "il y a plus de");
+        assert_eq!(simple_op_label(Field::Name, Op::Contains), "contient");
+        for kind in SIMPLE_ACTIONS {
+            assert!(!simple_action_label(kind).is_empty());
+        }
+    }
+
+    #[test]
+    fn spans_are_translated() {
+        assert_eq!(span_fr("1 week"), "1 semaine");
+        assert_eq!(span_fr("2 weeks"), "2 semaines");
+        assert_eq!(span_fr("3 months"), "3 mois");
+        assert_eq!(span_fr("1 year"), "1 an");
+    }
+}

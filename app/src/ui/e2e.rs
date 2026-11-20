@@ -157,3 +157,65 @@ fn intro_shows_until_it_has_been_seen_and_never_when_launched_in_background() {
     background.restore(state);
     assert!(background.intro.is_none());
 }
+
+/// Dessine l'écran Règles une fois, sans fenêtre : sert à vérifier qu'aucune étape ne plante.
+fn draw_rules(app: &mut App, ctx: &egui::Context) {
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| app.rules_ui(ui));
+    });
+}
+
+#[test]
+fn rules_mode_is_remembered_across_restarts() {
+    let mut app = blank_app();
+    assert_eq!(app.rules_mode, RulesMode::Simple, "un nouvel utilisateur démarre en simple");
+    app.rules_mode = RulesMode::Advanced;
+    let state = app.snapshot();
+    let mut again = blank_app();
+    again.restore(state);
+    assert_eq!(again.rules_mode, RulesMode::Advanced);
+}
+
+#[test]
+fn a_new_rule_in_simple_mode_starts_empty_and_every_step_draws() {
+    let dir = temp_dir("simple-steps");
+    let mut app = blank_app();
+    add_png_rule(&mut app, &dir, &dir.join("out"));
+    let folder_id = app.folders[0].id;
+    app.new_rule_in(folder_id);
+    let rule = app.rules.last().unwrap();
+    assert!(rule.conditions.is_empty(), "l'assistant propose lui-même les conditions");
+    assert_eq!(rule.actions.len(), 1);
+    assert_eq!(rule.actions[0].param(ON_CONFLICT_PARAM_KEY), CONFLICT_NUMBER);
+
+    let ctx = egui::Context::default();
+    load_fonts(&ctx);
+    apply_theme(&ctx);
+    for step in 1..=3 {
+        app.simple_step = step;
+        draw_rules(&mut app, &ctx);
+    }
+    assert_eq!(app.rules.last().unwrap().conditions.len(), 0, "dessiner ne modifie jamais la règle");
+}
+
+#[test]
+fn an_advanced_rule_is_left_untouched_in_simple_mode() {
+    let dir = temp_dir("simple-advanced-rule");
+    let mut app = blank_app();
+    add_png_rule(&mut app, &dir, &dir.join("out"));
+    app.rules[0].recursion_depth = 2;
+    app.rules[0].match_all = false;
+    let before = format!("{:?}", app.rules[0]);
+
+    let ctx = egui::Context::default();
+    load_fonts(&ctx);
+    apply_theme(&ctx);
+    app.rules_mode = RulesMode::Simple;
+    draw_rules(&mut app, &ctx);
+    assert_eq!(format!("{:?}", app.rules[0]), before, "la règle n'est pas modifiée en silence");
+    assert_eq!(app.rules_mode, RulesMode::Simple);
+
+    app.rules_mode = RulesMode::Advanced;
+    draw_rules(&mut app, &ctx);
+    assert_eq!(format!("{:?}", app.rules[0]), before);
+}
