@@ -1665,6 +1665,14 @@ fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Respon
     resp
 }
 
+/// Pastille discrète d'un libellé du héros : fond accent translucide, texte secondaire inchangé.
+fn hero_sub_pill(ui: &mut egui::Ui, text: &str, accent: Color32) {
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(16.0), text_dim());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(galley.size().x + 20.0, 26.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, Rounding::same(13.0), with_alpha(accent, 30));
+    ui.painter().galley(Pos2::new(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0), galley, text_dim());
+}
+
 /// Pastille cliquable (22 px) : même rendu que `chip`, avec survol.
 fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Response {
     let font = egui::FontId::new(14.0, semibold());
@@ -2630,15 +2638,20 @@ impl App {
         c.add_space(4.0);
         c.label(RichText::new(&title).size(34.0).family(bold()).color(Color32::WHITE));
         c.add_space(2.0);
+        let badge = subs.len() > 1;
         c.horizontal(|ui| {
             for (i, s) in subs.iter().enumerate() {
                 if i > 0 {
-                    ui.add_space(16.0);
+                    ui.add_space(8.0);
                 }
-                ui.label(RichText::new(s).size(16.0).color(text_dim()));
+                if badge {
+                    hero_sub_pill(ui, s, accent);
+                } else {
+                    ui.label(RichText::new(s).size(16.0).color(text_dim()));
+                }
             }
         });
-        c.add_space(18.0);
+        c.add_space(12.0);
         c.horizontal(|ui| match state {
             HeroState::NoFolder => {
                 if pill(ui, "Ajouter un dossier", accent, true, true).clicked() {
