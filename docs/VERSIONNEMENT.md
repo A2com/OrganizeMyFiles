@@ -93,3 +93,15 @@ scripts/versionner.sh --verifier
 
 Le script contrôle que `app/Cargo.toml`, `app/Cargo.lock` et la dernière section publiée de `CHANGELOG.md`
 portent la même version. Il s'exécute avant chaque PR de version et avant chaque build de release.
+
+## Mises à jour intégrées
+
+L'appli lit `https://api.github.com/repos/A2com/OrganizeMyFiles/releases/latest` (dépôt **public**, aucune clé).
+Pour qu'une release soit proposée aux utilisateurs :
+
+- le **tag** est `vX.Y.Z` (le « v » est ignoré à la lecture) et la version dépasse celle de l'appli installée ;
+- la release contient le fichier `OrganizeMyFiles-X.Y.Z.dmg` produit par `scripts/emballer-mac.sh` ; le `.dmg` doit
+  contenir `OrganizeMyFiles.app` à sa racine ;
+- GitHub calcule l'empreinte SHA-256 du fichier ; l'appli la vérifie avant d'installer.
+
+Une release marquée « pre-release » ou « brouillon » n'est jamais proposée (l'API `latest` les ignore).

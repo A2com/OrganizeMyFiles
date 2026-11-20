@@ -14,6 +14,10 @@ décrite dans `docs/VERSIONNEMENT.md`.
   essai sans rien toucher ; le mode avancé reste l'écran habituel. Bascule « Simple / Avancé » mémorisée (nouveaux
   utilisateurs : simple ; sauvegardes existantes : avancé).
 
+- Mises à jour : l'appli cherche les nouvelles versions sur GitHub (au lancement puis une fois par jour, désactivable) ;
+  bandeau « Version X disponible » et installation en un clic (téléchargement, vérification SHA-256, remplacement,
+  redémarrage). Bouton « Rechercher des mises à jour » dans Réglages › À propos.
+
 ### Corrigé
 
 - Interface : champs de saisie toujours sombres même en mode clair macOS (#37).
