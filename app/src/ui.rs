@@ -3338,7 +3338,15 @@ impl App {
                 chip(ui, &depth.to_string(), accent, with_alpha(accent, 38));
             });
             ui.add_space(4.0);
-            ui.label(RichText::new("0 = premier niveau seulement ; n = n niveaux de plus.").size(13.5).color(text_dim()));
+            ui.label(
+                RichText::new(
+                    "Jusqu'où chercher dans les sous-dossiers : 0 = seulement les fichiers posés dans le dossier ; \
+                     1 = aussi ceux de ses sous-dossiers ; 2 = un niveau de plus, etc. \
+                     Exemple avec 1 : un fichier dans « Téléchargements/Photos » est traité aussi.",
+                )
+                .size(13.5)
+                .color(text_dim()),
+            );
         });
 
         if deleted {
