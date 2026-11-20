@@ -4,10 +4,10 @@ Checklist à cocher avant chaque version. **Auto** = déjà vérifié par des te
 (date de la dernière vérification entre parenthèses). **À faire** = à cocher à la main : clics, clavier, boîtes de
 dialogue et invites de macOS ne peuvent pas être simulés depuis un terminal.
 
-Version testée : 0.1.0 · Mac : ____________ · macOS : ____________ · Date : ____________ · Testeur : ____________
+Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ____________ · macOS : ____________ · Date : ____________ · Testeur : ____________
 
 ## 0. Préparation
-- [x] Récupérer `OrganizeMyFiles-0.1.0.dmg` (`scripts/emballer-mac.sh` sur le Mac Studio, dossier `dist/`).
+- [ ] Récupérer `OrganizeMyFiles-X.Y.Z.dmg` (`scripts/emballer-mac.sh` sur le Mac Studio, dossier `dist/`).
 - [x] Sauvegarder (ou renommer) `~/Library/Application Support/OrganizeMyFiles/` pour repartir d'un état neuf.
 - [x] Créer un dossier de test avec quelques fichiers : une image `.png`, un `.pdf`, un `.txt`, une photo d'un reçu.
 
