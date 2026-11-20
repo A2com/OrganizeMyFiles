@@ -343,6 +343,12 @@ impl App {
             Some("settings") => Tab::Settings,
             _ => Tab::Dashboard,
         };
+        if app.screenshot.is_some() {
+            // Captures de l'écran Règles : OMF_RULES_STEP (1 à 3) et OMF_RULE_INDEX (0 = première règle).
+            let read = |key: &str| std::env::var(key).ok().and_then(|v| v.parse::<usize>().ok());
+            app.simple_step = read("OMF_RULES_STEP").map_or(1, |n| n.clamp(1, 3) as u8);
+            app.selected_rule = read("OMF_RULE_INDEX").unwrap_or(0);
+        }
         app
     }
 

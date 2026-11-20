@@ -153,7 +153,7 @@ fn kind_phrase(value: &str, negative: bool) -> String {
         "image" => "une image",
         "document" => "un document",
         "video" => "une vidéo",
-        "audio" => "un fichier audio",
+        "audio" => "de type audio",
         "archive" => "une archive",
         "folder" => "un dossier",
         "app" => "une application",
@@ -272,29 +272,6 @@ impl App {
         });
         ui.add_space(14.0);
 
-        let sentence = rule_sentence(&self.rules[idx], &self.folders);
-        panel_card(ui, |ui| {
-            ui.label(caps("EN RÉSUMÉ"));
-            ui.add_space(4.0);
-            ui.label(RichText::new(sentence).size(16.0).color(text_primary()));
-            if step == LAST_STEP {
-                ui.add_space(10.0);
-                ui.label(
-                    RichText::new(
-                        "Rien n'est perdu : chaque rangement apparaît dans l'Historique et peut être annulé. \
-                         Vous pouvez d'abord faire un essai : rien ne bouge, le résultat s'affiche dans l'Historique.",
-                    )
-                    .size(14.0)
-                    .color(text_dim()),
-                );
-                ui.add_space(8.0);
-                if btn(ui, "Tester sans rien toucher", Btn::Sky, accent, None).clicked() {
-                    self.run_batch(true);
-                }
-            }
-        });
-        ui.add_space(14.0);
-
         let ready = step_ready(step, &self.rules[idx]);
         ui.horizontal(|ui| {
             if step > 1 && btn(ui, "Précédent", Btn::Ghost, accent, None).clicked() {
@@ -319,6 +296,29 @@ impl App {
                 ui.label(RichText::new(why).size(14.5).color(text_dim()));
             }
         });
+        ui.add_space(14.0);
+        let sentence = rule_sentence(&self.rules[idx], &self.folders);
+        panel_card(ui, |ui| {
+            ui.label(caps("EN RÉSUMÉ"));
+            ui.add_space(4.0);
+            ui.label(RichText::new(sentence).size(16.0).color(text_primary()));
+            if step == LAST_STEP {
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(
+                        "Rien n'est perdu : chaque rangement apparaît dans l'Historique et, le plus souvent, peut être annulé. \
+                         Vous pouvez d'abord faire un essai : rien ne bouge, le résultat s'affiche dans l'Historique.",
+                    )
+                    .size(14.0)
+                    .color(text_dim()),
+                );
+                ui.add_space(8.0);
+                if btn(ui, "Tester sans rien toucher", Btn::Sky, accent, None).clicked() {
+                    self.run_batch(true);
+                }
+            }
+        });
+        ui.add_space(14.0);
         moved
     }
 
