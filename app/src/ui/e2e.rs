@@ -107,6 +107,27 @@ fn removing_a_folder_can_be_undone_with_its_rules() {
 }
 
 #[test]
+fn cmd_comma_opens_settings_and_plain_comma_does_nothing() {
+    let mut app = blank_app();
+    app.tab = Tab::Dashboard;
+    let ctx = egui::Context::default();
+    let key = |modifiers| egui::Event::Key { key: egui::Key::Comma, physical_key: None, pressed: true, repeat: false, modifiers };
+
+    // ⌘, : le raccourci macOS standard ouvre les réglages.
+    ctx.begin_pass(egui::RawInput { events: vec![key(egui::Modifiers::COMMAND)], ..Default::default() });
+    app.global_shortcuts(&ctx);
+    let _ = ctx.end_pass();
+    assert!(matches!(app.tab, Tab::Settings), "⌘, ouvre les réglages");
+
+    // Virgule seule : aucun changement d'onglet.
+    app.tab = Tab::Dashboard;
+    ctx.begin_pass(egui::RawInput { events: vec![key(egui::Modifiers::NONE)], ..Default::default() });
+    app.global_shortcuts(&ctx);
+    let _ = ctx.end_pass();
+    assert!(matches!(app.tab, Tab::Dashboard), "virgule seule ne change rien");
+}
+
+#[test]
 fn intro_shows_until_it_has_been_seen_and_never_when_launched_in_background() {
     let mut seen = blank_app();
     let mut state = seen.snapshot();
