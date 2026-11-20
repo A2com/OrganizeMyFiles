@@ -132,7 +132,10 @@ fn load_fonts(ctx: &egui::Context) {
 }
 
 /// Applique le style sombre global : champs `#0c0e15`, focus orange, coins doux.
+/// Le thème est forcé sombre : sinon egui suit le réglage macOS et, en mode clair,
+/// les champs de saisie deviennent blancs avec un texte illisible.
 fn apply_theme(ctx: &egui::Context) {
+    ctx.set_theme(egui::ThemePreference::Dark);
     let mut v = egui::Visuals::dark();
     v.panel_fill = Color32::TRANSPARENT;
     v.window_fill = Color32::from_rgb(0x1a, 0x1d, 0x27);
