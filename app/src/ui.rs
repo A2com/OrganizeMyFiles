@@ -4203,5 +4203,9 @@ mod tests {
     }
 }
 
+// Les fonctions de l'assistant sont branchées dans le commit suivant.
+#[allow(dead_code)]
+mod simple_rules;
+
 #[cfg(test)]
 mod e2e;
