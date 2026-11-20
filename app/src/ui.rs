@@ -2186,6 +2186,19 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Raccourcis clavier globaux : ⌘K focus recherche, ⌘, réglages (standard macOS).
+    fn global_shortcuts(&mut self, ctx: &egui::Context) {
+        // ⌘K : focus sur la recherche.
+        let search_id = egui::Id::new("global-search");
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
+            ctx.memory_mut(|m| m.request_focus(search_id));
+        }
+        // ⌘, : ouvre les réglages (raccourci macOS par défaut, aussi dans le menu de la barre des menus).
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
+            self.tab = Tab::Settings;
+        }
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
         let ctx = ui.ctx().clone();
@@ -2198,11 +2211,7 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
 
-        // ⌘K : focus sur la recherche.
-        let search_id = egui::Id::new("global-search");
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
-            ctx.memory_mut(|m| m.request_focus(search_id));
-        }
+        self.global_shortcuts(&ctx);
 
         // La recherche part 25 px à gauche du début du contenu (barre latérale 256 px + marge 28 px)
         // et prend tout l'espace libre jusqu'aux boutons de droite.
@@ -2227,6 +2236,7 @@ impl App {
         }
 
         // --- centre : recherche
+        let search_id = egui::Id::new("global-search");
         ui.painter().rect_filled(search_rect, Rounding::same(8.0), with_alpha(CANVAS, 180));
         let mut sui = ui.new_child(
             egui::UiBuilder::new().max_rect(search_rect.shrink2(Vec2::new(10.0, 0.0))).layout(Layout::left_to_right(Align::Center)),
