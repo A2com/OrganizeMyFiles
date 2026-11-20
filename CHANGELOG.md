@@ -10,6 +10,9 @@ décrite dans `docs/VERSIONNEMENT.md`.
 ### Ajouté
 
 - Réglages : raccourci ⌘, pour ouvrir les réglages (#38).
+- Règles : mode simple en trois étapes (dossiers, conditions, action) avec modèles de conditions, phrase récapitulative et
+  essai sans rien toucher ; le mode avancé reste l'écran habituel. Bascule « Simple / Avancé » mémorisée (nouveaux
+  utilisateurs : simple ; sauvegardes existantes : avancé).
 
 ### Corrigé
 

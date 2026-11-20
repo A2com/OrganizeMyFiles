@@ -47,6 +47,11 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [x] | Action « Déplacer » : le bouton « Choisir… » remplit le dossier de destination | Validé par Andy (2026-11-12) |
 | [x] | Une règle sur plusieurs dossiers s'applique à chacun ; ancienne sauvegarde relue | Auto (2026-11-12) |
 | [x] | Parcours complet : dossier → règle → organiser → annuler → relance | Auto (test `e2e`, 2026-11-12) |
+| [ ] | Mode simple : « Nouvelle règle » → 3 étapes (dossiers, conditions, action) → « Terminer » ; la règle s'applique | À faire (Andy, Mac) |
+| [ ] | Mode simple : modèles de conditions (image, PDF, plus de 30 jours…), valeurs « nombre + unité », bouton « Suivant » grisé tant que l'étape est incomplète | À faire (Andy, Mac) |
+| [ ] | Mode simple : « Tester sans rien toucher » ne déplace rien et alimente l'Historique | À faire (Andy, Mac) |
+| [ ] | Bascule Simple / Avancé : mémorisée au redémarrage ; une règle avancée (récursion, plusieurs actions…) affiche « réglages avancés » sans être modifiée | À faire (Andy, Mac) |
+| [x] | Les 3 étapes et la carte « réglages avancés » se dessinent en 980×640 et 1180×780 | Captures relues (2026-11-20) |
 
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
