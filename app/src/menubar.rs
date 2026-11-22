@@ -29,6 +29,19 @@ pub enum MenuCommand {
     Quit,
 }
 
+/// Un clic sur l'icône du Dock demande de rouvrir la fenêtre (événement macOS « rouvrir l'application »).
+static REOPEN_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn request_reopen() {
+    REOPEN_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Vrai une seule fois par clic sur l'icône du Dock (remet la demande à zéro).
+pub fn take_reopen_request() -> bool {
+    REOPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 #[cfg(target_os = "macos")]
 mod imp {
     use std::sync::mpsc::{channel, Receiver};
@@ -36,13 +49,13 @@ mod imp {
     use muda::accelerator::{Accelerator, Code, Modifiers};
     use muda::{ContextMenu, IconMenuItem, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
     use objc2::rc::Retained;
-    use objc2::runtime::AnyObject;
-    use objc2::{sel, MainThreadMarker};
+    use objc2::runtime::{AnyObject, NSObject};
+    use objc2::{define_class, msg_send, sel, AllocAnyThread, MainThreadMarker};
     use objc2_app_kit::{
         NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSControlSize, NSImage, NSImageView, NSMenu, NSMenuItem,
         NSSwitch, NSTextField, NSView,
     };
-    use objc2_foundation::{NSData, NSPoint, NSRect, NSSize, NSString};
+    use objc2_foundation::{NSAppleEventDescriptor, NSAppleEventManager, NSData, NSPoint, NSRect, NSSize, NSString};
     use tray_icon::{TrayIcon, TrayIconBuilder};
 
     use super::{menubar_info, MenuCommand, MenuInfo, MenuScreen};
@@ -51,6 +64,51 @@ mod imp {
         ($name:literal) => {
             include_bytes!(concat!("../../assets/icons/menu/", $name, ".png"))
         };
+    }
+
+    define_class!(
+        /// Reçoit l'événement « rouvrir l'application » (clic sur l'icône du Dock) : ni winit ni eframe ne le traitent.
+        #[unsafe(super(NSObject))]
+        #[name = "OMFReopenHandler"]
+        struct ReopenHandler;
+
+        impl ReopenHandler {
+            #[unsafe(method(handleReopen:withReplyEvent:))]
+            fn handle_reopen(&self, _event: &NSAppleEventDescriptor, _reply: &NSAppleEventDescriptor) {
+                super::request_reopen();
+                if let Some(wake) = REOPEN_WAKE.get() {
+                    wake();
+                }
+            }
+        }
+    );
+
+    static REOPEN_WAKE: std::sync::OnceLock<std::sync::Arc<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+    /// `'aevt'` (événements de base) et `'rapp'` (rouvrir l'application).
+    const CORE_EVENT_CLASS: u32 = 0x6165_7674;
+    const REOPEN_EVENT_ID: u32 = 0x7261_7070;
+
+    /// Branche le gestionnaire une seule fois. À faire après le démarrage de l'appli : avant, macOS remplacerait le nôtre.
+    fn install_reopen_handler(wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = REOPEN_WAKE.set(wake);
+            let handler: Retained<ReopenHandler> = unsafe { msg_send![ReopenHandler::alloc(), init] };
+            let manager = NSAppleEventManager::sharedAppleEventManager();
+            // Appel direct : la méthode typée de objc2-foundation exige une crate supplémentaire (core-services).
+            unsafe {
+                let _: () = msg_send![
+                    &*manager,
+                    setEventHandler: &*handler,
+                    andSelector: sel!(handleReopen:withReplyEvent:),
+                    forEventClass: CORE_EVENT_CLASS,
+                    andEventID: REOPEN_EVENT_ID,
+                ];
+            }
+            // Le gestionnaire doit vivre autant que l'appli : le gestionnaire d'événements ne le retient pas.
+            std::mem::forget(handler);
+        });
     }
 
     const TRAY_ICON: &[u8] = include_bytes!("../../assets/icons/tray-template-44.png");
@@ -166,6 +224,8 @@ mod imp {
     impl MenuBar {
         /// `wake` réveille l'interface à chaque clic dans le menu.
         pub fn new(wake: impl Fn() + Send + Sync + 'static) -> Option<Self> {
+            let wake: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(wake);
+            install_reopen_handler(wake.clone());
             let title = MenuItem::with_id("title", "OrganizeMyFiles", false, None);
             let status = item("status", "Surveillance active", false, menu_icon!("actif"), None);
             let counts = item("counts", "—", false, menu_icon!("dossiers"), None);
@@ -309,3 +369,16 @@ mod imp {
 }
 
 pub use imp::{set_dock_visible, MenuBar};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dock_click_is_reported_once() {
+        assert!(!take_reopen_request(), "rien à signaler au départ");
+        request_reopen();
+        assert!(take_reopen_request());
+        assert!(!take_reopen_request(), "la demande est consommée");
+    }
+}

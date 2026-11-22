@@ -62,6 +62,12 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [ ] | Sans connexion : la vérification automatique est silencieuse, la vérification manuelle explique l'échec | À faire (Andy, Mac) |
 | [ ] | Appli installée dans Applications : le remplacement fonctionne (sinon message « glissez la nouvelle version ») | À faire (Andy, Mac) |
 
+## 3 ter. Icône du Dock
+| | Contrôle | État |
+|---|---|---|
+| [ ] | Fermer la fenêtre avec le bouton rouge, puis cliquer sur l'icône de l'appli dans le Dock : la fenêtre se rouvre | À faire (Andy, Mac) |
+| [x] | Même événement simulé par `open OrganizeMyFiles.app` : fenêtre masquée → visible (ancienne version : reste masquée) | Auto (2026-11-22) |
+
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
 |---|---|---|
