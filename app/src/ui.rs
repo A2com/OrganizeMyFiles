@@ -188,6 +188,24 @@ struct UndoFolder {
 
 const UNDO_SECONDS: u64 = 8;
 
+/// Barre du haut : largeurs fixes et places à réserver.
+const STATUS_PILL_W: f32 = 112.0;
+const ICON_BUTTON_W: f32 = 32.0;
+/// La recherche ne descend pas sous cette largeur ; le raccourci « ⌘ K » disparaît sous la seconde.
+const SEARCH_MIN_W: f32 = 160.0;
+const SEARCH_HINT_MIN_W: f32 = 240.0;
+
+/// Largeur réelle du groupe de droite de la barre du haut (pastille, boutons, et en grande fenêtre cloche et
+/// réglages), écarts compris, plus une petite marge. La recherche prend le reste : jamais de chevauchement.
+fn top_bar_right_width(run_w: f32, preview_w: f32, wide: bool, gap: f32) -> f32 {
+    let mut widths = vec![STATUS_PILL_W, preview_w, run_w];
+    if wide {
+        widths.extend([ICON_BUTTON_W, ICON_BUTTON_W]);
+    }
+    let bell_extra = if wide { 4.0 } else { 0.0 };
+    widths.iter().sum::<f32>() + gap * (widths.len() - 1) as f32 + bell_extra + 4.0
+}
+
 const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/app-256.png");
 
 fn app_icon_image() -> egui::ColorImage {
@@ -1655,12 +1673,22 @@ enum Btn {
     Sky,
 }
 
+/// Marges horizontales d'un bouton `btn` et place prise par son icône.
+const BTN_PAD_X: f32 = 28.0;
+const BTN_ICON_W: f32 = 20.0;
+
+/// Largeur qu'aura un bouton `btn` : sert à réserver la bonne place avant de le dessiner.
+fn btn_width(ui: &egui::Ui, text: &str, with_icon: bool) -> f32 {
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::new(14.5, semibold()), Color32::WHITE);
+    galley.size().x + BTN_PAD_X + if with_icon { BTN_ICON_W } else { 0.0 }
+}
+
 /// Bouton 32 px de haut (rayon 8) : primaire orange, fantôme, bleu azur ou danger.
 fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<Icon>) -> egui::Response {
     let font = egui::FontId::new(14.5, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font.clone(), Color32::WHITE);
-    let icon_w = if icon.is_some() { 20.0 } else { 0.0 };
-    let size = Vec2::new(galley.size().x + 28.0 + icon_w, 32.0);
+    let icon_w = if icon.is_some() { BTN_ICON_W } else { 0.0 };
+    let size = Vec2::new(galley.size().x + BTN_PAD_X + icon_w, 32.0);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let enabled = resp.enabled();
     let hover = resp.hovered() && enabled;
@@ -2327,10 +2355,16 @@ impl App {
 
         // La recherche part 25 px à gauche du début du contenu (barre latérale 256 px + marge 28 px)
         // et prend tout l'espace libre jusqu'aux boutons de droite.
-        let right_w = if wide { 492.0 } else { 420.0 };
+        let run_label = if rect.width() >= 1300.0 { "Organiser maintenant" } else { "Organiser" };
+        let right_w = top_bar_right_width(
+            btn_width(ui, run_label, true),
+            btn_width(ui, "Aperçu simulation", false),
+            wide,
+            ui.spacing().item_spacing.x,
+        );
         let search_left = rect.left() + 256.0 + 28.0 - 25.0;
         let search_right = rect.right() - 16.0 - right_w - 12.0;
-        let search_w = (search_right - search_left).clamp(220.0, 640.0);
+        let search_w = (search_right - search_left).clamp(SEARCH_MIN_W, 640.0);
         let search_rect = Rect::from_min_size(Pos2::new(search_left, rect.center().y - 17.0), Vec2::new(search_w, 34.0));
 
         // --- gauche
@@ -2363,13 +2397,15 @@ impl App {
                 .hint_text("Rechercher règles, dossiers, fichiers…"),
         );
         let key = if cfg!(target_os = "macos") { "⌘ K" } else { "Ctrl K" };
-        ui.painter().text(
-            Pos2::new(search_rect.right() - 12.0, search_rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            key,
-            egui::FontId::proportional(13.5),
-            text_dim(),
-        );
+        if search_w >= SEARCH_HINT_MIN_W {
+            ui.painter().text(
+                Pos2::new(search_rect.right() - 12.0, search_rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                key,
+                egui::FontId::proportional(13.5),
+                text_dim(),
+            );
+        }
 
         // --- droite
         let right = Rect::from_min_max(Pos2::new(search_rect.right() + 10.0, rect.top()), Pos2::new(rect.right() - 16.0, rect.bottom()));
@@ -2397,7 +2433,6 @@ impl App {
             rui.add_space(4.0);
         }
         let enabled = self.app_enabled;
-        let run_label = if rect.width() >= 1300.0 { "Organiser maintenant" } else { "Organiser" };
         let run = rui.add_enabled_ui(enabled, |ui| btn(ui, run_label, Btn::Primary, accent, Some(Icon::Bolt))).inner;
         let run = run
             .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).")
@@ -2412,7 +2447,7 @@ impl App {
         // Statut : pastille verte pulsée.
         let label = if self.app_enabled { "Actif" } else { "En veille" };
         let dot = if self.app_enabled { GREEN } else { text_dim() };
-        let (r, resp) = rui.allocate_exact_size(Vec2::new(112.0, 32.0), egui::Sense::click());
+        let (r, resp) = rui.allocate_exact_size(Vec2::new(STATUS_PILL_W, 32.0), egui::Sense::click());
         rui.painter().rect_filled(r, Rounding::same(16.0), with_alpha(dot, if resp.hovered() { 36 } else { 22 }));
         let dc = Pos2::new(r.left() + 16.0, r.center().y);
         if self.app_enabled {
@@ -4077,6 +4112,31 @@ fn save_png(path: &str, shot: &egui::ColorImage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_search_box_never_overlaps_the_right_group_of_the_top_bar() {
+        // Largeurs réalistes des boutons (mesurées sur Mac) ; la fenêtre ne descend pas sous 980 px.
+        for window_w in (980..=2200).step_by(10) {
+            let window_w = window_w as f32;
+            let wide = window_w >= 1280.0;
+            let run_w = if window_w >= 1300.0 { 190.0 } else { 113.0 };
+            let right_w = top_bar_right_width(run_w, 160.0, wide, 8.0);
+            let search_left = 259.0;
+            let search_w = (window_w - 16.0 - right_w - 12.0 - search_left).clamp(SEARCH_MIN_W, 640.0);
+            assert!(
+                search_left + search_w + 10.0 + right_w <= window_w - 16.0 + 0.01,
+                "chevauchement à {window_w} px : recherche jusqu'à {}, groupe de droite dès {}",
+                search_left + search_w,
+                window_w - 16.0 - right_w
+            );
+            assert!(search_w > SEARCH_MIN_W, "la recherche garde de la place à {window_w} px");
+        }
+    }
+
+    #[test]
+    fn the_wide_top_bar_reserves_room_for_the_bell_and_the_gear() {
+        assert!(top_bar_right_width(113.0, 160.0, true, 8.0) > top_bar_right_width(113.0, 160.0, false, 8.0) + 2.0 * ICON_BUTTON_W);
+    }
 
     #[test]
     fn ellipsize_truncates_to_width() {

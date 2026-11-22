@@ -7,6 +7,10 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+### Corrigé
+
+- Barre du haut : le raccourci « ⌘ K » de la recherche ne chevauche plus la pastille « Actif » (largeur du groupe de droite mesurée au lieu d'une constante).
+
 ## [0.2.0] - 2026-11-20
 
 ### Ajouté
