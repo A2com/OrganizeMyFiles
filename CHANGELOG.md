@@ -7,6 +7,8 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+## [0.2.1] - 2026-11-22
+
 ### Corrigé
 
 - Dock : un clic sur l'icône de l'appli rouvre la fenêtre quand elle a été fermée avec le bouton rouge.
