@@ -68,6 +68,12 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [ ] | Fermer la fenêtre avec le bouton rouge, puis cliquer sur l'icône de l'appli dans le Dock : la fenêtre se rouvre | À faire (Andy, Mac) |
 | [x] | Même événement simulé par `open OrganizeMyFiles.app` : fenêtre masquée → visible (ancienne version : reste masquée) | Auto (2026-11-22) |
 
+## 3 quater. Barre du haut
+| | Contrôle | État |
+|---|---|---|
+| [x] | « ⌘ K », « Actif », « Aperçu simulation » et « Organiser » ne se chevauchent à aucune largeur de fenêtre (980, 1180, 1300, 1500 px) | Captures relues (2026-11-22) |
+| [ ] | Même contrôle en agrandissant et réduisant la fenêtre à la main (écran Retina) | À faire (Andy, Mac) |
+
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
 |---|---|---|
