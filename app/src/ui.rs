@@ -1038,6 +1038,10 @@ impl App {
         if self.window_hidden && self.menubar.is_none() {
             self.show_window(ctx);
         }
+        // Clic sur l'icône du Dock : on rouvre la fenêtre (elle peut avoir été fermée avec le bouton rouge).
+        if menubar::take_reopen_request() {
+            self.show_window(ctx);
+        }
         let commands = self.menubar.as_ref().map(MenuBar::poll).unwrap_or_default();
         if self.menubar.is_some() {
             let info = self.menu_info();

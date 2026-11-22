@@ -9,6 +9,7 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ### Corrigé
 
+- Dock : un clic sur l'icône de l'appli rouvre la fenêtre quand elle a été fermée avec le bouton rouge.
 - Barre du haut : le raccourci « ⌘ K » de la recherche ne chevauche plus la pastille « Actif » (largeur du groupe de droite mesurée au lieu d'une constante).
 
 ## [0.2.0] - 2026-11-20
