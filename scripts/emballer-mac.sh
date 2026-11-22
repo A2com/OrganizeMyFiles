@@ -64,7 +64,25 @@ codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 
 DMG="$DIST/OrganizeMyFiles-$VERSION.dmg"
-hdiutil create -volname "OrganizeMyFiles" -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
+
+# Installateur illustré (fond, icône de l'appli, raccourci « Applications ») : dmgbuild écrit la mise en page
+# sans passer par Finder. Installé une fois dans un environnement Python dédié (réseau nécessaire la 1re fois).
+DMGBUILD_VERSION="1.6.5"
+VENV="$HOME/.cache/omf-dmg-venv"
+if ! "$VENV/bin/dmgbuild" --help >/dev/null 2>&1; then
+  python3 -m venv "$VENV"
+  "$VENV/bin/pip" install --quiet "dmgbuild==$DMGBUILD_VERSION" || {
+    echo "ERREUR : installation de dmgbuild impossible (connexion ?)." >&2
+    exit 1
+  }
+fi
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+swiftc -O scripts/alias-applications.swift -o "$STAGE/alias-applications"
+"$STAGE/alias-applications" /Applications "$STAGE/Applications" assets/dmg/applications-folder.png
+"$VENV/bin/dmgbuild" -s scripts/dmg-reglages.py \
+  -D racine="$ROOT" -D app="$APP" -D alias="$STAGE/Applications" \
+  "OrganizeMyFiles" "$DMG" >/dev/null
 if [ ! -f "$DMG" ]; then
   echo "ERREUR : le .dmg attendu n'a pas été créé : $DMG" >&2
   exit 1
