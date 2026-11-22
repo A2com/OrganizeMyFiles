@@ -12,7 +12,8 @@ filesystem = "HFS+"
 files = [app, alias]
 symlinks = {}
 icon = os.path.join(racine, "assets", "icons", "macos", "AppIcon.icns")
-background = os.path.join(racine, "assets", "dmg", "background.jpg")
+# Fond fourni en 1x (background.png) et Retina (background@2x.png) : dmgbuild les combine.
+background = os.path.join(racine, "assets", "dmg", "background.png")
 
 window_rect = ((200, 120), (658, 398))
 default_view = "icon-view"

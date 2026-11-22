@@ -113,7 +113,7 @@ fois dans `~/.cache/omf-dmg-venv` : **connexion Internet nécessaire au premier 
 d'AppleScript : la mise en page est écrite directement dans le `.DS_Store`.
 
 - `scripts/dmg-reglages.py` : taille de fenêtre (658 × 398, celle du fond), taille des icônes, positions ;
-- `assets/dmg/background.jpg` : fond (1×) ; `assets/dmg/applications-folder.png` : icône du raccourci ;
+- `assets/dmg/background.png` et `background@2x.png` : fond (1× et Retina, combinés par `dmgbuild`) ; `assets/dmg/applications-folder.png` : icône du raccourci ;
 - `scripts/alias-applications.swift` : crée l'alias « Applications » (un alias, pas un lien symbolique, pour pouvoir
   lui donner une icône personnalisée).
 
