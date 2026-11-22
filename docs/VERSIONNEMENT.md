@@ -105,3 +105,16 @@ Pour qu'une release soit proposée aux utilisateurs :
 - GitHub calcule l'empreinte SHA-256 du fichier ; l'appli la vérifie avant d'installer.
 
 Une release marquée « pre-release » ou « brouillon » n'est jamais proposée (l'API `latest` les ignore).
+
+## Fabrication du `.dmg`
+
+`scripts/emballer-mac.sh` fabrique un installateur illustré avec `dmgbuild` (version épinglée, installé la première
+fois dans `~/.cache/omf-dmg-venv` : **connexion Internet nécessaire au premier build**). Pas de Finder ni
+d'AppleScript : la mise en page est écrite directement dans le `.DS_Store`.
+
+- `scripts/dmg-reglages.py` : taille de fenêtre (658 × 398, celle du fond), taille des icônes, positions ;
+- `assets/dmg/background.jpg` : fond (1×) ; `assets/dmg/applications-folder.png` : icône du raccourci ;
+- `scripts/alias-applications.swift` : crée l'alias « Applications » (un alias, pas un lien symbolique, pour pouvoir
+  lui donner une icône personnalisée).
+
+L'appli reste à la **racine** du volume : la mise à jour intégrée l'y cherche.

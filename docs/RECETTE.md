@@ -74,6 +74,13 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [x] | « ⌘ K », « Actif », « Aperçu simulation » et « Organiser » ne se chevauchent à aucune largeur de fenêtre (980, 1180, 1300, 1500 px) | Captures relues (2026-11-22) |
 | [ ] | Même contrôle en agrandissant et réduisant la fenêtre à la main (écran Retina) | À faire (Andy, Mac) |
 
+## 3 quinquies. Installateur .dmg
+| | Contrôle | État |
+|---|---|---|
+| [ ] | Ouvrir le `.dmg` : fenêtre 658 × 398 sans barres, fond illustré, icône OrganizeMyFiles à gauche, dossier « Applications » à droite, chevron entre les deux | À faire (Andy, Mac) |
+| [ ] | Glisser l'appli sur « Applications » : elle est copiée dans le dossier Applications | À faire (Andy, Mac) |
+| [x] | Contenu du volume et `.DS_Store` relus (positions, taille des icônes, fond) ; copie de l'appli depuis le `.dmg` et signature valide | Auto (2026-11-22) |
+
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
 |---|---|---|

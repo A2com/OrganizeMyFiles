@@ -7,6 +7,10 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+### Modifié
+
+- Installateur `.dmg` illustré : fond, icône de l'appli à gauche, raccourci « Applications » avec son icône à droite (glisser-déposer).
+
 ## [0.2.1] - 2026-11-22
 
 ### Corrigé
