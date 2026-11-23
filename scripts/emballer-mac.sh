@@ -83,6 +83,11 @@ swiftc -O scripts/alias-applications.swift -o "$STAGE/alias-applications"
 "$VENV/bin/dmgbuild" -s scripts/dmg-reglages.py \
   -D racine="$ROOT" -D app="$APP" -D alias="$STAGE/Applications" \
   "OrganizeMyFiles" "$DMG" >/dev/null
+# Mise en page relue par Finder (bande d'état, taille de fenêtre) : voir scripts/dmg-finder.sh.
+if ! scripts/dmg-finder.sh "$DMG"; then
+  echo "AVERTISSEMENT : mise en page Finder non appliquée (session graphique ou autorisation Finder absente) :" >&2
+  echo "               le .dmg est valide mais la bande d'état et la taille de fenêtre peuvent différer." >&2
+fi
 if [ ! -f "$DMG" ]; then
   echo "ERREUR : le .dmg attendu n'a pas été créé : $DMG" >&2
   exit 1

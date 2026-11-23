@@ -117,4 +117,10 @@ d'AppleScript : la mise en page est écrite directement dans le `.DS_Store`.
 - `scripts/alias-applications.swift` : crée l'alias « Applications » (un alias, pas un lien symbolique, pour pouvoir
   lui donner une icône personnalisée).
 
+`scripts/dmg-finder.sh` repasse ensuite l'image par Finder (AppleScript) : le `.DS_Store` écrit par `dmgbuild` n'était
+pas toujours respecté (bande d'état affichée, fenêtre à la mauvaise taille) ; écrit par Finder lui-même, il est relu
+fidèlement. Cette étape exige une **session ouverte sur le Mac** et l'autorisation d'automatiser Finder ; sinon
+`emballer-mac.sh` avertit et garde l'image `dmgbuild`. Le fond vient de `~/…/OrganizeMyFiles/DMG Installer/`
+(fichier `installer-background.jpg` en 1316 × 796, réduit en 658 × 398 pour la version 1×).
+
 L'appli reste à la **racine** du volume : la mise à jour intégrée l'y cherche.
