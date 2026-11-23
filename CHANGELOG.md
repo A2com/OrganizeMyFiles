@@ -7,6 +7,10 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+### Ajouté
+
+- Logotype « OrganizeMyFiles » (SVG fourni par Andy) intégré avec discrétion : barre latérale, pied de l'écran de bienvenue, Réglages › À propos.
+
 ## [0.2.1] - 2026-11-22
 
 ### Corrigé
