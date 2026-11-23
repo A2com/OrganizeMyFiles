@@ -7,15 +7,17 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+## [0.3.1] - 2026-11-23
+
 ### Corrigé
 
 - Historique : une règle encore incomplète (destination, nouveau nom ou condition pas choisis — brouillon
   d'assistant sauvegardé automatiquement) n'est plus exécutée. Le lot affiche une seule ligne neutre
   « ignorée » avec la raison, au lieu d'un échec rouge par fichier ; ces lignes ne comptent ni dans les
-  échecs, ni dans la notification, ni dans la barre des menus.
+  échecs, ni dans la notification, ni dans la barre des menus. (#66)
 - Rangement : les métadonnées système (`.DS_Store`, `.localized`, copies `._*`, `Thumbs.db`, `desktop.ini`,
   `Icon`, `.Trashes`) et les téléchargements partiels ne sont plus jamais proposés à une règle. Un fichier
-  caché ordinaire (`.gitignore`, `.env`) reste triable.
+  caché ordinaire (`.gitignore`, `.env`) reste triable. (#66)
 
 ## [0.3.0] - 2026-11-23
 
