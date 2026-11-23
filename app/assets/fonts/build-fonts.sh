@@ -5,13 +5,15 @@
 #   <dossier-sources>/outfit/Outfit-var.ttf = Outfit[wght].ttf (google/fonts, ofl/outfit)
 set -euo pipefail
 SRC="$1"; OUT="$(cd "$(dirname "$0")" && pwd)"
-ICONS="dashboard folder_managed rule history memory tune search notifications settings bolt filter_alt drag_indicator close add check_circle schedule visibility power_settings_new sort arrow_forward delete folder_open refresh check undo"
+ICONS="dashboard folder_managed rule history memory tune search notifications settings bolt filter_alt drag_indicator close add check_circle schedule visibility power_settings_new sort arrow_forward delete folder_open refresh check undo image picture_as_pdf movie description music_note folder_zip text_fields straighten drive_file_move content_copy drive_file_rename_outline sell auto_awesome event category expand_more"
 UNI=""
 for n in $ICONS; do
   cp=$(awk -v n="$n" '$1==n {print $2}' "$SRC/ms.codepoints"); UNI="$UNI,U+$cp"
 done
 python3 -m fontTools.varLib.instancer "$SRC/ms.ttf" FILL=0 GRAD=0 opsz=24 wght=400 -o "$SRC/ms-static.ttf"
 python3 -m fontTools.subset "$SRC/ms-static.ttf" --unicodes="${UNI#,}" --output-file="$OUT/MaterialSymbolsOutlined-subset.ttf" --no-hinting
+# Outfit : seulement si la police variable est fournie (les icônes se régénèrent sans elle).
+[ -f "$SRC/outfit/Outfit-var.ttf" ] || { echo "OK : icônes régénérées (Outfit ignorée : $SRC/outfit/Outfit-var.ttf absent)"; exit 0; }
 for pair in Regular:400 SemiBold:600 Bold:700; do
   name="${pair%%:*}"; wght="${pair##*:}"
   python3 -m fontTools.varLib.instancer "$SRC/outfit/Outfit-var.ttf" wght="$wght" -o "$SRC/outfit/Outfit-$name-full.ttf"

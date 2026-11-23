@@ -74,6 +74,16 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [x] | « ⌘ K », « Actif », « Aperçu simulation » et « Organiser » ne se chevauchent à aucune largeur de fenêtre (980, 1180, 1300, 1500 px) | Captures relues (2026-11-22) |
 | [ ] | Même contrôle en agrandissant et réduisant la fenêtre à la main (écran Retina) | À faire (Andy, Mac) |
 
+## 3 octies. Règles en mode simple (version illustrée)
+| | Contrôle | État |
+|---|---|---|
+| [ ] | Étape 1 : un clic sur le grand dossier (ou « Choisir les dossiers ») déroule la liste ; cocher / décocher un dossier ; impossible de retirer le dernier ; « Terminé » referme | À faire (Andy, Mac) |
+| [ ] | Étape 2 : les cartes de modèles s'allument au clic (et s'éteignent au second clic) ; la liste « Vos conditions » suit | À faire (Andy, Mac) |
+| [ ] | Étape 3 : les cartes d'actions ; la carte choisie est en accent ; les réglages apparaissent en fondu | À faire (Andy, Mac) |
+| [ ] | La carte « En résumé » se lit bien (mots clés surlignés) à chaque étape | À faire (Andy, Mac) |
+| [ ] | « Animer le fond » désactivé : plus d'animation (le panneau apparaît d'un coup) | À faire (Andy, Mac) |
+| [x] | Les 3 étapes et le panneau ouvert se dessinent à 980 et 1180 px (captures relues) | Captures relues (2026-11-23) |
+
 ## 3 septies. Logotype
 | | Contrôle | État |
 |---|---|---|

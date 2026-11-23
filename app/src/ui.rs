@@ -53,6 +53,22 @@ enum Icon {
     Refresh,
     Tick,
     Undo,
+    Image,
+    Pdf,
+    Video,
+    Document,
+    Music,
+    Archive,
+    Text,
+    Ruler,
+    Move,
+    Copy,
+    Rename,
+    Tag,
+    Sparkle,
+    Event,
+    Category,
+    ExpandMore,
 }
 
 const TABS: &[(Tab, &str, Icon, &str)] = &[
@@ -256,6 +272,8 @@ impl IntroState {
     }
 }
 
+/// Illustration du dossier (écran Règles, mode simple).
+const FOLDER_ART_PNG: &[u8] = include_bytes!("../../assets/ui/folder.png");
 const INTRO_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/intro-600.png");
 /// Largeurs d'affichage du logotype (points) : barre latérale, écran de bienvenue, « À propos ».
 const WORDMARK_SIDEBAR_W: f32 = 128.0;
@@ -314,6 +332,7 @@ pub struct App {
     watch_key: String,
     /// Logo de la barre latérale (chargé au premier affichage).
     logo: Option<egui::TextureHandle>,
+    folder_art: Option<egui::TextureHandle>,
     wordmark: Option<egui::TextureHandle>,
     /// Icône et menu de la barre des menus (macOS).
     menubar: Option<MenuBar>,
@@ -430,6 +449,7 @@ impl App {
             watcher: None,
             watch_key: String::new(),
             logo: None,
+            folder_art: None,
             wordmark: None,
             menubar: None,
             menubar_failed: false,
@@ -684,6 +704,17 @@ impl App {
             (0, f) => self.toast_error(format!("Annulation impossible pour {f} action(s)")),
             (d, f) => self.toast_error(format!("{d} action(s) annulée(s), {f} impossible(s)")),
         }
+    }
+
+    /// Texture de l'illustration du dossier (chargée une seule fois).
+    pub(super) fn folder_art_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
+        self.folder_art
+            .get_or_insert_with(|| {
+                let img = image::load_from_memory(FOLDER_ART_PNG).expect("illustration du dossier valide").to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                ctx.load_texture("folder-art", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
+            })
+            .clone()
     }
 
     /// Texture du logotype (chargée une seule fois).
@@ -1695,6 +1726,22 @@ fn icon_char(icon: Icon) -> char {
         Icon::Refresh => '\u{e5d5}',    // refresh
         Icon::Tick => '\u{e668}',       // check
         Icon::Undo => '\u{e166}',       // undo
+        Icon::Image => '\u{e3f4}',      // image
+        Icon::Pdf => '\u{e415}',        // picture_as_pdf
+        Icon::Video => '\u{e404}',      // movie
+        Icon::Document => '\u{e873}',   // description
+        Icon::Music => '\u{e405}',      // music_note
+        Icon::Archive => '\u{eb2c}',    // folder_zip
+        Icon::Text => '\u{e262}',       // text_fields
+        Icon::Ruler => '\u{e41c}',      // straighten
+        Icon::Move => '\u{e9a1}',       // drive_file_move
+        Icon::Copy => '\u{e14d}',       // content_copy
+        Icon::Rename => '\u{e9a2}',     // drive_file_rename_outline
+        Icon::Tag => '\u{f05b}',        // sell
+        Icon::Sparkle => '\u{e65f}',    // auto_awesome
+        Icon::Event => '\u{e878}',      // event
+        Icon::Category => '\u{e72c}',   // category
+        Icon::ExpandMore => '\u{e5cf}', // expand_more
     }
 }
 
