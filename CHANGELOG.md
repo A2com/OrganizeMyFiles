@@ -32,6 +32,7 @@ décrite dans `docs/VERSIONNEMENT.md`.
 - Le fichier d'état n'est lisible que par le propriétaire du compte (droits `600`).
 - Documentation : procédure de retour arrière écrite (`docs/VERSIONNEMENT.md`), lignes de recette associées.
 - Sauvegarde : un ancien fichier d'état sans numéro de format est migré automatiquement, règles conservées (une version plus récente que l'appli reste refusée).
+- Dépendances : `notify` 8 → 9 (surveillance des dossiers, correctifs FSEvents sur macOS) et `rfd` 0.18 (sélecteurs de fichiers) ; la chaîne `zbus`/`zvariant` n'est plus tirée sous Linux.
 - Accessibilité : les contrôles dessinés à la main (cartes de choix, tuiles de dossiers, étapes, cases, interrupteurs, curseur, sélecteurs, boutons, pastilles) ont maintenant un libellé et un état pour VoiceOver.
 - Cibles de clic agrandies (cases, interrupteurs, pastilles « Annuler » et croix) ; case vide avec un contour visible ; textes de 12 à 13 px relevés à 13,5 px.
 - Le réglage macOS « Réduire les animations » coupe aussi les animations de l'appli.
