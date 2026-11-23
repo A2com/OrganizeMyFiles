@@ -275,6 +275,12 @@ impl IntroState {
 /// Illustration du dossier (écran Règles, mode simple).
 const FOLDER_ART_PNG: &[u8] = include_bytes!("../../assets/ui/folder.png");
 const INTRO_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/intro-600.png");
+/// Largeurs d'affichage du logotype (points) : barre latérale, écran de bienvenue, « À propos ».
+const WORDMARK_SIDEBAR_W: f32 = 128.0;
+const WORDMARK_INTRO_W: f32 = 170.0;
+const WORDMARK_ABOUT_W: f32 = 150.0;
+/// Logotype « OrganizeMyFiles » (texte blanc, dégradé sur « O » et « My »), généré par `scripts/generer-logo.py`.
+const WORDMARK_PNG: &[u8] = include_bytes!("../../assets/logo/wordmark-white-480.png");
 
 pub struct App {
     tab: Tab,
@@ -327,6 +333,7 @@ pub struct App {
     /// Logo de la barre latérale (chargé au premier affichage).
     logo: Option<egui::TextureHandle>,
     folder_art: Option<egui::TextureHandle>,
+    wordmark: Option<egui::TextureHandle>,
     /// Icône et menu de la barre des menus (macOS).
     menubar: Option<MenuBar>,
     menubar_failed: bool,
@@ -443,6 +450,7 @@ impl App {
             watch_key: String::new(),
             logo: None,
             folder_art: None,
+            wordmark: None,
             menubar: None,
             menubar_failed: false,
             quitting: false,
@@ -709,6 +717,17 @@ impl App {
             .clone()
     }
 
+    /// Texture du logotype (chargée une seule fois).
+    fn wordmark_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
+        self.wordmark
+            .get_or_insert_with(|| {
+                let img = image::load_from_memory(WORDMARK_PNG).expect("logotype valide").to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                ctx.load_texture("wordmark", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
+            })
+            .clone()
+    }
+
     fn intro_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
         self.intro_icon
             .get_or_insert_with(|| {
@@ -812,6 +831,20 @@ impl App {
             egui::FontId::proportional(18.0),
             with_alpha(text_primary(), alpha(f.subtitle * 0.92)),
         );
+
+        // Signature discrète : le logotype en pied d'écran, il apparaît après le bouton.
+        {
+            let mark = self.wordmark_texture(&ctx);
+            let w = WORDMARK_INTRO_W;
+            let h = w * mark.size_vec2().y / mark.size_vec2().x;
+            let rect = Rect::from_center_size(Pos2::new(cx, screen.bottom() - 44.0 - h / 2.0), Vec2::new(w, h));
+            painter.image(
+                mark.id(),
+                rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::from_white_alpha(alpha(f.button * 0.55)),
+            );
+        }
 
         // Clic n'importe où ou Entrée / Espace / Échap : on saute à la fin (sans quitter l'écran).
         let anywhere = ui.interact(screen, ui.id().with("intro-skip-anywhere"), egui::Sense::click());
@@ -2634,8 +2667,13 @@ impl App {
                 ui.ctx().load_texture("app-logo", img, egui::TextureOptions::LINEAR)
             });
             ui.painter().image(logo.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-            ui.add_space(8.0);
-            ui.label(RichText::new("OrganizeMyFiles").size(17.0).family(semibold()).color(Color32::WHITE));
+            ui.add_space(10.0);
+            let mark = self.wordmark_texture(ui.ctx());
+            let width = WORDMARK_SIDEBAR_W;
+            let (rect, resp) =
+                ui.allocate_exact_size(Vec2::new(width, width * mark.size_vec2().y / mark.size_vec2().x), egui::Sense::hover());
+            ui.painter().image(mark.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            resp.on_hover_text("OrganizeMyFiles");
         });
         ui.add_space(22.0);
         ui.horizontal(|ui| {
@@ -4106,10 +4144,16 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 275.0), |ui| {
+        card(ui, Vec2::new(756.0, 305.0), |ui| {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
-            ui.label(RichText::new(format!("OrganizeMyFiles · version {}", env!("CARGO_PKG_VERSION"))).size(14.5).color(text_primary()));
+            let mark = self.wordmark_texture(ui.ctx());
+            let w = WORDMARK_ABOUT_W;
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, w * mark.size_vec2().y / mark.size_vec2().x), egui::Sense::hover());
+            ui.painter().image(mark.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            resp.on_hover_text("OrganizeMyFiles");
+            ui.add_space(4.0);
+            ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(14.5).color(text_primary()));
             ui.add_space(4.0);
             ui.label(
                 RichText::new("Outil libre et open source. Tout reste sur ton Mac : aucun envoi de données (seule la recherche de mises à jour contacte GitHub).").size(13.5).color(text_dim()),
@@ -4163,6 +4207,15 @@ fn save_png(path: &str, shot: &egui::ColorImage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_wordmark_png_decodes_with_the_logo_proportions() {
+        let img = image::load_from_memory(WORDMARK_PNG).expect("logotype valide");
+        let ratio = img.width() as f32 / img.height() as f32;
+        assert!((6.5..7.2).contains(&ratio), "rapport largeur/hauteur du logotype : {ratio}");
+        // Fond transparent : le logotype se pose sur le thème sombre sans cadre.
+        assert_eq!(img.to_rgba8().get_pixel(0, 0)[3], 0);
+    }
 
     #[test]
     fn the_search_box_never_overlaps_the_right_group_of_the_top_bar() {

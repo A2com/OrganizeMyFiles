@@ -22,3 +22,7 @@ app/target/
 
 # Captures d'écran de contrôle
 /captures/
+
+# Python
+__pycache__/
+*.pyc
