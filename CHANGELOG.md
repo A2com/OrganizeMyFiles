@@ -7,6 +7,8 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+## [0.3.0] - 2026-11-23
+
 ### Ajouté
 
 - Journal local de diagnostic (`~/Library/Logs/OrganizeMyFiles/journal.log`, lisible par le seul propriétaire) :
