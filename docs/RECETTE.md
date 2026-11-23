@@ -113,6 +113,13 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [ ] | Nouveau logotype ; « Bienvenue » deux fois plus petit | À faire (Andy, Mac) |
 | [x] | Captures de l'intro, des 3 étapes et de l'en-tête Règles relues | Captures relues (2026-11-23) |
 
+## 3 decies. Icônes illustrées et rendu lisse
+| | Contrôle | État |
+|---|---|---|
+| [ ] | Étapes 1, 2, 3 des règles : icônes illustrées nettes, halo, survol qui grossit, carte choisie lisible | À faire (Andy, Mac) |
+| [ ] | Bords des images, du logo et des formes moins crénelés (écran Retina et externe) | À faire (Andy, Mac) |
+| [x] | Captures des 3 étapes et de la liste des dossiers relues | Captures relues (2026-11-23) |
+
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
 |---|---|---|

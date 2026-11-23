@@ -53,21 +53,7 @@ enum Icon {
     Refresh,
     Tick,
     Undo,
-    Image,
-    Pdf,
-    Video,
-    Document,
-    Music,
-    Archive,
-    Text,
-    Ruler,
-    Move,
-    Copy,
-    Rename,
-    Tag,
     Sparkle,
-    Event,
-    Category,
     ExpandMore,
 }
 
@@ -276,7 +262,6 @@ impl IntroState {
 }
 
 /// Illustration du dossier (écran Règles, mode simple).
-const FOLDER_ART_PNG: &[u8] = include_bytes!("../../assets/ui/folder.png");
 const INTRO_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/intro-600.png");
 /// Taille du mot « Bienvenue » par rapport à sa taille d'origine (réduit de moitié à la demande d'Andy).
 const WORD_SCALE: f32 = 0.5;
@@ -337,7 +322,6 @@ pub struct App {
     watch_key: String,
     /// Logo de la barre latérale (chargé au premier affichage).
     logo: Option<egui::TextureHandle>,
-    folder_art: Option<egui::TextureHandle>,
     wordmark: Option<egui::TextureHandle>,
     /// Icône et menu de la barre des menus (macOS).
     menubar: Option<MenuBar>,
@@ -454,7 +438,6 @@ impl App {
             watcher: None,
             watch_key: String::new(),
             logo: None,
-            folder_art: None,
             wordmark: None,
             menubar: None,
             menubar_failed: false,
@@ -711,36 +694,13 @@ impl App {
         }
     }
 
-    /// Texture de l'illustration du dossier (chargée une seule fois).
-    pub(super) fn folder_art_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
-        self.folder_art
-            .get_or_insert_with(|| {
-                let img = image::load_from_memory(FOLDER_ART_PNG).expect("illustration du dossier valide").to_rgba8();
-                let size = [img.width() as usize, img.height() as usize];
-                ctx.load_texture("folder-art", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
-            })
-            .clone()
-    }
-
     /// Texture du logotype (chargée une seule fois).
     fn wordmark_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
-        self.wordmark
-            .get_or_insert_with(|| {
-                let img = image::load_from_memory(WORDMARK_PNG).expect("logotype valide").to_rgba8();
-                let size = [img.width() as usize, img.height() as usize];
-                ctx.load_texture("wordmark", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
-            })
-            .clone()
+        self.wordmark.get_or_insert_with(|| smooth_texture(ctx, "wordmark", WORDMARK_PNG)).clone()
     }
 
     fn intro_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
-        self.intro_icon
-            .get_or_insert_with(|| {
-                let img = image::load_from_memory(INTRO_ICON_PNG).expect("icône d'introduction valide").to_rgba8();
-                let size = [img.width() as usize, img.height() as usize];
-                ctx.load_texture("intro-icon", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
-            })
-            .clone()
+        self.intro_icon.get_or_insert_with(|| smooth_texture(ctx, "intro-icon", INTRO_ICON_PNG)).clone()
     }
 
     /// Écran d'introduction : icône, « Bienvenue » écrit à la main, présentation et bouton « Commencer »,
@@ -1675,6 +1635,22 @@ fn state_is_live(intro: &Option<IntroState>) -> bool {
 }
 
 /// Halo doux : disque dont l'opacité décroît du centre (`alpha` au centre) vers le bord (transparent).
+/// Réglage des textures d'images : filtrage linéaire et mipmaps (versions réduites précalculées), pour que les images
+/// affichées bien plus petites que leur taille d'origine restent lisses au lieu de crénelées.
+const SMOOTH_TEXTURE: egui::TextureOptions = egui::TextureOptions {
+    magnification: egui::TextureFilter::Linear,
+    minification: egui::TextureFilter::Linear,
+    wrap_mode: egui::TextureWrapMode::ClampToEdge,
+    mipmap_mode: Some(egui::TextureFilter::Linear),
+};
+
+/// Décode un PNG embarqué et en fait une texture lisse.
+fn smooth_texture(ctx: &egui::Context, name: &str, png: &[u8]) -> egui::TextureHandle {
+    let img = image::load_from_memory(png).expect("image embarquée valide").to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    ctx.load_texture(name, egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), SMOOTH_TEXTURE)
+}
+
 fn radial_glow(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32, alpha: f32) {
     const SEGMENTS: usize = 64;
     let mut mesh = egui::epaint::Mesh::default();
@@ -1731,21 +1707,7 @@ fn icon_char(icon: Icon) -> char {
         Icon::Refresh => '\u{e5d5}',    // refresh
         Icon::Tick => '\u{e668}',       // check
         Icon::Undo => '\u{e166}',       // undo
-        Icon::Image => '\u{e3f4}',      // image
-        Icon::Pdf => '\u{e415}',        // picture_as_pdf
-        Icon::Video => '\u{e404}',      // movie
-        Icon::Document => '\u{e873}',   // description
-        Icon::Music => '\u{e405}',      // music_note
-        Icon::Archive => '\u{eb2c}',    // folder_zip
-        Icon::Text => '\u{e262}',       // text_fields
-        Icon::Ruler => '\u{e41c}',      // straighten
-        Icon::Move => '\u{e9a1}',       // drive_file_move
-        Icon::Copy => '\u{e14d}',       // content_copy
-        Icon::Rename => '\u{e9a2}',     // drive_file_rename_outline
-        Icon::Tag => '\u{f05b}',        // sell
         Icon::Sparkle => '\u{e65f}',    // auto_awesome
-        Icon::Event => '\u{e878}',      // event
-        Icon::Category => '\u{e72c}',   // category
         Icon::ExpandMore => '\u{e5cf}', // expand_more
     }
 }
@@ -2678,7 +2640,7 @@ impl App {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(36.0), egui::Sense::hover());
             let logo = self.logo.get_or_insert_with(|| {
                 let img = app_icon_image();
-                ui.ctx().load_texture("app-logo", img, egui::TextureOptions::LINEAR)
+                ui.ctx().load_texture("app-logo", img, SMOOTH_TEXTURE)
             });
             ui.painter().image(logo.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
             ui.add_space(10.0);

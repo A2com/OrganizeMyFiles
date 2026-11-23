@@ -9,6 +9,8 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ### Modifié
 
+- Images et formes plus lisses : textures avec versions réduites précalculées (mipmaps) et lissage matériel des bords (MSAA ×4).
+- Règles (mode simple) : les pictogrammes plats sont remplacés par les icônes illustrées fournies par Andy (`assets/ui/rules/`, préparées par `scripts/generer-icones-regles.sh`) : cartes agrandies, icône sur un halo de sa teinte qui s'intensifie au choix et au survol, dossier illustré pour l'étape 1 et la liste des dossiers.
 - Halos lumineux adoucis (réglage unique `GLOW_SOFTNESS`), pastilles d'icônes plates et plus lisibles, mots clés du résumé en gras seulement.
 - Règles (mode simple) : « Suivant » / « Terminer » à droite ; sélecteur Simple / Avancé avec des espaces réguliers entre les boutons.
 - Logotype remplacé par la nouvelle version fournie par Andy ; « Bienvenue » réduit de moitié sur l'écran d'introduction.
