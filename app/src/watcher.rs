@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use notify::{EventKind, RecursiveMode, Watcher as _};
 
-use crate::engine::{Folder, HistoryEntry, Rule, Runner};
+use crate::engine::{is_ignorable, Folder, HistoryEntry, Rule, Runner};
 use crate::system::SystemCommands;
 
 /// Attente après le dernier événement avant de traiter un fichier.
@@ -96,16 +96,6 @@ impl Drop for Watcher {
 }
 
 // ------------------------------------------------------------ logique pure (testée)
-
-/// Téléchargement ou copie en cours, ou fichier système sans intérêt : on n'y touche pas.
-pub fn is_ignorable(path: &Path) -> bool {
-    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if name == ".ds_store" {
-        return true;
-    }
-    let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    matches!(ext.as_str(), "download" | "crdownload" | "part" | "partial" | "tmp" | "opdownload")
-}
 
 /// Fichiers en attente : on ne traite un fichier qu'une fois qu'il n'a plus bougé pendant `settle`.
 pub struct Debouncer {
@@ -306,7 +296,7 @@ mod tests {
 
     #[test]
     fn partial_downloads_and_system_files_are_ignored() {
-        for n in ["a.crdownload", "b.PART", "c.download", "d.tmp", ".DS_Store"] {
+        for n in ["a.crdownload", "b.PART", "c.download", "d.tmp"] {
             assert!(is_ignorable(Path::new(n)), "{n}");
         }
         for n in ["photo.png", "notes.txt", "archive.zip"] {

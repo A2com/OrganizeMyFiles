@@ -2285,6 +2285,7 @@ fn status_color(s: Status) -> Color32 {
         Status::DryRun => Color32::from_rgb(0x8b, 0x5c, 0xf6),
         Status::BlockedByConflict => Color32::from_rgb(0xf5, 0x8c, 0x2c),
         Status::Failed => Color32::from_rgb(0xe0, 0x5c, 0x5c),
+        Status::Skipped => Color32::from_rgb(0x8a, 0x8f, 0x98),
     }
 }
 
@@ -4047,6 +4048,14 @@ impl App {
                                     with_alpha(status_color(Status::Undone), 38),
                                 );
                             }
+                            if sum.skipped > 0 {
+                                chip(
+                                    ui,
+                                    &format!("{} ignorée{}", sum.skipped, if sum.skipped > 1 { "s" } else { "" }),
+                                    status_color(Status::Skipped),
+                                    with_alpha(status_color(Status::Skipped), 38),
+                                );
+                            }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if sum.undoable > 0
                                     && chip_button(ui, "Annuler le lot", accent, with_alpha(accent, 38))
@@ -4087,7 +4096,8 @@ impl App {
     /// Une ligne compacte : fichier → dossier d'arrivée, action, boutons. Texte tronqué, détail au survol.
     fn history_row(&self, ui: &mut egui::Ui, i: usize, accent: Color32, undo_idx: &mut Option<usize>, reveal: &mut Option<PathBuf>) {
         let e = &self.history[i];
-        let failed = matches!(e.status, Status::Failed | Status::BlockedByConflict);
+        // Échec, conflit ou règle ignorée : la raison s'affiche sous la ligne (couleur du statut).
+        let show_reason = matches!(e.status, Status::Failed | Status::BlockedByConflict | Status::Skipped);
         let frame = egui::Frame::none().inner_margin(egui::Margin::symmetric(4.0, 4.0)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -4119,7 +4129,7 @@ impl App {
                     chip(ui, &history_view::short_action(&e.action_label), text_dim(), glass(14));
                 });
             });
-            if failed {
+            if show_reason {
                 ui.horizontal(|ui| {
                     ui.add_space(22.0);
                     ui.add(egui::Label::new(RichText::new(fr_message(&e.message)).size(13.5).color(status_color(e.status))).wrap());

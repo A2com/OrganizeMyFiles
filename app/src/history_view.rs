@@ -74,8 +74,12 @@ pub fn day_label(created: SystemTime, now: SystemTime) -> String {
     }
 }
 
-/// Nom du fichier traité (forme composée, sans dossier).
+/// Nom du fichier traité (forme composée, sans dossier). Une règle ignorée affiche son propre nom :
+/// aucune entrée fichier n'existe dans ce cas.
 pub fn file_name(e: &HistoryEntry) -> String {
+    if e.status == Status::Skipped {
+        return nfc(&e.rule_name);
+    }
     e.original_path.file_name().map(|n| nfc(&n.to_string_lossy())).unwrap_or_else(|| nfc(&e.original_path.to_string_lossy()))
 }
 
@@ -134,21 +138,23 @@ pub struct BatchSummary {
     pub applied: usize,
     pub failed: usize,
     pub undone: usize,
+    pub skipped: usize,
     pub undoable: usize,
 }
 
 pub fn batch_summary(history: &[HistoryEntry], entries: &[usize]) -> BatchSummary {
-    let mut s = BatchSummary { files: 0, applied: 0, failed: 0, undone: 0, undoable: 0 };
+    let mut s = BatchSummary { files: 0, applied: 0, failed: 0, undone: 0, skipped: 0, undoable: 0 };
     let mut seen = HashSet::new();
     for &i in entries {
         let e = &history[i];
-        if seen.insert(&e.original_path) {
+        if e.status != Status::Skipped && seen.insert(&e.original_path) {
             s.files += 1;
         }
         match e.status {
             Status::Applied => s.applied += 1,
             Status::Failed | Status::BlockedByConflict => s.failed += 1,
             Status::Undone => s.undone += 1,
+            Status::Skipped => s.skipped += 1,
             Status::DryRun => {}
         }
         if is_undoable(e) {
@@ -251,7 +257,26 @@ mod tests {
     fn summary_counts_files_and_statuses() {
         let h = sample();
         let s = batch_summary(&h, &[1, 2]);
-        assert_eq!(s, BatchSummary { files: 2, applied: 1, failed: 1, undone: 0, undoable: 1 });
+        assert_eq!(s, BatchSummary { files: 2, applied: 1, failed: 1, undone: 0, skipped: 0, undoable: 1 });
+    }
+
+    #[test]
+    fn skipped_rule_is_named_and_never_counted_as_failure() {
+        let now = at(102 * DAY + 100);
+        let mut h = sample();
+        let mut e = entry(4, 102 * DAY + 20, Status::Skipped, "", "");
+        e.rule_name = "Brouillon".into();
+        e.action_label = "Règle incomplète".into();
+        e.message = "Règle incomplète — Choisissez le dossier de destination.".into();
+        h.push(e);
+
+        assert_eq!(file_name(&h[4]), "Brouillon");
+        assert_eq!(destination_label(&h[4]), "—");
+        let s = batch_summary(&h, &[4]);
+        assert_eq!(s, BatchSummary { files: 0, applied: 0, failed: 0, undone: 0, skipped: 1, undoable: 0 });
+        assert!(group(&h, now, StatusFilter::Failed, "").iter().flat_map(|d| &d.batches).flat_map(|b| &b.entries).all(|&i| i != 4));
+        let all = group(&h, now, StatusFilter::All, "");
+        assert_eq!(all[0].batches[0].entries, vec![4]);
     }
 
     #[test]

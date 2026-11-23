@@ -276,13 +276,7 @@ fn conditions_ready(conditions: &[Condition]) -> Result<(), &'static str> {
 
 fn action_ready(actions: &[Action]) -> Result<(), &'static str> {
     let [action] = actions else { return Err("Choisissez ce qu'il faut faire des fichiers.") };
-    let missing = |key: &str| action.param(key).is_empty();
-    match action.kind {
-        ActionKind::Move | ActionKind::Copy if missing("destination") => Err("Choisissez le dossier de destination."),
-        ActionKind::Rename if missing("pattern") => Err("Indiquez le nouveau nom."),
-        ActionKind::AddTag if missing("tags") => Err("Indiquez l'étiquette à ajouter."),
-        _ => Ok(()),
-    }
+    action.invalid_reason().map_or(Ok(()), Err)
 }
 
 /// « 30 days » → (« 30 », « jours ») ; « 100 MB » → (« 100 », « MB »). Sert aux champs « nombre + unité ».

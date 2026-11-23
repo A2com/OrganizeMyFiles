@@ -99,9 +99,9 @@ pub fn tooltip(info: &MenuInfo) -> String {
     format!("OrganizeMyFiles · {} · {}", status_line(info), counts_line(info))
 }
 
-/// « Dernier rangement : il y a 5 min · 12 fichiers » d'après le dernier lot réel (hors aperçu).
+/// « Dernier rangement : il y a 5 min · 12 fichiers » d'après le dernier lot réel (hors aperçu et règle ignorée).
 pub fn last_batch_line(history: &[HistoryEntry], now: SystemTime) -> Option<String> {
-    let last = history.iter().rev().find(|e| e.status != Status::DryRun)?;
+    let last = history.iter().rev().find(|e| !matches!(e.status, Status::DryRun | Status::Skipped))?;
     let files: HashSet<_> =
         history.iter().filter(|e| e.batch_id == last.batch_id && e.status == Status::Applied).map(|e| &e.original_path).collect();
     let what = match files.len() {
@@ -176,5 +176,10 @@ mod tests {
         assert_eq!(last_batch_line(&h, now).unwrap(), "Dernier rangement : il y a 5 min · 2 fichiers");
         assert_eq!(last_batch_line(&[], now), None);
         assert_eq!(last_batch_line(&[entry(1, Status::DryRun, "/a", 5, now)], now), None);
+        assert_eq!(
+            last_batch_line(&h.iter().cloned().chain([entry(4, Status::Skipped, "", 1, now)]).collect::<Vec<_>>(), now).unwrap(),
+            "Dernier rangement : il y a 5 min · 2 fichiers",
+            "une règle ignorée ne remplace pas le dernier vrai rangement"
+        );
     }
 }
