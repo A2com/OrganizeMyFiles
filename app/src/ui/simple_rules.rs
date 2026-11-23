@@ -416,6 +416,47 @@ pub fn rule_sentence(rule: &Rule, folders: &[Folder]) -> String {
     rule_sentence_parts(rule, folders).into_iter().map(|(text, _)| text).collect()
 }
 
+/// Écran affiché par le mode simple des règles : accueil, assistant en trois étapes, ou confirmation d'une règle terminée.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SimpleView {
+    Home,
+    Wizard,
+    Done(u64),
+}
+
+/// Une règle résumée sur l'écran d'accueil.
+#[derive(Debug, PartialEq)]
+pub struct HomeCard {
+    pub rule_id: u64,
+    pub name: String,
+    pub sentence: String,
+    pub enabled: bool,
+    /// Règle que l'assistant ne sait pas présenter (réglages avancés) : elle reste intacte.
+    pub advanced_only: bool,
+    pub art: RuleArt,
+    pub tint: Color32,
+}
+
+/// Cartes de l'écran d'accueil, dans l'ordre `order` (identifiants de règles). Une règle inconnue est ignorée.
+pub fn home_cards(rules: &[Rule], order: &[u64], folders: &[Folder]) -> Vec<HomeCard> {
+    order
+        .iter()
+        .filter_map(|id| rules.iter().find(|r| r.id == *id))
+        .map(|r| {
+            let (art, tint) = r.actions.first().map_or((RuleArt::Folder, INDIGO), |a| action_icon(&a.kind));
+            HomeCard {
+                rule_id: r.id,
+                name: r.name.clone(),
+                sentence: rule_sentence(r, folders),
+                enabled: r.enabled,
+                advanced_only: !is_simple_compatible(r),
+                art,
+                tint,
+            }
+        })
+        .collect()
+}
+
 // ------------------------------------------------------------------ affichage
 
 const STEP_NAMES: [&str; 3] = ["Dossiers", "Conditions", "Action"];
@@ -428,6 +469,9 @@ const CARD_W: f32 = 148.0;
 const CARD_H: f32 = 134.0;
 /// Côté de l'icône illustrée d'une carte.
 const ART_SIZE: f32 = 78.0;
+/// Illustration de l'accueil et hauteur d'une carte de règle.
+const HOME_ART_SIZE: f32 = 110.0;
+const HOME_CARD_H: f32 = 66.0;
 const FOLDER_TILE_W: f32 = 262.0;
 const FOLDER_TILE_H: f32 = 58.0;
 /// Au-delà de ce nombre de dossiers suivis, le panneau de sélection propose une recherche.
@@ -566,7 +610,7 @@ impl App {
                             self.simple_step = step + 1;
                         }
                     } else if btn(ui, "Terminer", Btn::Primary, accent, Some(Icon::Tick)).clicked() {
-                        self.toast("Règle enregistrée : elle s'applique dès maintenant.".to_string());
+                        self.simple_view = SimpleView::Done(self.rules[idx].id);
                         self.simple_step = 1;
                     }
                 });
@@ -576,6 +620,115 @@ impl App {
         self.summary_card(ui, idx, accent, step);
         ui.add_space(14.0);
         moved
+    }
+
+    /// Accueil du mode simple : bouton « Ajouter une nouvelle règle », puis les règles existantes (un clic les ouvre).
+    pub(super) fn simple_home_ui(&mut self, ui: &mut egui::Ui) {
+        let accent = self.accent();
+        let dur = self.motion_secs();
+        let ctx = ui.ctx().clone();
+        let float = if self.animated() { (ctx.input(|i| i.time) as f32 * 1.2).sin() * 2.5 } else { 0.0 };
+        let mut add = false;
+        panel_card_with(ui, None, 28.0, |ui| {
+            ui.vertical_centered(|ui| {
+                let (slot, _) = ui.allocate_exact_size(Vec2::new(150.0, 132.0), egui::Sense::hover());
+                radial_glow(ui.painter(), slot.center(), 84.0, accent, 70.0);
+                let art = RuleArt::FolderMove;
+                paint_art(ui.painter(), &ctx, art, slot.center() + Vec2::new(0.0, float), HOME_ART_SIZE, 1.0);
+                if self.animated() {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(40));
+                }
+                ui.add_space(6.0);
+                ui.label(RichText::new("Rangez vos fichiers en trois étapes").size(24.0).family(bold()).color(text_primary()));
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Choisissez les dossiers, dites quels fichiers sont concernés, puis ce qu'il faut en faire.")
+                        .size(15.0)
+                        .color(text_dim()),
+                );
+                ui.add_space(18.0);
+                if pill(ui, "Ajouter une nouvelle règle", accent, true, true).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    add = true;
+                }
+            });
+        });
+        let order = self.rule_order();
+        let cards = home_cards(&self.rules, &order, &self.folders);
+        let mut open: Option<u64> = None;
+        if !cards.is_empty() {
+            ui.add_space(18.0);
+            ui.label(caps("VOS RÈGLES"));
+            ui.add_space(6.0);
+            for card in &cards {
+                if rule_home_card(ui, card, dur).clicked() {
+                    open = Some(card.rule_id);
+                }
+                ui.add_space(8.0);
+            }
+        }
+        if add {
+            self.new_rule();
+        }
+        if let Some(rid) = open {
+            self.selected_rule = order.iter().position(|id| *id == rid).unwrap_or(0);
+            self.simple_step = 1;
+            self.simple_view = SimpleView::Wizard;
+        }
+    }
+
+    /// Confirmation après « Terminer » : coche animée, phrase de la règle, « Terminé » ramène à l'accueil.
+    pub(super) fn simple_done_ui(&mut self, ui: &mut egui::Ui, rid: u64) {
+        let accent = self.accent();
+        let Some(idx) = self.rules.iter().position(|r| r.id == rid) else {
+            self.simple_view = SimpleView::Home;
+            return;
+        };
+        let ctx = ui.ctx().clone();
+        let started_id = egui::Id::new(("simple-done-started", rid));
+        let now = ctx.input(|i| i.time);
+        let started: f64 = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(started_id, || now));
+        let t = if self.motion_secs() > 0.0 { ease(((now - started) / 0.7) as f32) } else { 1.0 };
+        if t < 1.0 {
+            ctx.request_repaint();
+        }
+        let parts = rule_sentence_parts(&self.rules[idx], &self.folders);
+        let (mut finish, mut another) = (false, false);
+        panel_card_with(ui, None, 32.0, |ui| {
+            ui.vertical_centered(|ui| {
+                let (slot, _) = ui.allocate_exact_size(Vec2::splat(132.0), egui::Sense::hover());
+                let painter = ui.painter();
+                radial_glow(painter, slot.center(), 90.0 * t, accent, 90.0 * t);
+                painter.circle_filled(slot.center(), 42.0 * t, accent);
+                if t > 0.45 {
+                    draw_icon(painter, slot.center(), Icon::Tick, Color32::WHITE, 46.0 * t);
+                }
+                ui.add_space(8.0);
+                ui.label(RichText::new("Règle enregistrée").size(26.0).family(bold()).color(text_primary()));
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Le réglage est appliqué : vos fichiers seront rangés ainsi dès maintenant.")
+                        .size(15.0)
+                        .color(text_dim()),
+                );
+                ui.add_space(16.0);
+                ui.label(sentence_job(parts, 18.0, (ui.available_width() - 40.0).max(120.0), Align::Center));
+                ui.add_space(22.0);
+                if btn(ui, "Terminé", Btn::Primary, accent, Some(Icon::Tick)).clicked() {
+                    finish = true;
+                }
+                ui.add_space(8.0);
+                if btn(ui, "Ajouter une autre règle", Btn::Ghost, accent, Some(Icon::Add)).clicked() {
+                    another = true;
+                }
+            });
+        });
+        if finish || another {
+            ctx.data_mut(|d| d.remove_temp::<f64>(started_id));
+            self.simple_view = SimpleView::Home;
+        }
+        if another {
+            self.new_rule();
+        }
     }
 
     /// « En résumé » : la règle en une phrase, mise en évidence (fond et contour d'accent, mots clés colorés).
@@ -589,14 +742,7 @@ impl App {
                 ui.label(RichText::new("EN RÉSUMÉ").size(13.5).family(semibold()).color(lighten(accent, 40)));
             });
             ui.add_space(10.0);
-            let mut job = egui::text::LayoutJob::default();
-            job.wrap.max_width = ui.available_width();
-            for (text, key) in parts {
-                // Mots clés en gras seulement : même couleur que le reste de la phrase, pas de fond.
-                let font = if key { egui::FontId::new(19.5, semibold()) } else { egui::FontId::proportional(19.5) };
-                job.append(&text, 0.0, egui::text::TextFormat { font_id: font, color: text_primary(), ..Default::default() });
-            }
-            ui.label(job);
+            ui.label(sentence_job(parts, 19.5, ui.available_width(), Align::LEFT));
             if step == LAST_STEP {
                 ui.add_space(12.0);
                 ui.label(
@@ -1034,6 +1180,57 @@ impl App {
 }
 
 /// Tuile d'un dossier suivi (panneau de l'étape 1) : pastille, nom, chemin court, coche animée.
+/// La phrase d'une règle : mots clés en gras seulement, même couleur que le reste (pas de fond).
+fn sentence_job(parts: Vec<(String, bool)>, size: f32, width: f32, halign: Align) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = width;
+    job.halign = halign;
+    for (text, key) in parts {
+        let font = if key { egui::FontId::new(size, semibold()) } else { egui::FontId::proportional(size) };
+        job.append(&text, 0.0, egui::text::TextFormat { font_id: font, color: text_primary(), ..Default::default() });
+    }
+    job
+}
+
+/// Carte d'une règle sur l'écran d'accueil : icône de son action, nom, phrase d'une ligne, état. Un clic l'ouvre.
+fn rule_home_card(ui: &mut egui::Ui, card: &HomeCard, dur: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), HOME_CARD_H), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{}. {}", card.name, card.sentence)));
+    let ctx = ui.ctx().clone();
+    let hover = ctx.animate_bool_with_time(resp.id.with("hover"), resp.hovered(), dur);
+    let painter = ui.painter();
+    painter.rect_filled(rect, Rounding::same(14.0), glass((12.0 + 10.0 * hover) as u8));
+    painter.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0_f32, glass(22)));
+    let center = Pos2::new(rect.left() + 16.0 + 22.0, rect.center().y);
+    radial_glow(painter, center, 28.0, card.tint, 50.0 + 40.0 * hover);
+    paint_art(painter, &ctx, card.art, center, 44.0, 1.0);
+    let (label, color) = if card.advanced_only {
+        ("Réglages avancés", AMBER)
+    } else if card.enabled {
+        ("Active", GREEN)
+    } else {
+        ("Désactivée", text_dim())
+    };
+    let font = egui::FontId::new(13.5, semibold());
+    let galley = painter.layout_no_wrap(label.to_string(), font, color);
+    let chip = Rect::from_center_size(
+        Pos2::new(rect.right() - 16.0 - (galley.size().x + 20.0) / 2.0, rect.center().y),
+        Vec2::new(galley.size().x + 20.0, 24.0),
+    );
+    painter.rect_filled(chip, Rounding::same(12.0), with_alpha(CANVAS, 140));
+    painter.rect_filled(chip, Rounding::same(12.0), with_alpha(color, 38));
+    painter.galley(Pos2::new(chip.left() + 10.0, chip.center().y - galley.size().y / 2.0), galley, color);
+    let text_x = center.x + 22.0 + 16.0;
+    let max_w = (chip.left() - 16.0 - text_x).max(40.0);
+    let name_font = egui::FontId::new(15.5, semibold());
+    let name = ellipsize(painter, &card.name, &name_font, max_w);
+    painter.text(Pos2::new(text_x, rect.top() + 14.0), egui::Align2::LEFT_TOP, name, name_font, text_primary());
+    let small = egui::FontId::proportional(13.5);
+    let sentence = ellipsize(painter, &card.sentence, &small, max_w);
+    painter.text(Pos2::new(text_x, rect.top() + 38.0), egui::Align2::LEFT_TOP, sentence, small, text_dim());
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 fn folder_tile(ui: &mut egui::Ui, name: &str, path: &str, selected: bool, accent: Color32, dur: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(FOLDER_TILE_W, FOLDER_TILE_H), egui::Sense::click());
     let ctx = ui.ctx().clone();
@@ -1115,6 +1312,24 @@ mod tests {
         let mut a = Action::new(ActionKind::Move);
         a.params.insert("destination".into(), dest.into());
         a
+    }
+
+    #[test]
+    fn the_home_lists_the_rules_in_order_with_sentence_and_state() {
+        let folders = vec![folder(1, "/Users/x/Downloads")];
+        let mut images = rule(vec![(PRESETS[0].make)()], vec![move_to("/x")]);
+        images.name = "Images".into();
+        let mut trash = rule(vec![], vec![Action::new(ActionKind::Trash)]);
+        (trash.id, trash.enabled) = (2, false);
+        let mut advanced = rule(vec![], vec![]);
+        (advanced.id, advanced.recursion_depth) = (3, 2);
+
+        let cards = home_cards(&[images, trash, advanced], &[2, 1, 99, 3], &folders);
+        assert_eq!(cards.iter().map(|c| c.rule_id).collect::<Vec<_>>(), vec![2, 1, 3], "ordre demandé, règle inconnue ignorée");
+        assert_eq!((cards[0].enabled, cards[0].art), (false, RuleArt::FolderDelete));
+        assert_eq!((cards[1].name.as_str(), cards[1].art), ("Images", RuleArt::FolderMove));
+        assert!(cards[1].sentence.contains("Downloads"), "la phrase nomme le dossier : {}", cards[1].sentence);
+        assert!(!cards[1].advanced_only && cards[2].advanced_only);
     }
 
     #[test]

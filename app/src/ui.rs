@@ -20,6 +20,7 @@ use crate::tags;
 use crate::toast::{self, Toast, ToastKind};
 use crate::update;
 use crate::watcher::{self, WatchConfig, Watcher};
+use simple_rules::SimpleView;
 
 // ------------------------------------------------------------------- theme
 
@@ -286,6 +287,8 @@ pub struct App {
     selected_rule: usize,
     /// Étape courante de l'assistant du mode simple (1 à 3).
     simple_step: u8,
+    /// Écran du mode simple des règles : accueil, assistant ou confirmation.
+    simple_view: SimpleView,
     app_enabled: bool,
     launch_at_login: bool,
     /// Passage complet automatique toutes les N minutes ; 0 = désactivé.
@@ -385,6 +388,14 @@ impl App {
             let read = |key: &str| std::env::var(key).ok().and_then(|v| v.parse::<usize>().ok());
             app.simple_step = read("OMF_RULES_STEP").map_or(1, |n| n.clamp(1, 3) as u8);
             app.selected_rule = read("OMF_RULE_INDEX").unwrap_or(0);
+            // OMF_RULES_VIEW : home (par défaut), wizard ou done ; OMF_RULES_STEP force l'assistant.
+            let done = app.rule_order().get(app.selected_rule).copied().map(SimpleView::Done);
+            app.simple_view = match std::env::var("OMF_RULES_VIEW").as_deref() {
+                Ok("done") => done.unwrap_or(SimpleView::Home),
+                Ok("wizard") => SimpleView::Wizard,
+                _ if std::env::var_os("OMF_RULES_STEP").is_some() => SimpleView::Wizard,
+                _ => SimpleView::Home,
+            };
         }
         app
     }
@@ -410,6 +421,7 @@ impl App {
             add_folder_text: String::new(),
             selected_rule: 0,
             simple_step: 1,
+            simple_view: SimpleView::Home,
             app_enabled: true,
             launch_at_login: false,
             auto_organize_minutes: 0,
@@ -2604,6 +2616,7 @@ impl App {
             actions: vec![action],
         });
         self.simple_step = 1;
+        self.simple_view = SimpleView::Wizard;
         self.selected_rule = self.rule_order().iter().position(|r| *r == id).unwrap_or(0);
         self.tab = Tab::Rules;
     }
@@ -2613,6 +2626,8 @@ impl App {
         let first = self.rule_order().iter().position(|id| self.rules.iter().any(|r| r.id == *id && r.folder_ids.contains(&folder_id)));
         if let Some(pos) = first {
             self.selected_rule = pos;
+            self.simple_step = 1;
+            self.simple_view = SimpleView::Wizard;
         }
         self.tab = Tab::Rules;
     }
@@ -3549,6 +3564,7 @@ impl App {
                 if let Some(i) = segmented(ui, egui::Id::new("rules-mode"), &["Simple", "Avancé"], current, SKY_DEEP) {
                     self.rules_mode = if i == 0 { RulesMode::Simple } else { RulesMode::Advanced };
                     self.simple_step = 1;
+                    self.simple_view = SimpleView::Home;
                 }
             });
         });
@@ -3565,7 +3581,18 @@ impl App {
             return;
         }
 
+        let simple = self.rules_mode == RulesMode::Simple;
+        match self.simple_view {
+            SimpleView::Home if simple => return self.simple_home_ui(ui),
+            SimpleView::Done(rid) if simple => return self.simple_done_ui(ui, rid),
+            _ => {}
+        }
         let order = self.rule_order();
+        if order.is_empty() && simple {
+            self.simple_view = SimpleView::Home;
+            ui.ctx().request_repaint();
+            return;
+        }
         if order.is_empty() {
             ui.label(RichText::new("Aucune règle.").color(text_dim()));
             ui.add_space(8.0);
@@ -3579,19 +3606,25 @@ impl App {
 
         // ---- onglets de règles (filtrés par la recherche globale)
         let q = self.search.trim().to_lowercase();
-        ui.horizontal_wrapped(|ui| {
-            for (i, rid) in order.iter().enumerate() {
-                let Some(r) = self.rules.iter().find(|r| r.id == *rid) else { continue };
-                if !q.is_empty() && i != sel && !self.rule_matches(r, &q) {
-                    continue;
-                }
-                let name: String = r.name.chars().take(32).collect();
-                if rule_tab(ui, &format!("Règle {} : {}", i + 1, name), i == sel, r.enabled, accent).clicked() {
-                    self.selected_rule = i;
-                    self.simple_step = 1;
-                }
+        if simple {
+            if btn(ui, "Toutes les règles", Btn::Ghost, accent, Some(Icon::Undo)).clicked() {
+                self.simple_view = SimpleView::Home;
             }
-        });
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                for (i, rid) in order.iter().enumerate() {
+                    let Some(r) = self.rules.iter().find(|r| r.id == *rid) else { continue };
+                    if !q.is_empty() && i != sel && !self.rule_matches(r, &q) {
+                        continue;
+                    }
+                    let name: String = r.name.chars().take(32).collect();
+                    if rule_tab(ui, &format!("Règle {} : {}", i + 1, name), i == sel, r.enabled, accent).clicked() {
+                        self.selected_rule = i;
+                        self.simple_step = 1;
+                    }
+                }
+            });
+        }
         ui.add_space(14.0);
 
         let rid = order[sel];
@@ -3659,6 +3692,9 @@ impl App {
         if deleted {
             self.rules.retain(|r| r.id != rid);
             self.selected_rule = sel.saturating_sub(1);
+            if simple {
+                self.simple_view = SimpleView::Home;
+            }
             return;
         }
         if moved {

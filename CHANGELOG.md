@@ -7,6 +7,15 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+### Ajouté
+
+- Règles (mode simple) : **écran d'accueil** (bouton « Ajouter une nouvelle règle » et liste des règles existantes, un clic ouvre l'assistant) et **écran de confirmation** après « Terminer » (coche animée, phrase de la règle, « Terminé » ramène à l'accueil). Un lien « Toutes les règles » permet de revenir à l'accueil depuis l'assistant.
+
+### Corrigé
+
+- Logos et icônes : plus de crénelage ni de flou. Chaque image est réduite à sa taille d'affichage exacte (filtre de Lanczos, alpha prémultiplié) et posée sur la grille de pixels ; les mipmaps sont retirés. Le logotype embarqué est la version fournie (2216 px).
+- Réglages : cartes à hauteur automatique et pleine largeur (plus de vide sous « Purger l'ancien historique », elles suivent le redimensionnement de la fenêtre).
+
 ### Modifié
 
 - Accessibilité : les contrôles dessinés à la main (cartes de choix, tuiles de dossiers, étapes, cases, interrupteurs, curseur, sélecteurs, boutons, pastilles) ont maintenant un libellé et un état pour VoiceOver.
