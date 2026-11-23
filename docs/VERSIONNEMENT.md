@@ -23,6 +23,18 @@ build séparé. On n'en ajoutera un que si la notarisation ou l'App Store l'exig
 Tant qu'on reste en `0.1.x`, les correctifs incrémentent le dernier chiffre. Le numéro est choisi **au moment de
 la préparation de version**, pas dans chaque PR de code : cela évite les conflits sur `CHANGELOG.md`.
 
+## Signature et distribution
+
+Décision du 2026-11-23 : l'appli reste signée **« ad hoc »** (`codesign --sign -` dans `scripts/emballer-mac.sh`),
+sans compte Apple Developer et sans notarisation. Conséquences assumées :
+
+- au premier lancement, macOS demande **clic droit › Ouvrir** (ou Réglages Système › Confidentialité et sécurité) ;
+- macOS ne peut pas attester l'origine de l'appli ni de ses mises à jour : le contrôle d'intégrité repose sur
+  l'empreinte **SHA-256 publiée par GitHub**, que l'appli exige désormais avant toute installation automatique
+  (sans empreinte, l'installation est refusée et le téléchargement manuel est proposé) ;
+- toute diffusion plus large (hors du cercle habituel) doit réévaluer cette décision : compte Apple Developer,
+  signature « Developer ID », notarisation.
+
 ## CHANGELOG
 
 `CHANGELOG.md` suit le format Keep a Changelog, en français, avec les sections `Ajouté`, `Modifié`, `Corrigé`,
