@@ -71,6 +71,11 @@ impl App {
         for msg in messages {
             match msg {
                 Msg::Checked { manual, result } => {
+                    match &result {
+                        Ok(Some(release)) => crate::journal::info(format!("mise à jour : version {} disponible", release.version)),
+                        Ok(None) => crate::journal::info("mise à jour : à jour"),
+                        Err(e) => crate::journal::warn(format!("mise à jour : vérification impossible — {e}")),
+                    }
                     self.update = match result {
                         Ok(Some(release)) => State::Available(release),
                         Ok(None) => State::UpToDate,
@@ -83,8 +88,14 @@ impl App {
                     }
                 }
                 Msg::Progress(step) => self.update = State::Installing(step),
-                Msg::Installed(Ok(())) => self.finish_update(),
-                Msg::Installed(Err(e)) => self.update = State::Failed(e),
+                Msg::Installed(Ok(())) => {
+                    crate::journal::info("mise à jour : installée, redémarrage");
+                    self.finish_update();
+                }
+                Msg::Installed(Err(e)) => {
+                    crate::journal::warn(format!("mise à jour : installation refusée ou échouée — {e}"));
+                    self.update = State::Failed(e);
+                }
             }
         }
     }

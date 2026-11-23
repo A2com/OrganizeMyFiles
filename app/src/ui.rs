@@ -397,6 +397,14 @@ impl App {
                 _ => SimpleView::Home,
             };
         }
+        if app.screenshot.is_none() {
+            crate::journal::info(format!(
+                "démarrage {} : {} dossiers, {} règles",
+                env!("CARGO_PKG_VERSION"),
+                app.folders.len(),
+                app.rules.len()
+            ));
+        }
         app
     }
 
@@ -666,6 +674,19 @@ impl App {
             }
         }
         let failed = outcome.history.iter().filter(|e| matches!(e.status, Status::Failed | Status::BlockedByConflict)).count();
+        crate::journal::info(format!(
+            "{}lot {} : {} scannés, {} retenus, {} actions, {} échecs",
+            if dry_run { "aperçu " } else { "" },
+            self.next_batch - 1,
+            outcome.scanned,
+            outcome.matched,
+            actions,
+            failed
+        ));
+        for entry in outcome.history.iter().filter(|e| matches!(e.status, Status::Failed | Status::BlockedByConflict)) {
+            let name = entry.original_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            crate::journal::warn(format!("règle « {} » : {} sur {} — {}", entry.rule_name, entry.status.label(), name, entry.message));
+        }
         for e in outcome.history {
             self.history.push(e);
         }
