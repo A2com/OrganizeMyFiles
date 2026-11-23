@@ -7,17 +7,24 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+### Ajouté
+
+- Sauvegarde de l'état : avant chaque écriture, la version précédente de `state.json` est conservée en
+  `state.json.bak`. Un fichier illisible (ou d'un format plus récent) est mis de côté et l'appli repart de cette
+  copie de secours, avec un message explicite — les règles ne sont plus perdues.
+- Logotype « OrganizeMyFiles » (SVG fourni par Andy) intégré avec discrétion : barre latérale, pied de l'écran de bienvenue, Réglages › À propos.
+
 ### Modifié
 
+- Mise à jour : sans empreinte SHA-256 publiée par GitHub, l'installation automatique est refusée (le bandeau
+  propose « Télécharger ») au lieu d'installer un fichier non vérifié.
+- Le fichier d'état n'est lisible que par le propriétaire du compte (droits `600`).
+- Documentation : procédure de retour arrière écrite (`docs/VERSIONNEMENT.md`), lignes de recette associées.
 - Halos lumineux adoucis (réglage unique `GLOW_SOFTNESS`), pastilles d'icônes plates et plus lisibles, mots clés du résumé en gras seulement.
 - Règles (mode simple) : « Suivant » / « Terminer » à droite ; sélecteur Simple / Avancé avec des espaces réguliers entre les boutons.
 - Logotype remplacé par la nouvelle version fournie par Andy ; « Bienvenue » réduit de moitié sur l'écran d'introduction.
 - Installateur `.dmg` illustré : fond, icône de l'appli à gauche, raccourci « Applications » avec son icône à droite (glisser-déposer).
 - Règles (mode simple) plus « friendly » : grande illustration du dossier qui déroule, avec animation, la liste de tous les dossiers suivis ; modèles de conditions et actions en cartes illustrées (pictogrammes colorés, état choisi, coche) ; frise d'étapes à pastilles ; carte « En résumé » mise en évidence (mots clés surlignés) ; animations coupées en mouvement réduit.
-
-### Ajouté
-
-- Logotype « OrganizeMyFiles » (SVG fourni par Andy) intégré avec discrétion : barre latérale, pied de l'écran de bienvenue, Réglages › À propos.
 
 ### Corrigé
 

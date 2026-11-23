@@ -102,9 +102,36 @@ Pour qu'une release soit proposée aux utilisateurs :
 - le **tag** est `vX.Y.Z` (le « v » est ignoré à la lecture) et la version dépasse celle de l'appli installée ;
 - la release contient le fichier `OrganizeMyFiles-X.Y.Z.dmg` produit par `scripts/emballer-mac.sh` ; le `.dmg` doit
   contenir `OrganizeMyFiles.app` à sa racine ;
-- GitHub calcule l'empreinte SHA-256 du fichier ; l'appli la vérifie avant d'installer.
+- GitHub calcule l'empreinte SHA-256 du fichier ; l'appli la vérifie avant d'installer. **Sans empreinte publiée,
+  l'installation automatique est refusée** : le bandeau propose alors « Télécharger » (page de la version).
 
 Une release marquée « pre-release » ou « brouillon » n'est jamais proposée (l'API `latest` les ignore).
+
+## Retour arrière
+
+À faire quand une version publiée casse l'appli ou range les fichiers de travers. Le retour arrière se fait sur le
+poste concerné, sans toucher au dépôt ni aux tags.
+
+```bash
+# 1. Récupérer l'installateur de la version précédente (remplacer N-1 par le numéro voulu)
+curl -L -o ~/Downloads/OrganizeMyFiles-N-1.dmg \
+  https://github.com/A2com/OrganizeMyFiles/releases/download/vN-1/OrganizeMyFiles-N-1.dmg
+
+# 2. Remplacer l'appli (Fermer OrganizeMyFiles d'abord : menu OrganizeMyFiles > Quitter)
+open ~/Downloads/OrganizeMyFiles-N-1.dmg
+# glisser OrganizeMyFiles sur Applications, en confirmant « Remplacer »
+
+# 3. Vérifier la version installée, puis relancer
+plutil -extract CFBundleShortVersionString raw /Applications/OrganizeMyFiles.app/Contents/Info.plist
+```
+
+- **Données** : elles restent dans `~/Library/Application Support/OrganizeMyFiles/`. Une version plus ancienne relit
+  le même format (`schema_version` 1). Si le format avait changé, elle met `state.json` de côté
+  (`state.corrupt-<horodatage>.json`) et repart de `state.json.bak` : garder les deux fichiers avant de rétrograder.
+- **Mise à jour automatique ratée** : l'installateur remet déjà l'ancienne appli en place en cas d'échec
+  (`OrganizeMyFiles.app.old`) ; aucune action de ta part.
+- **Durée** : environ 2 minutes (téléchargement compris). **Responsable** : Andy.
+- **Dernier essai** : 2026-11-23, Mac Studio, 0.2.1 → 0.2.0 (voir `docs/RECETTE.md`, section 3 undecies).
 
 ## Fabrication du `.dmg`
 
