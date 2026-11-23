@@ -127,6 +127,17 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [ ] | Navigation au clavier (Tab) : les contrôles reçoivent le focus | À faire (Andy, Mac) |
 | [ ] | Réglages Système › Accessibilité › Réduire les animations : le fond et le dossier ne bougent plus | À faire (Andy, Mac) |
 
+## 3 undecies. Sauvegarde, restauration et retour arrière
+| | Contrôle | État |
+|---|---|---|
+| [x] | Copie de secours : après deux modifications, `state.json` et `state.json.bak` existent ; la première écriture n'en crée pas | Auto (2026-11-23) |
+| [x] | État corrompu : `state.json` illisible → mise de côté en `state.corrupt-<date>.json`, **restauration automatique** depuis `state.json.bak` et réécriture du fichier principal | Auto (2026-11-23, tests + essai Mac Studio : 6 dossiers, 12 règles, 321 entrées retrouvés) |
+| [x] | Fichier d'état lisible par le seul propriétaire (droits `600`, il contient des chemins de fichiers) | Auto (2026-11-23) |
+| [ ] | À la main : modifier une règle, quitter, vérifier dans le Finder que `state.json` et `state.json.bak` appartiennent au compte (« andy seulement ») | À faire (Andy, Mac) |
+| [ ] | À la main : copier `state.json.bak` de côté, remplacer `state.json` par `{`, relancer : l'appli affiche « copie de secours restaurée » et retrouve les règles | À faire (Andy, Mac) |
+| [x] | Retour arrière (`docs/VERSIONNEMENT.md` › Retour arrière) : 0.2.1 → 0.2.0 → 0.2.1 sur le Mac Studio, état conservé (aucune quarantaine) | Auto (2026-11-23, Mac Studio) |
+| [ ] | À la main sur ton Mac : suivre la procédure de retour arrière puis revenir à la version courante ; dossiers, règles et historique conservés | À faire (Andy, Mac) |
+
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
 |---|---|---|

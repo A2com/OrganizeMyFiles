@@ -9,15 +9,24 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ### Ajouté
 
+- Sauvegarde de l'état : avant chaque écriture, la version précédente de `state.json` est conservée en
+  `state.json.bak`. Un fichier illisible (ou d'un format plus récent) est mis de côté et l'appli repart de cette
+  copie de secours, avec un message explicite — les règles ne sont plus perdues.
 - Règles (mode simple) : **écran d'accueil** (bouton « Ajouter une nouvelle règle » et liste des règles existantes, un clic ouvre l'assistant) et **écran de confirmation** après « Terminer » (coche animée, phrase de la règle, « Terminé » ramène à l'accueil). Un lien « Toutes les règles » permet de revenir à l'accueil depuis l'assistant.
+- Logotype « OrganizeMyFiles » (SVG fourni par Andy) intégré avec discrétion : barre latérale, pied de l'écran de bienvenue, Réglages › À propos.
 
 ### Corrigé
 
 - Logos et icônes : plus de crénelage ni de flou. Chaque image est réduite à sa taille d'affichage exacte (filtre de Lanczos, alpha prémultiplié) et posée sur la grille de pixels ; les mipmaps sont retirés. Le logotype embarqué est la version fournie (2216 px).
 - Réglages : cartes à hauteur automatique et pleine largeur (plus de vide sous « Purger l'ancien historique », elles suivent le redimensionnement de la fenêtre).
+- Écran de bienvenue : « Bienvenue » s'écrit en un geste continu (lettres liées, stylo à vitesse régulière, point du « i » en dernier) au lieu de lettres posées les unes après les autres.
 
 ### Modifié
 
+- Mise à jour : sans empreinte SHA-256 publiée par GitHub, l'installation automatique est refusée (le bandeau
+  propose « Télécharger ») au lieu d'installer un fichier non vérifié.
+- Le fichier d'état n'est lisible que par le propriétaire du compte (droits `600`).
+- Documentation : procédure de retour arrière écrite (`docs/VERSIONNEMENT.md`), lignes de recette associées.
 - Accessibilité : les contrôles dessinés à la main (cartes de choix, tuiles de dossiers, étapes, cases, interrupteurs, curseur, sélecteurs, boutons, pastilles) ont maintenant un libellé et un état pour VoiceOver.
 - Cibles de clic agrandies (cases, interrupteurs, pastilles « Annuler » et croix) ; case vide avec un contour visible ; textes de 12 à 13 px relevés à 13,5 px.
 - Le réglage macOS « Réduire les animations » coupe aussi les animations de l'appli.
@@ -29,14 +38,6 @@ décrite dans `docs/VERSIONNEMENT.md`.
 - Logotype remplacé par la nouvelle version fournie par Andy ; « Bienvenue » réduit de moitié sur l'écran d'introduction.
 - Installateur `.dmg` illustré : fond, icône de l'appli à gauche, raccourci « Applications » avec son icône à droite (glisser-déposer).
 - Règles (mode simple) plus « friendly » : grande illustration du dossier qui déroule, avec animation, la liste de tous les dossiers suivis ; modèles de conditions et actions en cartes illustrées (pictogrammes colorés, état choisi, coche) ; frise d'étapes à pastilles ; carte « En résumé » mise en évidence (mots clés surlignés) ; animations coupées en mouvement réduit.
-
-### Ajouté
-
-- Logotype « OrganizeMyFiles » (SVG fourni par Andy) intégré avec discrétion : barre latérale, pied de l'écran de bienvenue, Réglages › À propos.
-
-### Corrigé
-
-- Écran de bienvenue : « Bienvenue » s'écrit en un geste continu (lettres liées, stylo à vitesse régulière, point du « i » en dernier) au lieu de lettres posées les unes après les autres.
 
 ## [0.2.1] - 2026-11-22
 

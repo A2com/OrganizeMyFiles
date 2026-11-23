@@ -77,6 +77,12 @@ pub enum Loaded {
     /// Aucun fichier : premier lancement.
     Fresh,
     Restored(Box<State>),
+    /// Fichier principal illisible, mais la copie de secours a été récupérée.
+    RestoredFromBackup {
+        state: Box<State>,
+        backup: PathBuf,
+        reason: String,
+    },
     /// Fichier illisible ou d'une version plus récente : mis de côté, l'appli démarre vide.
     Unreadable {
         backup: PathBuf,
@@ -117,6 +123,21 @@ fn quarantine(path: &Path) -> PathBuf {
     }
 }
 
+/// Copie de secours de l'état, écrite avant chaque remplacement (`state.json.bak`).
+pub fn backup_path(path: &Path) -> PathBuf {
+    path.with_extension("json.bak")
+}
+
+/// Lit `text` et rend l'état, ou la raison du refus (sans toucher au disque).
+fn parse_state(text: &str) -> Result<State, String> {
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("JSON invalide ({e})"))?;
+    let version = value.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    if version == 0 || version > SCHEMA_VERSION {
+        return Err(format!("version {version} non prise en charge (attendue : {SCHEMA_VERSION})"));
+    }
+    serde_json::from_value::<State>(value).map_err(|e| format!("contenu inattendu ({e})"))
+}
+
 pub fn load(path: &Path) -> Loaded {
     let Ok(text) = fs::read_to_string(path) else {
         return if path.exists() {
@@ -125,35 +146,55 @@ pub fn load(path: &Path) -> Loaded {
             Loaded::Fresh
         };
     };
-    let value: serde_json::Value = match serde_json::from_str(&text) {
-        Ok(v) => v,
-        Err(e) => return Loaded::Unreadable { backup: quarantine(path), reason: format!("JSON invalide ({e})") },
-    };
-    let version = value.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    if version == 0 || version > SCHEMA_VERSION {
-        return Loaded::Unreadable {
-            backup: quarantine(path),
-            reason: format!("version {version} non prise en charge (attendue : {SCHEMA_VERSION})"),
-        };
-    }
-    match serde_json::from_value::<State>(value) {
+    match parse_state(&text) {
         Ok(state) => Loaded::Restored(Box::new(state)),
-        Err(e) => Loaded::Unreadable { backup: quarantine(path), reason: format!("contenu inattendu ({e})") },
+        Err(reason) => Loaded::Unreadable { backup: quarantine(path), reason },
+    }
+}
+
+/// Comme `load`, mais se rabat sur `state.json.bak` quand le fichier principal est illisible :
+/// une sauvegarde abîmée ne doit pas coûter les règles de l'utilisateur.
+pub fn load_with_backup(path: &Path) -> Loaded {
+    match load(path) {
+        Loaded::Unreadable { backup, reason } => {
+            let previous = backup_path(path);
+            match fs::read_to_string(&previous).ok().and_then(|text| parse_state(&text).ok()) {
+                Some(state) => Loaded::RestoredFromBackup { state: Box::new(state), backup: previous, reason },
+                None => Loaded::Unreadable { backup, reason },
+            }
+        }
+        other => other,
     }
 }
 
 /// Écrit `json` dans `path` de façon atomique : fichier temporaire, synchronisation disque, renommage.
+/// La version précédente est conservée en `state.json.bak` (restauration, cf. `docs/VERSIONNEMENT.md`).
 pub fn save(path: &Path, json: &str) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("json.tmp");
     {
-        let mut f = fs::File::create(&tmp)?;
+        let mut f = create_private(&tmp)?;
         f.write_all(json.as_bytes())?;
         f.sync_all()?;
     }
+    if path.exists() {
+        // Une copie de secours ratée ne doit pas empêcher la sauvegarde.
+        let _ = fs::copy(path, backup_path(path));
+    }
     fs::rename(&tmp, path)
+}
+
+/// Crée le fichier en lecture réservée au propriétaire : l'état contient des chemins de fichiers personnels.
+fn create_private(path: &Path) -> std::io::Result<fs::File> {
+    let file = fs::OpenOptions::new().write(true).create(true).truncate(true).open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
 }
 
 #[cfg(test)]
@@ -278,6 +319,60 @@ mod tests {
         save(&path, &"x".repeat(5000)).unwrap();
         save(&path, "{}").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "{}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_keeps_the_previous_version_as_backup() {
+        let dir = temp_dir("bak");
+        let path = dir.join("state.json");
+        let first = to_json(&sample_state());
+        save(&path, &first).unwrap();
+        assert!(!backup_path(&path).exists(), "la première écriture n'a pas d'état précédent à garder");
+        save(&path, "{}").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{}");
+        assert_eq!(fs::read_to_string(backup_path(&path)).unwrap(), first, "la version précédente est conservée");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ruined_file_is_replaced_by_its_backup() {
+        let dir = temp_dir("recover");
+        let path = dir.join("state.json");
+        let expected = to_json(&sample_state());
+        save(&path, &expected).unwrap();
+        save(&path, "{}").unwrap();
+        fs::write(&path, "{ pas du json").unwrap();
+
+        match load_with_backup(&path) {
+            Loaded::RestoredFromBackup { state, backup, reason } => {
+                assert_eq!(to_json(&state), expected);
+                assert_eq!(backup, backup_path(&path));
+                assert!(reason.contains("JSON invalide"), "la raison du refus est conservée : {reason}");
+            }
+            _ => panic!("la copie de secours aurait dû être restaurée"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn without_a_backup_a_ruined_file_stays_unreadable() {
+        let dir = temp_dir("nobak");
+        let path = dir.join("state.json");
+        fs::write(&path, "{ pas du json").unwrap();
+        assert!(matches!(load_with_backup(&path), Loaded::Unreadable { .. }));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_state_file_is_readable_only_by_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("mode");
+        let path = dir.join("state.json");
+        save(&path, "{}").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "état lisible par d'autres comptes : droits {mode:o}");
         let _ = fs::remove_dir_all(&dir);
     }
 
