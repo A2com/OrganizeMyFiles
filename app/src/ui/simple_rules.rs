@@ -360,7 +360,7 @@ fn icon_tile(painter: &egui::Painter, rect: Rect, icon: Icon, tint: Color32) {
     painter.rect_filled(rect, Rounding::same(r), tint);
     let top = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.center().y));
     painter.rect_filled(top, Rounding { nw: r, ne: r, sw: 0.0, se: 0.0 }, with_alpha(Color32::WHITE, 34));
-    painter.rect_stroke(rect, Rounding::same(r), Stroke::new(1.0, with_alpha(Color32::WHITE, 70)));
+    painter.rect_stroke(rect, Rounding::same(r), Stroke::new(1.0_f32, with_alpha(Color32::WHITE, 70)));
     draw_icon(painter, rect.center(), icon, Color32::WHITE, rect.width() * 0.52);
 }
 
@@ -375,9 +375,9 @@ fn choice_card(ui: &mut egui::Ui, icon: Icon, tint: Color32, label: &str, select
     painter.rect_filled(rect, Rounding::same(14.0), glass(((12.0 + 10.0 * hover) as u8).max(10)));
     if chosen > 0.0 {
         painter.rect_filled(rect, Rounding::same(14.0), with_alpha(accent, (40.0 * chosen) as u8));
-        painter.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.5, with_alpha(accent, (230.0 * chosen) as u8)));
+        painter.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.5_f32, with_alpha(accent, (230.0 * chosen) as u8)));
     } else {
-        painter.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0, glass(22)));
+        painter.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0_f32, glass(22)));
     }
     let tile = Rect::from_center_size(Pos2::new(rect.center().x, rect.top() + 14.0 + 22.0), Vec2::splat(44.0));
     icon_tile(painter, tile, icon, tint);
@@ -535,10 +535,10 @@ impl App {
             painter.rect_stroke(
                 rect.expand(k as f32 * 1.8),
                 Rounding::same(CARD_RADIUS + k as f32 * 1.8),
-                Stroke::new(2.0, with_alpha(accent, alpha)),
+                Stroke::new(2.0_f32, with_alpha(accent, alpha)),
             );
         }
-        painter.rect_stroke(rect, Rounding::same(CARD_RADIUS), Stroke::new(1.5, with_alpha(accent, 200)));
+        painter.rect_stroke(rect, Rounding::same(CARD_RADIUS), Stroke::new(1.5_f32, with_alpha(accent, 200)));
         if self.animate_bg {
             ctx.request_repaint_after(std::time::Duration::from_millis(60));
         }
@@ -589,7 +589,7 @@ impl App {
                 let from = Pos2::new(prev_label_end + 10.0, center.y);
                 let to = Pos2::new(center.x - 22.0, center.y);
                 if to.x - from.x > 12.0 {
-                    painter.line_segment([from, to], Stroke::new(2.0, if n <= step { with_alpha(accent, 170) } else { glass(40) }));
+                    painter.line_segment([from, to], Stroke::new(2.0_f32, if n <= step { with_alpha(accent, 170) } else { glass(40) }));
                 }
             }
             if current {
@@ -968,9 +968,9 @@ fn folder_tile(ui: &mut egui::Ui, name: &str, path: &str, selected: bool, accent
     painter.rect_filled(rect, Rounding::same(12.0), glass((12.0 + 10.0 * hover) as u8));
     if chosen > 0.0 {
         painter.rect_filled(rect, Rounding::same(12.0), with_alpha(accent, (36.0 * chosen) as u8));
-        painter.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.5, with_alpha(accent, (220.0 * chosen) as u8)));
+        painter.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.5_f32, with_alpha(accent, (220.0 * chosen) as u8)));
     } else {
-        painter.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0, glass(22)));
+        painter.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0_f32, glass(22)));
     }
     let tile = Rect::from_min_size(rect.left_top() + Vec2::new(10.0, 10.0), Vec2::splat(38.0));
     icon_tile(painter, tile, Icon::FolderOpen, if selected { accent } else { BLUE });
@@ -983,7 +983,7 @@ fn folder_tile(ui: &mut egui::Ui, name: &str, path: &str, selected: bool, accent
     let path = ellipsize(painter, path, &small, max_w);
     painter.text(Pos2::new(text_x, rect.top() + 32.0), egui::Align2::LEFT_TOP, path, small, text_dim());
     let c = Pos2::new(rect.right() - 22.0, rect.center().y);
-    painter.circle_stroke(c, 10.0, Stroke::new(1.5, with_alpha(text_dim(), 150)));
+    painter.circle_stroke(c, 10.0, Stroke::new(1.5_f32, with_alpha(text_dim(), 150)));
     if chosen > 0.0 {
         painter.circle_filled(c, 10.0 * chosen, accent);
         if chosen > 0.6 {
