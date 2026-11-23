@@ -132,10 +132,26 @@ pub fn backup_path(path: &Path) -> PathBuf {
 fn parse_state(text: &str) -> Result<State, String> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("JSON invalide ({e})"))?;
     let version = value.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    if version == 0 || version > SCHEMA_VERSION {
-        return Err(format!("version {version} non prise en charge (attendue : {SCHEMA_VERSION})"));
+    if version > SCHEMA_VERSION {
+        return Err(format!("version {version} plus récente que celle de l'appli ({SCHEMA_VERSION})"));
     }
+    let value = migrate(value, version)?;
     serde_json::from_value::<State>(value).map_err(|e| format!("contenu inattendu ({e})"))
+}
+
+/// Amène un état de la version `from` jusqu'à `SCHEMA_VERSION`, une étape par version.
+/// Une étape par version évite de perdre la configuration lors d'un changement de format.
+fn migrate(mut value: serde_json::Value, from: u32) -> Result<serde_json::Value, String> {
+    let mut version = from;
+    while version < SCHEMA_VERSION {
+        match version {
+            // v0 : fichiers écrits avant le champ `schema_version` ; même structure que la v1.
+            0 => value["schema_version"] = serde_json::json!(1),
+            other => return Err(format!("aucune migration depuis la version {other}")),
+        }
+        version += 1;
+    }
+    Ok(value)
 }
 
 pub fn load(path: &Path) -> Loaded {
@@ -296,6 +312,23 @@ mod tests {
                 assert_eq!(fs::read_to_string(backup).unwrap(), "{ pas du json");
             }
             _ => panic!("un fichier corrompu doit être mis de côté"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_without_version_is_migrated_to_the_current_format() {
+        let dir = temp_dir("migre");
+        let path = dir.join("state.json");
+        let mut value: serde_json::Value = serde_json::from_str(&to_json(&sample_state())).unwrap();
+        value.as_object_mut().unwrap().remove("schema_version");
+        fs::write(&path, value.to_string()).unwrap();
+        match load(&path) {
+            Loaded::Restored(state) => {
+                assert_eq!(state.schema_version, SCHEMA_VERSION, "le fichier est amené au format courant");
+                assert_eq!(state.rules.len(), sample_state().rules.len(), "les règles sont conservées");
+            }
+            _ => panic!("un fichier sans version doit être migré, pas jeté"),
         }
         let _ = fs::remove_dir_all(&dir);
     }

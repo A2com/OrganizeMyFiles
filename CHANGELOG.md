@@ -19,6 +19,7 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 - Logos et icônes : plus de crénelage ni de flou. Chaque image est réduite à sa taille d'affichage exacte (filtre de Lanczos, alpha prémultiplié) et posée sur la grille de pixels ; les mipmaps sont retirés. Le logotype embarqué est la version fournie (2216 px).
 - Réglages : cartes à hauteur automatique et pleine largeur (plus de vide sous « Purger l'ancien historique », elles suivent le redimensionnement de la fenêtre).
+- Compression (ZIP) : les liens symboliques ne sont plus suivis ; un lien circulaire ne bloque plus l'opération.
 - Écran de bienvenue : « Bienvenue » s'écrit en un geste continu (lettres liées, stylo à vitesse régulière, point du « i » en dernier) au lieu de lettres posées les unes après les autres.
 
 ### Modifié
@@ -27,6 +28,7 @@ décrite dans `docs/VERSIONNEMENT.md`.
   propose « Télécharger ») au lieu d'installer un fichier non vérifié.
 - Le fichier d'état n'est lisible que par le propriétaire du compte (droits `600`).
 - Documentation : procédure de retour arrière écrite (`docs/VERSIONNEMENT.md`), lignes de recette associées.
+- Sauvegarde : un ancien fichier d'état sans numéro de format est migré automatiquement, règles conservées (une version plus récente que l'appli reste refusée).
 - Accessibilité : les contrôles dessinés à la main (cartes de choix, tuiles de dossiers, étapes, cases, interrupteurs, curseur, sélecteurs, boutons, pastilles) ont maintenant un libellé et un état pour VoiceOver.
 - Cibles de clic agrandies (cases, interrupteurs, pastilles « Annuler » et croix) ; case vide avec un contour visible ; textes de 12 à 13 px relevés à 13,5 px.
 - Le réglage macOS « Réduire les animations » coupe aussi les animations de l'appli.
