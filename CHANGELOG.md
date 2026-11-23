@@ -12,7 +12,14 @@ décrite dans `docs/VERSIONNEMENT.md`.
 - Sauvegarde de l'état : avant chaque écriture, la version précédente de `state.json` est conservée en
   `state.json.bak`. Un fichier illisible (ou d'un format plus récent) est mis de côté et l'appli repart de cette
   copie de secours, avec un message explicite — les règles ne sont plus perdues.
+- Règles (mode simple) : **écran d'accueil** (bouton « Ajouter une nouvelle règle » et liste des règles existantes, un clic ouvre l'assistant) et **écran de confirmation** après « Terminer » (coche animée, phrase de la règle, « Terminé » ramène à l'accueil). Un lien « Toutes les règles » permet de revenir à l'accueil depuis l'assistant.
 - Logotype « OrganizeMyFiles » (SVG fourni par Andy) intégré avec discrétion : barre latérale, pied de l'écran de bienvenue, Réglages › À propos.
+
+### Corrigé
+
+- Logos et icônes : plus de crénelage ni de flou. Chaque image est réduite à sa taille d'affichage exacte (filtre de Lanczos, alpha prémultiplié) et posée sur la grille de pixels ; les mipmaps sont retirés. Le logotype embarqué est la version fournie (2216 px).
+- Réglages : cartes à hauteur automatique et pleine largeur (plus de vide sous « Purger l'ancien historique », elles suivent le redimensionnement de la fenêtre).
+- Écran de bienvenue : « Bienvenue » s'écrit en un geste continu (lettres liées, stylo à vitesse régulière, point du « i » en dernier) au lieu de lettres posées les unes après les autres.
 
 ### Modifié
 
@@ -20,15 +27,17 @@ décrite dans `docs/VERSIONNEMENT.md`.
   propose « Télécharger ») au lieu d'installer un fichier non vérifié.
 - Le fichier d'état n'est lisible que par le propriétaire du compte (droits `600`).
 - Documentation : procédure de retour arrière écrite (`docs/VERSIONNEMENT.md`), lignes de recette associées.
+- Accessibilité : les contrôles dessinés à la main (cartes de choix, tuiles de dossiers, étapes, cases, interrupteurs, curseur, sélecteurs, boutons, pastilles) ont maintenant un libellé et un état pour VoiceOver.
+- Cibles de clic agrandies (cases, interrupteurs, pastilles « Annuler » et croix) ; case vide avec un contour visible ; textes de 12 à 13 px relevés à 13,5 px.
+- Le réglage macOS « Réduire les animations » coupe aussi les animations de l'appli.
+- Réglages : plus de nom de variable (`history_max_days`) affiché ; données de démonstration de l'Historique en français.
+- Images et formes plus lisses : textures avec versions réduites précalculées (mipmaps) et lissage matériel des bords (MSAA ×4).
+- Règles (mode simple) : les pictogrammes plats sont remplacés par les icônes illustrées fournies par Andy (`assets/ui/rules/`, préparées par `scripts/generer-icones-regles.sh`) : cartes agrandies, icône sur un halo de sa teinte qui s'intensifie au choix et au survol, dossier illustré pour l'étape 1 et la liste des dossiers.
 - Halos lumineux adoucis (réglage unique `GLOW_SOFTNESS`), pastilles d'icônes plates et plus lisibles, mots clés du résumé en gras seulement.
 - Règles (mode simple) : « Suivant » / « Terminer » à droite ; sélecteur Simple / Avancé avec des espaces réguliers entre les boutons.
 - Logotype remplacé par la nouvelle version fournie par Andy ; « Bienvenue » réduit de moitié sur l'écran d'introduction.
 - Installateur `.dmg` illustré : fond, icône de l'appli à gauche, raccourci « Applications » avec son icône à droite (glisser-déposer).
 - Règles (mode simple) plus « friendly » : grande illustration du dossier qui déroule, avec animation, la liste de tous les dossiers suivis ; modèles de conditions et actions en cartes illustrées (pictogrammes colorés, état choisi, coche) ; frise d'étapes à pastilles ; carte « En résumé » mise en évidence (mots clés surlignés) ; animations coupées en mouvement réduit.
-
-### Corrigé
-
-- Écran de bienvenue : « Bienvenue » s'écrit en un geste continu (lettres liées, stylo à vitesse régulière, point du « i » en dernier) au lieu de lettres posées les unes après les autres.
 
 ## [0.2.1] - 2026-11-22
 

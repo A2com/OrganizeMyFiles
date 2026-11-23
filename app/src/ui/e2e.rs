@@ -199,6 +199,28 @@ fn a_new_rule_in_simple_mode_starts_empty_and_every_step_draws() {
 }
 
 #[test]
+fn the_simple_mode_starts_on_the_home_and_a_new_rule_opens_the_wizard() {
+    let dir = temp_dir("simple-home");
+    let mut app = blank_app();
+    assert_eq!(app.simple_view, SimpleView::Home, "l'écran Règles s'ouvre sur l'accueil");
+    let rid = add_png_rule(&mut app, &dir, &dir.join("out"));
+    assert_eq!(app.simple_view, SimpleView::Wizard, "ajouter une règle ouvre l'assistant");
+
+    let ctx = egui::Context::default();
+    load_fonts(&ctx);
+    apply_theme(&ctx);
+    app.simple_view = SimpleView::Home;
+    draw_rules(&mut app, &ctx);
+    app.simple_view = SimpleView::Done(rid);
+    draw_rules(&mut app, &ctx);
+    assert_eq!(app.simple_view, SimpleView::Done(rid), "la confirmation reste affichée tant qu'on ne clique pas");
+
+    app.rules.clear();
+    draw_rules(&mut app, &ctx);
+    assert_eq!(app.simple_view, SimpleView::Home, "règle disparue : retour à l'accueil");
+}
+
+#[test]
 fn an_advanced_rule_is_left_untouched_in_simple_mode() {
     let dir = temp_dir("simple-advanced-rule");
     let mut app = blank_app();

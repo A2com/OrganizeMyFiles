@@ -68,6 +68,8 @@ fn main() -> eframe::Result {
     }
 
     let options = eframe::NativeOptions {
+        // Lissage matériel des bords (4 échantillons par pixel) : formes vectorielles et images moins crénelées.
+        multisampling: 4,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size(size)
             .with_min_inner_size([980.0, 640.0])

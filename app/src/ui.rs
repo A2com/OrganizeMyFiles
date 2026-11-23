@@ -20,6 +20,7 @@ use crate::tags;
 use crate::toast::{self, Toast, ToastKind};
 use crate::update;
 use crate::watcher::{self, WatchConfig, Watcher};
+use simple_rules::SimpleView;
 
 // ------------------------------------------------------------------- theme
 
@@ -53,21 +54,7 @@ enum Icon {
     Refresh,
     Tick,
     Undo,
-    Image,
-    Pdf,
-    Video,
-    Document,
-    Music,
-    Archive,
-    Text,
-    Ruler,
-    Move,
-    Copy,
-    Rename,
-    Tag,
     Sparkle,
-    Event,
-    Category,
     ExpandMore,
 }
 
@@ -227,12 +214,6 @@ fn top_bar_right_width(run_w: f32, preview_w: f32, wide: bool, gap: f32) -> f32 
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/app-256.png");
 
-fn app_icon_image() -> egui::ColorImage {
-    let img = image::load_from_memory(APP_ICON_PNG).expect("icône embarquée valide").to_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
-}
-
 /// Icône de la fenêtre (barre des tâches). Sous macOS, on n'en impose aucune : le Dock affiche l'icône du `.app`,
 /// qui respecte le gabarit Apple (corps de 824 px sur 1024) ; l'image pleine taille la ferait paraître trop grosse.
 pub fn app_icon() -> egui::IconData {
@@ -276,7 +257,6 @@ impl IntroState {
 }
 
 /// Illustration du dossier (écran Règles, mode simple).
-const FOLDER_ART_PNG: &[u8] = include_bytes!("../../assets/ui/folder.png");
 const INTRO_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/intro-600.png");
 /// Taille du mot « Bienvenue » par rapport à sa taille d'origine (réduit de moitié à la demande d'Andy).
 const WORD_SCALE: f32 = 0.5;
@@ -284,8 +264,8 @@ const WORD_SCALE: f32 = 0.5;
 const WORDMARK_SIDEBAR_W: f32 = 128.0;
 const WORDMARK_INTRO_W: f32 = 170.0;
 const WORDMARK_ABOUT_W: f32 = 150.0;
-/// Logotype « OrganizeMyFiles » (texte blanc, dégradé sur « O » et « My »), généré par `scripts/generer-logo.py`.
-const WORDMARK_PNG: &[u8] = include_bytes!("../../assets/logo/wordmark-white-640.png");
+/// Logotype « OrganizeMyFiles » (texte blanc, dégradé sur « O » et « My »), fourni par Andy (2216 px), réduit à l'affichage par `fitted_texture`.
+const WORDMARK_PNG: &[u8] = include_bytes!("../../assets/logo/wordmark-white.png");
 
 pub struct App {
     tab: Tab,
@@ -299,12 +279,16 @@ pub struct App {
     menu_bar: bool,
     notify: bool,
     animate_bg: bool,
+    /// Réglage macOS « Réduire les animations » (lu au lancement) : coupe les animations en plus de « Animer le fond ».
+    system_reduce_motion: bool,
     bg_offset: f64,
     retention_days: u32,
     add_folder_text: String,
     selected_rule: usize,
     /// Étape courante de l'assistant du mode simple (1 à 3).
     simple_step: u8,
+    /// Écran du mode simple des règles : accueil, assistant ou confirmation.
+    simple_view: SimpleView,
     app_enabled: bool,
     launch_at_login: bool,
     /// Passage complet automatique toutes les N minutes ; 0 = désactivé.
@@ -328,17 +312,12 @@ pub struct App {
     sounds: Option<Sounds>,
     /// Le son d'ouverture de l'Aperçu a déjà été traité pour ce lancement.
     launch_sound_done: bool,
-    intro_icon: Option<egui::TextureHandle>,
     /// Dossiers suivis que macOS ne laisse pas lire (rafraîchi régulièrement).
     denied_folders: Vec<PathBuf>,
     next_access_check: f64,
     /// Surveillance automatique ; `None` en mode capture d'écran et dans les tests.
     watcher: Option<Watcher>,
     watch_key: String,
-    /// Logo de la barre latérale (chargé au premier affichage).
-    logo: Option<egui::TextureHandle>,
-    folder_art: Option<egui::TextureHandle>,
-    wordmark: Option<egui::TextureHandle>,
     /// Icône et menu de la barre des menus (macOS).
     menubar: Option<MenuBar>,
     menubar_failed: bool,
@@ -409,6 +388,14 @@ impl App {
             let read = |key: &str| std::env::var(key).ok().and_then(|v| v.parse::<usize>().ok());
             app.simple_step = read("OMF_RULES_STEP").map_or(1, |n| n.clamp(1, 3) as u8);
             app.selected_rule = read("OMF_RULE_INDEX").unwrap_or(0);
+            // OMF_RULES_VIEW : home (par défaut), wizard ou done ; OMF_RULES_STEP force l'assistant.
+            let done = app.rule_order().get(app.selected_rule).copied().map(SimpleView::Done);
+            app.simple_view = match std::env::var("OMF_RULES_VIEW").as_deref() {
+                Ok("done") => done.unwrap_or(SimpleView::Home),
+                Ok("wizard") => SimpleView::Wizard,
+                _ if std::env::var_os("OMF_RULES_STEP").is_some() => SimpleView::Wizard,
+                _ => SimpleView::Home,
+            };
         }
         app
     }
@@ -428,11 +415,13 @@ impl App {
             menu_bar: true,
             notify: true,
             animate_bg: true,
+            system_reduce_motion: system_reduces_motion(),
             bg_offset: bg_time,
             retention_days: HISTORY_RETENTION_DEFAULT_DAYS,
             add_folder_text: String::new(),
             selected_rule: 0,
             simple_step: 1,
+            simple_view: SimpleView::Home,
             app_enabled: true,
             launch_at_login: false,
             auto_organize_minutes: 0,
@@ -448,14 +437,10 @@ impl App {
             sounds_on: true,
             sounds: None,
             launch_sound_done: false,
-            intro_icon: None,
             denied_folders: Vec::new(),
             next_access_check: 0.0,
             watcher: None,
             watch_key: String::new(),
-            logo: None,
-            folder_art: None,
-            wordmark: None,
             menubar: None,
             menubar_failed: false,
             quitting: false,
@@ -503,7 +488,7 @@ impl App {
             self.history.push(HistoryEntry {
                 batch_id: 1,
                 rule_name: ["Tri Bureau & Téléchargements", "Compression Médias"][i % 2].into(),
-                action_label: ["Move to folder", "Rename with pattern", "Compress (ZIP)"][i % 3].into(),
+                action_label: ["Déplacer vers un dossier", "Renommer avec un motif", "Compresser (ZIP)"][i % 3].into(),
                 original_path: PathBuf::from(format!("{home}/Downloads/file-{i}.pdf")),
                 result_path: PathBuf::from(format!("{home}/Documents/Archive/2026-11/file-{i}.pdf")),
                 undo: if i % 3 == 0 {
@@ -725,46 +710,15 @@ impl App {
         }
     }
 
-    /// Texture de l'illustration du dossier (chargée une seule fois).
-    pub(super) fn folder_art_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
-        self.folder_art
-            .get_or_insert_with(|| {
-                let img = image::load_from_memory(FOLDER_ART_PNG).expect("illustration du dossier valide").to_rgba8();
-                let size = [img.width() as usize, img.height() as usize];
-                ctx.load_texture("folder-art", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
-            })
-            .clone()
-    }
-
-    /// Texture du logotype (chargée une seule fois).
-    fn wordmark_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
-        self.wordmark
-            .get_or_insert_with(|| {
-                let img = image::load_from_memory(WORDMARK_PNG).expect("logotype valide").to_rgba8();
-                let size = [img.width() as usize, img.height() as usize];
-                ctx.load_texture("wordmark", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
-            })
-            .clone()
-    }
-
-    fn intro_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
-        self.intro_icon
-            .get_or_insert_with(|| {
-                let img = image::load_from_memory(INTRO_ICON_PNG).expect("icône d'introduction valide").to_rgba8();
-                let size = [img.width() as usize, img.height() as usize];
-                ctx.load_texture("intro-icon", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
-            })
-            .clone()
-    }
-
     /// Écran d'introduction : icône, « Bienvenue » écrit à la main, présentation et bouton « Commencer »,
     /// sur le fond animé. Remplace toute l'interface tant qu'il est affiché.
     fn intro_ui(&mut self, ui: &mut egui::Ui, screen: Rect) {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         let accent = self.accent();
-        let animated = self.animate_bg;
-        let texture = self.intro_texture(&ctx);
+        let animated = self.animated();
+        let intro_icon_size = (ctx.screen_rect().height() * 0.34).min(300.0);
+        let texture = fitted_texture(&ctx, "intro-icon", INTRO_ICON_PNG, intro_icon_size);
         let Some(state) = self.intro.as_mut() else { return };
 
         // Temps de l'animation : figé (captures), final (mouvement réduit ou passée) ou horloge.
@@ -817,12 +771,7 @@ impl App {
         let breath = if animated { 1.0 + 0.05 * ((now as f32) * 1.6).sin() } else { 1.0 };
         radial_glow(&painter, icon_center, icon_size * 0.95 * breath * f.icon_scale, accent, 170.0 * f.icon_alpha * fade_out);
         let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size * f.icon_scale));
-        painter.image(
-            texture.id(),
-            icon_rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            Color32::from_white_alpha(alpha(f.icon_alpha)),
-        );
+        paint_fitted(&painter, &texture, icon_rect, Color32::from_white_alpha(alpha(f.icon_alpha)));
 
         // « Bienvenue » : tracé du stylo, bouts arrondis, pointe lumineuse (pas d'ombre).
         let word_left = cx - word_w / 2.0;
@@ -853,16 +802,11 @@ impl App {
 
         // Signature discrète : le logotype en pied d'écran, il apparaît après le bouton.
         {
-            let mark = self.wordmark_texture(&ctx);
             let w = WORDMARK_INTRO_W;
+            let mark = fitted_texture(&ctx, "wordmark", WORDMARK_PNG, w);
             let h = w * mark.size_vec2().y / mark.size_vec2().x;
             let rect = Rect::from_center_size(Pos2::new(cx, screen.bottom() - 44.0 - h / 2.0), Vec2::new(w, h));
-            painter.image(
-                mark.id(),
-                rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::from_white_alpha(alpha(f.button * 0.55)),
-            );
+            paint_fitted(&painter, &mark, rect, Color32::from_white_alpha(alpha(f.button * 0.55)));
         }
 
         // Clic n'importe où ou Entrée / Espace / Échap : on saute à la fin (sans quitter l'écran).
@@ -1589,15 +1533,6 @@ fn glass_shapes(rect: Rect) -> egui::Shape {
     ])
 }
 
-/// Carte de verre de taille fixe.
-fn card(ui: &mut egui::Ui, size: Vec2, add: impl FnOnce(&mut egui::Ui)) {
-    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    ui.painter().add(glass_shapes(rect));
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(22.0, 18.0))).layout(Layout::top_down(Align::Min)));
-    child.set_min_size(size - Vec2::new(44.0, 36.0));
-    add(&mut child);
-}
-
 fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool) -> egui::Response {
     let h = if big { 52.0 } else { 34.0 };
     let pad = if big { 30.0 } else { 18.0 };
@@ -1625,6 +1560,7 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
         let tc = Color32::WHITE;
         ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(font), tc);
     }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), text));
     response
 }
 
@@ -1689,6 +1625,77 @@ fn state_is_live(intro: &Option<IntroState>) -> bool {
 }
 
 /// Halo doux : disque dont l'opacité décroît du centre (`alpha` au centre) vers le bord (transparent).
+/// Vrai si macOS demande de réduire les animations (Réglages Système › Accessibilité › Écran).
+#[cfg(target_os = "macos")]
+fn system_reduces_motion() -> bool {
+    std::process::Command::new("defaults")
+        .args(["read", "com.apple.universalaccess", "reduceMotion"])
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_reduces_motion() -> bool {
+    false
+}
+
+/// Texture d'une image embarquée, **réduite à la taille exacte d'affichage** (`width_pt` points, soit `width_pt ×
+/// pixels_per_point` pixels) par un filtre de Lanczos. Les contours sont lisses (échantillonnage précis) et nets (un
+/// pixel d'image = un pixel d'écran, voir `paint_fitted`). Calculée une fois par taille et gardée en mémoire.
+/// La taille de la texture est en pixels physiques : le rapport largeur/hauteur reste celui de l'image.
+fn fitted_texture(ctx: &egui::Context, key: &str, png: &[u8], width_pt: f32) -> egui::TextureHandle {
+    let width_px = (width_pt * ctx.pixels_per_point()).round().max(1.0) as u32;
+    let id = egui::Id::new(("fitted-texture", key, width_px));
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return tex;
+    }
+    let source = image::load_from_memory(png).expect("image embarquée valide").to_rgba8();
+    let image = resize_premultiplied(&source, width_px);
+    let tex = ctx.load_texture(format!("{key}-{width_px}"), image, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    tex
+}
+
+/// Réduit `source` à `width_px` de large (jamais d'agrandissement), en alpha **prémultiplié** : sans cela, la couleur
+/// des pixels transparents déteint sur les contours (liseré sombre autour d'un logo blanc). Les valeurs sont ramenées
+/// à 0-1 : c'est la plage que `imageops::resize` conserve pour des flottants.
+fn resize_premultiplied(source: &image::RgbaImage, width_px: u32) -> egui::ColorImage {
+    let (w, h) = source.dimensions();
+    let width_px = width_px.min(w);
+    let height_px = ((h as f32 * width_px as f32 / w as f32).round() as u32).max(1);
+    let premultiplied: Vec<f32> = source
+        .pixels()
+        .flat_map(|p| {
+            let a = f32::from(p[3]) / 255.0;
+            [f32::from(p[0]) / 255.0 * a, f32::from(p[1]) / 255.0 * a, f32::from(p[2]) / 255.0 * a, a]
+        })
+        .collect();
+    let buffer = image::ImageBuffer::<image::Rgba<f32>, Vec<f32>>::from_raw(w, h, premultiplied).expect("dimensions cohérentes");
+    let out =
+        if width_px == w { buffer } else { image::imageops::resize(&buffer, width_px, height_px, image::imageops::FilterType::Lanczos3) };
+    let bytes: Vec<u8> = out
+        .pixels()
+        .flat_map(|p| {
+            let a = p[3].clamp(0.0, 1.0);
+            [p[0].clamp(0.0, a), p[1].clamp(0.0, a), p[2].clamp(0.0, a), a].map(|v| (v * 255.0).round() as u8)
+        })
+        .collect();
+    egui::ColorImage::from_rgba_premultiplied([width_px as usize, height_px as usize], &bytes)
+}
+
+/// Dessine une texture de `fitted_texture`. Quand `rect` a la taille prévue, l'image est posée **sur la grille de pixels** :
+/// un pixel d'image tombe pile sur un pixel d'écran (net). Sinon (animation d'échelle), elle est simplement étirée.
+fn paint_fitted(painter: &egui::Painter, tex: &egui::TextureHandle, rect: Rect, tint: Color32) {
+    let ppp = painter.ctx().pixels_per_point();
+    let exact = tex.size_vec2() / ppp;
+    let rect = if (rect.width() - exact.x).abs() * ppp < 0.5 {
+        Rect::from_min_size(painter.round_pos_to_pixels(rect.center() - exact / 2.0), exact)
+    } else {
+        rect
+    };
+    painter.image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint);
+}
+
 fn radial_glow(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32, alpha: f32) {
     const SEGMENTS: usize = 64;
     let mut mesh = egui::epaint::Mesh::default();
@@ -1745,21 +1752,7 @@ fn icon_char(icon: Icon) -> char {
         Icon::Refresh => '\u{e5d5}',    // refresh
         Icon::Tick => '\u{e668}',       // check
         Icon::Undo => '\u{e166}',       // undo
-        Icon::Image => '\u{e3f4}',      // image
-        Icon::Pdf => '\u{e415}',        // picture_as_pdf
-        Icon::Video => '\u{e404}',      // movie
-        Icon::Document => '\u{e873}',   // description
-        Icon::Music => '\u{e405}',      // music_note
-        Icon::Archive => '\u{eb2c}',    // folder_zip
-        Icon::Text => '\u{e262}',       // text_fields
-        Icon::Ruler => '\u{e41c}',      // straighten
-        Icon::Move => '\u{e9a1}',       // drive_file_move
-        Icon::Copy => '\u{e14d}',       // content_copy
-        Icon::Rename => '\u{e9a2}',     // drive_file_rename_outline
-        Icon::Tag => '\u{f05b}',        // sell
         Icon::Sparkle => '\u{e65f}',    // auto_awesome
-        Icon::Event => '\u{e878}',      // event
-        Icon::Category => '\u{e72c}',   // category
         Icon::ExpandMore => '\u{e5cf}', // expand_more
     }
 }
@@ -1815,6 +1808,7 @@ fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<I
         x += icon_w;
     }
     p.text(Pos2::new(x, rect.center().y), egui::Align2::LEFT_CENTER, text, font, fg);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
     resp
 }
 
@@ -1842,11 +1836,13 @@ fn hero_sub_pill(ui: &mut egui::Ui, text: &str, accent: Color32) {
 fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Response {
     let font = egui::FontId::new(14.0, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, fg);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 18.0, 22.0), egui::Sense::click());
-    ui.painter().rect_filled(rect, Rounding::same(11.0), with_alpha(CANVAS, 140));
-    ui.painter().rect_filled(rect, Rounding::same(11.0), if resp.hovered() { with_alpha(fg, 70) } else { bg });
-    let pos = Pos2::new(rect.left() + 9.0, rect.center().y - galley.size().y / 2.0);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 22.0, 26.0), egui::Sense::click());
+    ui.painter().rect_filled(rect, Rounding::same(13.0), with_alpha(CANVAS, 140));
+    ui.painter().rect_filled(rect, Rounding::same(13.0), if resp.hovered() { with_alpha(fg, 70) } else { bg });
+    let pos = Pos2::new(rect.left() + 11.0, rect.center().y - galley.size().y / 2.0);
+    let label = text.to_string();
     ui.painter().galley(pos, galley, fg);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -1854,14 +1850,18 @@ fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui:
 fn check_box(ui: &mut egui::Ui, on: &mut bool, label: &str, accent: Color32) -> egui::Response {
     let font = egui::FontId::proportional(15.0);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), text_primary());
-    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(26.0 + galley.size().x, 22.0), egui::Sense::click());
+    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(26.0 + galley.size().x, 26.0), egui::Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *on, label));
     let b = Rect::from_min_size(Pos2::new(rect.left(), rect.center().y - 9.0), Vec2::splat(18.0));
     let fill = if *on { accent } else { glass(if resp.hovered() { 36 } else { 24 }) };
     ui.painter().rect_filled(b, Rounding::same(5.0), fill);
+    if !*on {
+        ui.painter().rect_stroke(b, Rounding::same(5.0), Stroke::new(1.5_f32, with_alpha(text_dim(), 150)));
+    }
     if *on {
         let st = Stroke::new(2.0f32, Color32::WHITE);
         let m = Pos2::new(b.left() + 8.0, b.bottom() - 5.0);
@@ -1887,6 +1887,7 @@ fn slim_slider(ui: &mut egui::Ui, value: &mut u32, min: u32, max: u32, accent: C
             }
         }
     }
+    resp.widget_info(|| egui::WidgetInfo::slider(true, f64::from(*value), "Réglette"));
     let t = (*value - min) as f32 / (max - min) as f32;
     let y = rect.center().y;
     let knob = Pos2::new(x0 + t * (x1 - x0), y);
@@ -1916,11 +1917,13 @@ fn recursion_control(ui: &mut egui::Ui, rule: &mut Rule, accent: Color32) {
 }
 
 fn toggle(ui: &mut egui::Ui, on: &mut bool, accent: Color32) -> egui::Response {
-    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(38.0, 22.0), egui::Sense::click());
+    let (slot, mut resp) = ui.allocate_exact_size(Vec2::new(38.0, 26.0), egui::Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *on, "Interrupteur"));
+    let rect = Rect::from_center_size(slot.center(), Vec2::new(38.0, 22.0));
     let t = ui.ctx().animate_bool(resp.id, *on);
     let fill = if *on { accent } else { Color32::from_rgb(0x3a, 0x3d, 0x4a) };
     if *on {
@@ -1946,6 +1949,7 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
         let seg = Rect::from_min_size(Pos2::new(x, rect.top() + 4.0), Vec2::new(widths[i], 26.0));
         let resp = ui.interact(seg, id.with(i), egui::Sense::click());
         let on = i == selected;
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, on, *label));
         if on {
             ui.painter().rect_filled(seg, Rounding::same(6.0), active);
         } else if resp.hovered() {
@@ -1984,6 +1988,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, danger: bool) -> bool {
         text_dim()
     };
     draw_icon(&ui.painter().clone(), r.center(), icon, col, 16.0);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
     resp.on_hover_text(tip).clicked()
 }
 
@@ -1991,11 +1996,12 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, danger: bool) -> bool {
 fn removable_chip(ui: &mut egui::Ui, text: &str, tip: &str, accent: Color32) -> bool {
     let font = egui::FontId::new(14.0, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, accent);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 34.0, 24.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 36.0, 28.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{tip} : {text}")));
     ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(CANVAS, 140));
     ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(accent, 38));
     ui.painter().galley(Pos2::new(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0), galley, accent);
-    let cross = Rect::from_center_size(Pos2::new(rect.right() - 12.0, rect.center().y), Vec2::splat(18.0));
+    let cross = Rect::from_center_size(Pos2::new(rect.right() - 13.0, rect.center().y), Vec2::splat(20.0));
     let over_cross = resp.hover_pos().is_some_and(|p| cross.contains(p));
     if over_cross {
         ui.painter().circle_filled(cross.center(), 8.0, with_alpha(RED, 60));
@@ -2120,7 +2126,7 @@ fn row_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui
 }
 
 fn caps(text: &str) -> RichText {
-    RichText::new(text).size(12.5).family(semibold()).color(text_label())
+    RichText::new(text).size(13.0).family(semibold()).color(text_label())
 }
 
 fn rule_tab(ui: &mut egui::Ui, label: &str, active: bool, enabled: bool, accent: Color32) -> egui::Response {
@@ -2236,12 +2242,12 @@ fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub
     draw_icon(&p, tile.center(), icon, Color32::WHITE, 17.0);
     // Les textes sont tronqués à la largeur disponible : en fenêtre étroite,
     // ils dépassaient de la tuile (peints sans limite de largeur).
-    let label = ellipsize(&p, label, &egui::FontId::new(12.5, semibold()), (r.right() - 16.0 - (tile.right() + 10.0)).max(20.0));
+    let label = ellipsize(&p, label, &egui::FontId::new(13.0, semibold()), (r.right() - 16.0 - (tile.right() + 10.0)).max(20.0));
     p.text(
         Pos2::new(tile.right() + 10.0, tile.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::new(12.5, semibold()),
+        egui::FontId::new(13.0, semibold()),
         text_label(),
     );
     let value = ellipsize(&p, value, &egui::FontId::new(38.0, bold()), (w - 32.0).max(20.0));
@@ -2347,7 +2353,7 @@ impl eframe::App for App {
             self.last_tab = self.tab;
             self.tab_since = ctx.input(|i| i.time);
         }
-        let bg_time = if self.animate_bg {
+        let bg_time = if self.animated() {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
             ctx.input(|i| i.time) + self.bg_offset
         } else {
@@ -2624,6 +2630,7 @@ impl App {
             actions: vec![action],
         });
         self.simple_step = 1;
+        self.simple_view = SimpleView::Wizard;
         self.selected_rule = self.rule_order().iter().position(|r| *r == id).unwrap_or(0);
         self.tab = Tab::Rules;
     }
@@ -2633,6 +2640,8 @@ impl App {
         let first = self.rule_order().iter().position(|id| self.rules.iter().any(|r| r.id == *id && r.folder_ids.contains(&folder_id)));
         if let Some(pos) = first {
             self.selected_rule = pos;
+            self.simple_step = 1;
+            self.simple_view = SimpleView::Wizard;
         }
         self.tab = Tab::Rules;
     }
@@ -2683,6 +2692,11 @@ impl App {
         *self.folder_counts.entry(id).or_insert_with(|| count_top_level_files(path))
     }
 
+    /// Animations actives : réglage « Animer le fond » et mouvement non réduit dans macOS.
+    fn animated(&self) -> bool {
+        self.animate_bg && !self.system_reduce_motion
+    }
+
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
         // Identité de l'app, avant le menu.
@@ -2690,17 +2704,14 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(20.0);
             let (r, _) = ui.allocate_exact_size(Vec2::splat(36.0), egui::Sense::hover());
-            let logo = self.logo.get_or_insert_with(|| {
-                let img = app_icon_image();
-                ui.ctx().load_texture("app-logo", img, egui::TextureOptions::LINEAR)
-            });
-            ui.painter().image(logo.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            let logo = fitted_texture(ui.ctx(), "app-logo", APP_ICON_PNG, r.width());
+            paint_fitted(ui.painter(), &logo, r, Color32::WHITE);
             ui.add_space(10.0);
-            let mark = self.wordmark_texture(ui.ctx());
             let width = WORDMARK_SIDEBAR_W;
+            let mark = fitted_texture(ui.ctx(), "wordmark", WORDMARK_PNG, width);
             let (rect, resp) =
                 ui.allocate_exact_size(Vec2::new(width, width * mark.size_vec2().y / mark.size_vec2().x), egui::Sense::hover());
-            ui.painter().image(mark.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            paint_fitted(ui.painter(), &mark, rect, Color32::WHITE);
             resp.on_hover_text("OrganizeMyFiles");
         });
         ui.add_space(22.0);
@@ -2821,7 +2832,7 @@ impl App {
         let (hero, _) = ui.allocate_exact_size(Vec2::new(avail, 214.0), egui::Sense::hover());
         ui.painter().add(glass_shapes(hero));
         {
-            let t = if self.animate_bg { ctx.input(|i| i.time) } else { 0.0 };
+            let t = if self.animated() { ctx.input(|i| i.time) } else { 0.0 };
             let drift = (t * 0.3).sin() as f32 * 0.05;
             glow_in_rounded(
                 ui.painter(),
@@ -2840,7 +2851,7 @@ impl App {
         let text_w = (avail - 250.0).max(260.0);
         let inner = Rect::from_min_size(hero.min + Vec2::new(28.0, 24.0), Vec2::new(text_w, hero.height() - 48.0));
         let mut c = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
-        c.label(RichText::new("APERÇU").size(12.5).family(semibold()).color(text_label()));
+        c.label(RichText::new("APERÇU").size(13.0).family(semibold()).color(text_label()));
         c.add_space(4.0);
         c.label(RichText::new(&title).size(34.0).family(bold()).color(Color32::WHITE));
         c.add_space(2.0);
@@ -2874,7 +2885,7 @@ impl App {
                 let glow_slot = ui.painter().add(egui::Shape::Noop);
                 let run = pill(ui, "Organiser maintenant", accent, true, true)
                     .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).");
-                let animated = self.animate_bg && self.app_enabled;
+                let animated = self.animated() && self.app_enabled;
                 let phase = if animated { (ctx.input(|i| i.time) / 1.8).fract() as f32 } else { 0.3 };
                 if self.app_enabled {
                     ui.painter().set(
@@ -2914,7 +2925,7 @@ impl App {
             Pos2::new(center.x, center.y - 78.0),
             egui::Align2::CENTER_CENTER,
             kicker,
-            egui::FontId::new(12.0, semibold()),
+            egui::FontId::new(13.0, semibold()),
             text_label(),
         );
         p.text(center, egui::Align2::CENTER_CENTER, pct_text, egui::FontId::new(26.0, bold()), Color32::WHITE);
@@ -3035,7 +3046,7 @@ impl App {
                     Pos2::new(tile.right() + 12.0, rect.center().y + 11.0),
                     egui::Align2::LEFT_CENTER,
                     shorten(&f.path.display().to_string()),
-                    egui::FontId::proportional(13.0),
+                    egui::FontId::proportional(13.5),
                     text_dim(),
                 );
                 let mut right = ui.new_child(
@@ -3109,7 +3120,7 @@ impl App {
                     Pos2::new(rect.left() + 32.0, rect.center().y + 11.0),
                     egui::Align2::LEFT_CENTER,
                     format!("{} · {}", e.action_label, ago(e.created, now)),
-                    egui::FontId::proportional(13.0),
+                    egui::FontId::proportional(13.5),
                     text_dim(),
                 );
                 if can_undo {
@@ -3567,6 +3578,7 @@ impl App {
                 if let Some(i) = segmented(ui, egui::Id::new("rules-mode"), &["Simple", "Avancé"], current, SKY_DEEP) {
                     self.rules_mode = if i == 0 { RulesMode::Simple } else { RulesMode::Advanced };
                     self.simple_step = 1;
+                    self.simple_view = SimpleView::Home;
                 }
             });
         });
@@ -3583,7 +3595,18 @@ impl App {
             return;
         }
 
+        let simple = self.rules_mode == RulesMode::Simple;
+        match self.simple_view {
+            SimpleView::Home if simple => return self.simple_home_ui(ui),
+            SimpleView::Done(rid) if simple => return self.simple_done_ui(ui, rid),
+            _ => {}
+        }
         let order = self.rule_order();
+        if order.is_empty() && simple {
+            self.simple_view = SimpleView::Home;
+            ui.ctx().request_repaint();
+            return;
+        }
         if order.is_empty() {
             ui.label(RichText::new("Aucune règle.").color(text_dim()));
             ui.add_space(8.0);
@@ -3597,19 +3620,25 @@ impl App {
 
         // ---- onglets de règles (filtrés par la recherche globale)
         let q = self.search.trim().to_lowercase();
-        ui.horizontal_wrapped(|ui| {
-            for (i, rid) in order.iter().enumerate() {
-                let Some(r) = self.rules.iter().find(|r| r.id == *rid) else { continue };
-                if !q.is_empty() && i != sel && !self.rule_matches(r, &q) {
-                    continue;
-                }
-                let name: String = r.name.chars().take(32).collect();
-                if rule_tab(ui, &format!("Règle {} : {}", i + 1, name), i == sel, r.enabled, accent).clicked() {
-                    self.selected_rule = i;
-                    self.simple_step = 1;
-                }
+        if simple {
+            if btn(ui, "Toutes les règles", Btn::Ghost, accent, Some(Icon::Undo)).clicked() {
+                self.simple_view = SimpleView::Home;
             }
-        });
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                for (i, rid) in order.iter().enumerate() {
+                    let Some(r) = self.rules.iter().find(|r| r.id == *rid) else { continue };
+                    if !q.is_empty() && i != sel && !self.rule_matches(r, &q) {
+                        continue;
+                    }
+                    let name: String = r.name.chars().take(32).collect();
+                    if rule_tab(ui, &format!("Règle {} : {}", i + 1, name), i == sel, r.enabled, accent).clicked() {
+                        self.selected_rule = i;
+                        self.simple_step = 1;
+                    }
+                }
+            });
+        }
         ui.add_space(14.0);
 
         let rid = order[sel];
@@ -3677,6 +3706,9 @@ impl App {
         if deleted {
             self.rules.retain(|r| r.id != rid);
             self.selected_rule = sel.saturating_sub(1);
+            if simple {
+                self.simple_view = SimpleView::Home;
+            }
             return;
         }
         if moved {
@@ -4069,7 +4101,7 @@ impl App {
             if failed {
                 ui.horizontal(|ui| {
                     ui.add_space(22.0);
-                    ui.add(egui::Label::new(RichText::new(fr_message(&e.message)).size(13.0).color(status_color(e.status))).wrap());
+                    ui.add(egui::Label::new(RichText::new(fr_message(&e.message)).size(13.5).color(status_color(e.status))).wrap());
                 });
             }
         });
@@ -4089,7 +4121,7 @@ impl App {
         let accent = self.accent();
         self.header(ui, "Réglages", "Appliqués immédiatement.");
 
-        card(ui, Vec2::new(756.0, 132.0), |ui| {
+        panel_card(ui, |ui| {
             ui.label(RichText::new("Couleur d'accent").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(12.0);
             ui.horizontal(|ui| {
@@ -4114,7 +4146,7 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 420.0), |ui| {
+        panel_card(ui, |ui| {
             let before = self.launch_at_login;
             check_box(ui, &mut self.launch_at_login, "Lancement au démarrage", accent);
             if self.launch_at_login != before {
@@ -4161,7 +4193,7 @@ impl App {
             });
             ui.add_space(4.0);
             ui.label(RichText::new("Les entrées plus anciennes sont purgées.").size(13.5).color(text_dim()));
-            ui.label(RichText::new(format!("{HISTORY_RETENTION_SETTING_KEY} · de 1 à 365 jours")).size(13.5).color(text_dim()));
+            ui.label(RichText::new("Entre 1 et 365 jours.").size(13.5).color(text_dim()));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.add(egui::Button::new(RichText::new("Purger l'ancien historique").size(14.0)).fill(glass(34))).clicked() {
@@ -4172,13 +4204,13 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 305.0), |ui| {
+        panel_card(ui, |ui| {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
-            let mark = self.wordmark_texture(ui.ctx());
             let w = WORDMARK_ABOUT_W;
+            let mark = fitted_texture(ui.ctx(), "wordmark", WORDMARK_PNG, w);
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, w * mark.size_vec2().y / mark.size_vec2().x), egui::Sense::hover());
-            ui.painter().image(mark.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            paint_fitted(ui.painter(), &mark, rect, Color32::WHITE);
             resp.on_hover_text("OrganizeMyFiles");
             ui.add_space(4.0);
             ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(14.5).color(text_primary()));
@@ -4243,6 +4275,42 @@ mod tests {
         assert!((6.5..7.2).contains(&ratio), "rapport largeur/hauteur du logotype : {ratio}");
         // Fond transparent : le logotype se pose sur le thème sombre sans cadre.
         assert_eq!(img.to_rgba8().get_pixel(0, 0)[3], 0);
+    }
+
+    #[test]
+    fn a_reduced_white_logo_keeps_a_valid_premultiplied_edge() {
+        // Carré blanc opaque sur fond transparent « noir » : sans prémultiplication, les contours réduits seraient gris.
+        let mut img = image::RgbaImage::from_pixel(64, 64, image::Rgba([0, 0, 0, 0]));
+        for y in 16..48 {
+            for x in 16..48 {
+                img.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+            }
+        }
+        let small = resize_premultiplied(&img, 20);
+        assert_eq!(small.size, [20, 20]);
+        for p in &small.pixels {
+            let [r, g, b, a] = p.to_array();
+            assert!(r <= a && g <= a && b <= a, "couleur prémultipliée invalide : {p:?}");
+            assert_eq!((r, g), (g, b), "le blanc reste neutre, même sur les contours");
+            assert_eq!(r, a, "un blanc à demi transparent prémultiplié vaut son opacité (pas de liseré gris)");
+        }
+        assert!(small.pixels.iter().any(|p| p.a() == 255) && small.pixels.iter().any(|p| p.a() == 0));
+    }
+
+    #[test]
+    fn an_image_is_never_enlarged() {
+        let img = image::RgbaImage::from_pixel(10, 4, image::Rgba([255, 255, 255, 255]));
+        assert_eq!(resize_premultiplied(&img, 50).size, [10, 4]);
+    }
+
+    #[test]
+    fn a_fitted_texture_has_the_exact_pixel_size_and_is_cached() {
+        let ctx = egui::Context::default();
+        let a = fitted_texture(&ctx, "wordmark", WORDMARK_PNG, 128.0);
+        let b = fitted_texture(&ctx, "wordmark", WORDMARK_PNG, 128.0);
+        assert_eq!(a.id(), b.id(), "la texture est calculée une seule fois par taille");
+        assert_eq!(a.size()[0], 128);
+        assert_eq!(a.size()[1], 19, "2216 × 322 réduit à 128 px de large");
     }
 
     #[test]
