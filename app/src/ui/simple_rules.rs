@@ -16,9 +16,11 @@ pub const LAST_STEP: u8 = 3;
 pub const SIMPLE_ACTIONS: &[ActionKind] =
     &[ActionKind::Move, ActionKind::Copy, ActionKind::Rename, ActionKind::Trash, ActionKind::AddTag, ActionKind::Compress];
 
-/// Raccourci de condition : un libellé de carte et la condition qu'il ajoute.
+/// Raccourci de condition : une carte illustrée (libellé, pictogramme, teinte) et la condition qu'elle ajoute.
 pub struct Preset {
     pub label: &'static str,
+    pub icon: Icon,
+    pub tint: Color32,
     pub make: fn() -> Condition,
 }
 
@@ -26,15 +28,88 @@ fn cond(field: Field, op: Op, value: &str) -> Condition {
     Condition { field, op, value: value.into() }
 }
 
+// Teintes des pastilles illustrées : une couleur par famille de fichier, lisibles sur le thème sombre.
+const BLUE: Color32 = Color32::from_rgb(0x2b, 0x8c, 0xf0);
+const RED_TINT: Color32 = Color32::from_rgb(0xe5, 0x4d, 0x4d);
+const VIOLET: Color32 = Color32::from_rgb(0x8b, 0x5c, 0xf6);
+const INDIGO: Color32 = Color32::from_rgb(0x55, 0x6b, 0xf0);
+const PINK_TINT: Color32 = Color32::from_rgb(0xd9, 0x4f, 0xa0);
+const AMBER: Color32 = Color32::from_rgb(0xe0, 0x9a, 0x1f);
+const ORANGE_TINT: Color32 = Color32::from_rgb(0xf0, 0x6a, 0x2a);
+const TEAL: Color32 = Color32::from_rgb(0x14, 0xa8, 0xa0);
+const GREEN_TINT: Color32 = Color32::from_rgb(0x2f, 0xb4, 0x62);
+const CYAN: Color32 = Color32::from_rgb(0x1f, 0xb6, 0xd8);
+
 pub const PRESETS: &[Preset] = &[
-    Preset { label: "C'est une image", make: || cond(Field::Kind, Op::Is, "image") },
-    Preset { label: "C'est un PDF", make: || cond(Field::Extension, Op::Is, "pdf") },
-    Preset { label: "C'est une vidéo", make: || cond(Field::Kind, Op::Is, "video") },
-    Preset { label: "C'est un document", make: || cond(Field::Kind, Op::Is, "document") },
-    Preset { label: "Plus ancien que 30 jours", make: || cond(Field::DateModified, Op::NotWithinLast, "30 days") },
-    Preset { label: "Le nom contient…", make: || cond(Field::Name, Op::Contains, "") },
-    Preset { label: "Plus gros que…", make: || cond(Field::Size, Op::Greater, "100 MB") },
+    Preset { label: "C'est une image", icon: Icon::Image, tint: BLUE, make: || cond(Field::Kind, Op::Is, "image") },
+    Preset { label: "C'est un PDF", icon: Icon::Pdf, tint: RED_TINT, make: || cond(Field::Extension, Op::Is, "pdf") },
+    Preset { label: "C'est une vidéo", icon: Icon::Video, tint: VIOLET, make: || cond(Field::Kind, Op::Is, "video") },
+    Preset { label: "C'est un document", icon: Icon::Document, tint: INDIGO, make: || cond(Field::Kind, Op::Is, "document") },
+    Preset { label: "C'est un son", icon: Icon::Music, tint: PINK_TINT, make: || cond(Field::Kind, Op::Is, "audio") },
+    Preset { label: "C'est une archive", icon: Icon::Archive, tint: AMBER, make: || cond(Field::Kind, Op::Is, "archive") },
+    Preset {
+        label: "Plus ancien que 30 jours",
+        icon: Icon::Event,
+        tint: ORANGE_TINT,
+        make: || cond(Field::DateModified, Op::NotWithinLast, "30 days"),
+    },
+    Preset { label: "Le nom contient…", icon: Icon::Text, tint: TEAL, make: || cond(Field::Name, Op::Contains, "") },
+    Preset { label: "Plus gros que…", icon: Icon::Ruler, tint: GREEN_TINT, make: || cond(Field::Size, Op::Greater, "100 MB") },
 ];
+
+/// La carte est-elle « allumée » ? Oui si une condition de la règle correspond : même critère et même opérateur, et pour
+/// les types et extensions (valeur fixe) la même valeur. Les cartes à valeur libre (nom, taille, ancienneté) comptent dès
+/// que le critère est présent, quelle que soit la valeur choisie.
+pub fn preset_active(rule: &Rule, preset: &Preset) -> bool {
+    rule.conditions.iter().any(|c| preset_matches(c, &(preset.make)()))
+}
+
+fn preset_matches(have: &Condition, want: &Condition) -> bool {
+    if have.field != want.field || have.op != want.op {
+        return false;
+    }
+    match want.field {
+        Field::Kind | Field::Extension => have.value.trim().eq_ignore_ascii_case(want.value.trim()),
+        _ => true,
+    }
+}
+
+/// Clic sur une carte : ajoute la condition, ou la retire si elle y est déjà.
+pub fn toggle_preset(rule: &mut Rule, preset: &Preset) {
+    let want = (preset.make)();
+    match rule.conditions.iter().position(|c| preset_matches(c, &want)) {
+        Some(i) => {
+            rule.conditions.remove(i);
+        }
+        None => rule.conditions.push(want),
+    }
+}
+
+/// Pictogramme et teinte d'un critère de condition (ligne de la liste, étape 2).
+pub fn condition_icon(field: Field) -> (Icon, Color32) {
+    match field {
+        Field::Name => (Icon::Text, TEAL),
+        Field::Extension => (Icon::Document, INDIGO),
+        Field::Size => (Icon::Ruler, GREEN_TINT),
+        Field::DateAdded | Field::DateModified => (Icon::Event, ORANGE_TINT),
+        Field::Kind => (Icon::Category, BLUE),
+        Field::Tag => (Icon::Tag, AMBER),
+        Field::Contents => (Icon::Search, CYAN),
+    }
+}
+
+/// Pictogramme et teinte d'une action (cartes de l'étape 3).
+pub fn action_icon(kind: &ActionKind) -> (Icon, Color32) {
+    match kind {
+        ActionKind::Move => (Icon::Move, BLUE),
+        ActionKind::Copy => (Icon::Copy, CYAN),
+        ActionKind::Rename => (Icon::Rename, VIOLET),
+        ActionKind::Trash => (Icon::Trash, RED_TINT),
+        ActionKind::AddTag => (Icon::Tag, AMBER),
+        ActionKind::Compress => (Icon::Archive, ORANGE_TINT),
+        _ => (Icon::Bolt, INDIGO),
+    }
+}
 
 /// Opérateurs proposés en mode simple : tout sauf l'expression régulière (« correspond à »).
 pub fn simple_ops(field: Field) -> Vec<Op> {
@@ -219,8 +294,9 @@ pub fn action_phrase(a: &Action) -> String {
     }
 }
 
-/// La règle en une phrase : « Dans Téléchargements, quand un fichier est une image, le déplacer vers « Images ». »
-pub fn rule_sentence(rule: &Rule, folders: &[Folder]) -> String {
+/// La règle en une phrase, découpée en segments : `(texte, mis_en_valeur)`. Les mots clés (dossiers, conditions, action)
+/// sont mis en valeur par l'écran ; les autres relient la phrase.
+pub fn rule_sentence_parts(rule: &Rule, folders: &[Folder]) -> Vec<(String, bool)> {
     let names: Vec<String> = rule.folder_ids.iter().map(|id| tags::folder_label(folders, *id)).filter(|n| !n.is_empty()).collect();
     let place = match names.as_slice() {
         [] => "…".to_string(),
@@ -233,8 +309,21 @@ pub fn rule_sentence(rule: &Rule, folders: &[Folder]) -> String {
         rule.conditions.iter().map(condition_phrase).collect::<Vec<_>>().join(" et ")
     };
     let what = rule.actions.first().map_or_else(|| "…".to_string(), action_phrase);
-    let prefix = if names.len() > 1 { "Dans les dossiers" } else { "Dans" };
-    format!("{prefix} {place}, quand un fichier {when}, {what}.")
+    let prefix = if names.len() > 1 { "Dans les dossiers " } else { "Dans " };
+    vec![
+        (prefix.to_string(), false),
+        (place, true),
+        (", quand un fichier ".to_string(), false),
+        (when, true),
+        (", ".to_string(), false),
+        (what, true),
+        (".".to_string(), false),
+    ]
+}
+
+/// La règle en une phrase : « Dans Téléchargements, quand un fichier est une image, le déplacer vers « Images ». »
+pub fn rule_sentence(rule: &Rule, folders: &[Folder]) -> String {
+    rule_sentence_parts(rule, folders).into_iter().map(|(text, _)| text).collect()
 }
 
 // ------------------------------------------------------------------ affichage
@@ -244,14 +333,105 @@ const SIZE_UNITS: [&str; 3] = ["KB", "MB", "GB"];
 const SPAN_UNITS: [(&str, &str); 3] = [("days", "jours"), ("weeks", "semaines"), ("months", "mois")];
 const CONFLICT_CHOICES: [(&str, &str); 3] = [(CONFLICT_NUMBER, "Garder les deux"), ("skip", "Ne rien faire"), ("replace", "Remplacer")];
 
+/// Cartes illustrées (modèles de conditions, actions) : taille fixe, elles passent à la ligne.
+const CARD_W: f32 = 132.0;
+const CARD_H: f32 = 106.0;
+const FOLDER_TILE_W: f32 = 262.0;
+const FOLDER_TILE_H: f32 = 58.0;
+/// Au-delà de ce nombre de dossiers suivis, le panneau de sélection propose une recherche.
+const SEARCH_FROM: usize = 6;
+
+fn ease(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn step_title(ui: &mut egui::Ui, title: &str, hint: &str) {
-    ui.label(RichText::new(title).size(19.0).family(semibold()).color(text_primary()));
+    ui.label(RichText::new(title).size(21.0).family(semibold()).color(text_primary()));
     ui.add_space(2.0);
     ui.label(RichText::new(hint).size(14.5).color(text_dim()));
-    ui.add_space(12.0);
+    ui.add_space(14.0);
+}
+
+/// Pastille illustrée : carré arrondi teinté, reflet « verre » en haut, pictogramme blanc.
+fn icon_tile(painter: &egui::Painter, rect: Rect, icon: Icon, tint: Color32) {
+    let r = rect.width() * 0.3;
+    painter.rect_filled(rect.translate(Vec2::new(0.0, 2.0)), Rounding::same(r), with_alpha(tint, 70));
+    painter.rect_filled(rect, Rounding::same(r), tint);
+    let top = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.center().y));
+    painter.rect_filled(top, Rounding { nw: r, ne: r, sw: 0.0, se: 0.0 }, with_alpha(Color32::WHITE, 34));
+    painter.rect_stroke(rect, Rounding::same(r), Stroke::new(1.0, with_alpha(Color32::WHITE, 70)));
+    draw_icon(painter, rect.center(), icon, Color32::WHITE, rect.width() * 0.52);
+}
+
+/// Carte illustrée cliquable : pastille, libellé, état « choisi » (contour et coche d'accent), léger relief au survol.
+fn choice_card(ui: &mut egui::Ui, icon: Icon, tint: Color32, label: &str, selected: bool, accent: Color32, dur: f32) -> egui::Response {
+    let (slot, resp) = ui.allocate_exact_size(Vec2::new(CARD_W, CARD_H), egui::Sense::click());
+    let ctx = ui.ctx().clone();
+    let hover = ctx.animate_bool_with_time(resp.id.with("hover"), resp.hovered(), dur);
+    let chosen = ctx.animate_bool_with_time(resp.id.with("chosen"), selected, dur);
+    let rect = slot.translate(Vec2::new(0.0, -2.0 * hover));
+    let painter = ui.painter();
+    painter.rect_filled(rect, Rounding::same(14.0), glass(((12.0 + 10.0 * hover) as u8).max(10)));
+    if chosen > 0.0 {
+        painter.rect_filled(rect, Rounding::same(14.0), with_alpha(accent, (40.0 * chosen) as u8));
+        painter.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.5, with_alpha(accent, (230.0 * chosen) as u8)));
+    } else {
+        painter.rect_stroke(rect, Rounding::same(14.0), Stroke::new(1.0, glass(22)));
+    }
+    let tile = Rect::from_center_size(Pos2::new(rect.center().x, rect.top() + 14.0 + 22.0), Vec2::splat(44.0));
+    icon_tile(painter, tile, icon, tint);
+    let mut job = egui::text::LayoutJob::simple(label.to_string(), egui::FontId::new(13.5, semibold()), text_primary(), CARD_W - 16.0);
+    job.halign = Align::Center;
+    let galley = painter.layout_job(job);
+    painter.galley(Pos2::new(rect.center().x, tile.bottom() + 8.0), galley, text_primary());
+    if chosen > 0.0 {
+        let c = Pos2::new(rect.right() - 13.0, rect.top() + 13.0);
+        painter.circle_filled(c, 9.0 * chosen, accent);
+        if chosen > 0.6 {
+            draw_icon(painter, c, Icon::Tick, Color32::WHITE, 12.0);
+        }
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Déroule `content` avec une animation de hauteur et de fondu ; `None` tant que c'est fermé. Sans animation
+/// (`dur` à 0, mouvement réduit), le contenu apparaît d'un coup.
+fn unfold<R>(ui: &mut egui::Ui, id: egui::Id, open: bool, dur: f32, content: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
+    let ctx = ui.ctx().clone();
+    let t = ctx.animate_bool_with_time(id.with("t"), open, dur);
+    if t <= 0.0 {
+        return None;
+    }
+    let height_id = id.with("h");
+    if t >= 1.0 {
+        let out = ui.scope(content);
+        ctx.data_mut(|d| d.insert_temp(height_id, out.response.rect.height()));
+        return Some(out.inner);
+    }
+    let full: f32 = ctx.data(|d| d.get_temp(height_id)).unwrap_or(180.0);
+    let width = ui.available_width();
+    let (outer, _) = ui.allocate_exact_size(Vec2::new(width, full * ease(t)), egui::Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new().max_rect(Rect::from_min_size(outer.min, Vec2::new(width, 4000.0))).layout(Layout::top_down(Align::Min)),
+    );
+    child.set_clip_rect(outer.intersect(ui.clip_rect()));
+    child.set_opacity(ease(t));
+    let out = content(&mut child);
+    ctx.data_mut(|d| d.insert_temp(height_id, child.min_rect().height()));
+    Some(out)
 }
 
 impl App {
+    /// Durée des animations de l'assistant : nulle quand le mouvement est réduit (« Animer le fond » coupé).
+    fn motion_secs(&self) -> f32 {
+        if self.animate_bg {
+            0.24
+        } else {
+            0.0
+        }
+    }
+
     /// Corps de l'écran Règles en mode simple : frise, étape courante, navigation, phrase récapitulative.
     /// Renvoie vrai si les dossiers cibles ont changé (l'ordre des onglets peut en dépendre).
     pub(super) fn simple_rules_ui(&mut self, ui: &mut egui::Ui, idx: usize) -> bool {
@@ -265,7 +445,7 @@ impl App {
         ui.add_space(14.0);
 
         let mut moved = false;
-        panel_card(ui, |ui| match step {
+        panel_card_with(ui, None, 22.0, |ui| match step {
             1 => moved = self.step_folders(ui, idx, accent),
             2 => self.step_conditions(ui, idx, accent),
             _ => self.step_action(ui, idx, accent),
@@ -296,14 +476,43 @@ impl App {
                 ui.label(RichText::new(why).size(14.5).color(text_dim()));
             }
         });
+        ui.add_space(16.0);
+        self.summary_card(ui, idx, accent, step);
         ui.add_space(14.0);
-        let sentence = rule_sentence(&self.rules[idx], &self.folders);
-        panel_card(ui, |ui| {
-            ui.label(caps("EN RÉSUMÉ"));
-            ui.add_space(4.0);
-            ui.label(RichText::new(sentence).size(16.0).color(text_primary()));
+        moved
+    }
+
+    /// « En résumé » : la règle en une phrase, mise en évidence (fond et contour d'accent, mots clés colorés).
+    fn summary_card(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32, step: u8) {
+        let parts = rule_sentence_parts(&self.rules[idx], &self.folders);
+        let ctx = ui.ctx().clone();
+        let (_, rect) = panel_card_with(ui, Some(with_alpha(accent, 24)), 20.0, |ui| {
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(28.0), egui::Sense::hover());
+                icon_tile(ui.painter(), r, Icon::Sparkle, accent);
+                ui.add_space(4.0);
+                ui.label(RichText::new("EN RÉSUMÉ").size(13.5).family(semibold()).color(lighten(accent, 40)));
+            });
+            ui.add_space(10.0);
+            let mut job = egui::text::LayoutJob::default();
+            job.wrap.max_width = ui.available_width();
+            for (text, key) in parts {
+                let format = if key {
+                    // Mots clés « surlignés » : texte blanc gras sur fond d'accent, lisible quelle que soit la couleur du thème.
+                    egui::text::TextFormat {
+                        font_id: egui::FontId::new(19.5, semibold()),
+                        color: Color32::WHITE,
+                        background: with_alpha(accent, 120),
+                        ..Default::default()
+                    }
+                } else {
+                    egui::text::TextFormat { font_id: egui::FontId::proportional(19.0), color: text_primary(), ..Default::default() }
+                };
+                job.append(&text, 0.0, format);
+            }
+            ui.label(job);
             if step == LAST_STEP {
-                ui.add_space(10.0);
+                ui.add_space(12.0);
                 ui.label(
                     RichText::new(
                         "Rien n'est perdu : chaque rangement apparaît dans l'Historique et, le plus souvent, peut être annulé. \
@@ -312,14 +521,27 @@ impl App {
                     .size(14.0)
                     .color(text_dim()),
                 );
-                ui.add_space(8.0);
+                ui.add_space(10.0);
                 if btn(ui, "Tester sans rien toucher", Btn::Sky, accent, None).clicked() {
                     self.run_batch(true);
                 }
             }
         });
-        ui.add_space(14.0);
-        moved
+        // Halo lumineux (anneaux d'accent de plus en plus pâles) puis contour net : la carte ressort du reste.
+        let pulse = if self.animate_bg { 1.0 + 0.18 * (ctx.input(|i| i.time) as f32 * 1.4).sin() } else { 1.0 };
+        let painter = ui.painter();
+        for k in 1..=7 {
+            let alpha = ((46.0 - k as f32 * 6.0) * pulse).clamp(0.0, 255.0) as u8;
+            painter.rect_stroke(
+                rect.expand(k as f32 * 1.8),
+                Rounding::same(CARD_RADIUS + k as f32 * 1.8),
+                Stroke::new(2.0, with_alpha(accent, alpha)),
+            );
+        }
+        painter.rect_stroke(rect, Rounding::same(CARD_RADIUS), Stroke::new(1.5, with_alpha(accent, 200)));
+        if self.animate_bg {
+            ctx.request_repaint_after(std::time::Duration::from_millis(60));
+        }
     }
 
     /// Règle qui utilise des réglages que l'assistant ne sait pas présenter : on la laisse intacte.
@@ -345,56 +567,223 @@ impl App {
         });
     }
 
-    /// Frise « 1 Dossiers · 2 Conditions · 3 Action » : on revient en arrière librement, on avance étape par étape.
+    /// Frise « 1 Dossiers — 2 Conditions — 3 Action » : étape courante en accent, étapes faites cochées et cliquables
+    /// (on revient en arrière librement, on avance étape par étape).
     fn step_bar(&mut self, ui: &mut egui::Ui, idx: usize, step: u8, accent: Color32) {
-        ui.horizontal_wrapped(|ui| {
-            for (i, name) in STEP_NAMES.iter().enumerate() {
-                let n = i as u8 + 1;
-                let (fg, bg) = if n == step { (accent, with_alpha(accent, 50)) } else { (text_dim(), glass(14)) };
-                if chip_button(ui, &format!("{n}  {name}"), fg, bg).clicked() {
-                    let reachable = (1..n).all(|s| step_ready(s, &self.rules[idx]).is_ok());
-                    if reachable {
-                        self.simple_step = n;
-                    }
+        let seg = ((ui.available_width() - 40.0) / 3.0).clamp(150.0, 240.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(seg * 3.0, 44.0), egui::Sense::hover());
+        let dur = self.motion_secs();
+        let ctx = ui.ctx().clone();
+        let mut prev_label_end = rect.left();
+        for (i, name) in STEP_NAMES.iter().enumerate() {
+            let n = i as u8 + 1;
+            let origin = rect.left() + seg * i as f32;
+            let center = Pos2::new(origin + 18.0, rect.center().y);
+            let hit = Rect::from_min_size(Pos2::new(origin, rect.top()), Vec2::new(seg - 8.0, rect.height()));
+            let resp = ui.interact(hit, ui.id().with(("simple-step", n)), egui::Sense::click());
+            let current = n == step;
+            let done = n < step && step_ready(n, &self.rules[idx]).is_ok();
+            let on = ctx.animate_bool_with_time(resp.id.with("on"), current || done, dur);
+            let painter = ui.painter();
+            if i > 0 {
+                let from = Pos2::new(prev_label_end + 10.0, center.y);
+                let to = Pos2::new(center.x - 22.0, center.y);
+                if to.x - from.x > 12.0 {
+                    painter.line_segment([from, to], Stroke::new(2.0, if n <= step { with_alpha(accent, 170) } else { glass(40) }));
                 }
-                if n < LAST_STEP {
-                    ui.label(RichText::new("›").size(16.0).color(text_dim()));
+            }
+            if current {
+                painter.circle_filled(center, 21.0, with_alpha(accent, 40));
+            }
+            painter.circle_filled(center, 15.0, if on > 0.0 { accent } else { glass(26) });
+            if done {
+                draw_icon(painter, center, Icon::Tick, Color32::WHITE, 15.0);
+            } else {
+                let color = if current { Color32::WHITE } else { text_dim() };
+                painter.text(center, egui::Align2::CENTER_CENTER, n.to_string(), egui::FontId::new(15.0, semibold()), color);
+            }
+            let label_color = if current { text_primary() } else { text_dim() };
+            let font = egui::FontId::new(if current { 16.0 } else { 15.0 }, semibold());
+            let label_w = painter.layout_no_wrap(name.to_string(), font.clone(), label_color).size().x;
+            painter.text(Pos2::new(center.x + 24.0, center.y), egui::Align2::LEFT_CENTER, *name, font, label_color);
+            prev_label_end = center.x + 24.0 + label_w;
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                let reachable = (1..n).all(|s| step_ready(s, &self.rules[idx]).is_ok());
+                if reachable {
+                    self.simple_step = n;
+                }
+            }
+        }
+    }
+
+    /// Étape 1 : la grande illustration du dossier ; un clic déroule la liste de tous les dossiers suivis.
+    fn step_folders(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) -> bool {
+        let ctx = ui.ctx().clone();
+        let rid = self.rules[idx].id;
+        let dur = self.motion_secs();
+        let open_id = egui::Id::new(("simple-folders-open", rid));
+        // Capture d'écran : OMF_FOLDERS_OPEN ouvre d'emblée le panneau des dossiers.
+        if self.screenshot.is_some() && self.frame <= 1 && std::env::var_os("OMF_FOLDERS_OPEN").is_some() {
+            ctx.data_mut(|d| d.insert_temp(open_id, true));
+        }
+        let open: bool = ctx.data(|d| d.get_temp(open_id)).unwrap_or(false);
+        let art = self.folder_art_texture(&ctx);
+        let float = if self.animate_bg { (ctx.input(|i| i.time) as f32 * 1.2).sin() * 2.5 } else { 0.0 };
+        let mut changed = false;
+        let mut toggle = false;
+        let mut refused_last = false;
+
+        ui.horizontal(|ui| {
+            let h = 128.0;
+            let w = h * art.size_vec2().x / art.size_vec2().y;
+            let (slot, resp) = ui.allocate_exact_size(Vec2::new(w + 28.0, h + 24.0), egui::Sense::click());
+            let hover = ctx.animate_bool_with_time(resp.id.with("hover"), resp.hovered() || open, dur);
+            let painter = ui.painter();
+            radial_glow(painter, slot.center(), h * (0.75 + 0.1 * hover), accent, 55.0 + 55.0 * hover);
+            let scale = 1.0 + 0.05 * hover;
+            let img = Rect::from_center_size(slot.center() + Vec2::new(0.0, float - 2.0 * hover), Vec2::new(w, h) * scale);
+            painter.image(art.id(), img, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Choisir les dossiers à ranger").clicked() {
+                toggle = true;
+            }
+            if self.animate_bg {
+                ctx.request_repaint_after(std::time::Duration::from_millis(40));
+            }
+            ui.add_space(6.0);
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width());
+                ui.add_space(6.0);
+                step_title(
+                    ui,
+                    "Quels dossiers voulez-vous ranger ?",
+                    "Touchez le dossier pour choisir. Vos fichiers ne bougent que si les conditions de l'étape suivante sont remplies.",
+                );
+                ui.horizontal_wrapped(|ui| {
+                    let ids = self.rules[idx].folder_ids.clone();
+                    for fid in &ids {
+                        let label = tags::folder_label(&self.folders, *fid);
+                        let full = self.folders.iter().find(|f| f.id == *fid).map(|f| f.path.display().to_string()).unwrap_or_default();
+                        if removable_chip(ui, &label, &full, accent) {
+                            if ids.len() > 1 {
+                                self.rules[idx].folder_ids.retain(|id| id != fid);
+                                changed = true;
+                            } else {
+                                refused_last = true;
+                            }
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                let label = if open { "Fermer la liste" } else { "Choisir les dossiers" };
+                if btn(ui, label, Btn::Sky, accent, Some(Icon::ExpandMore)).clicked() {
+                    toggle = true;
+                }
+            });
+        });
+        if toggle {
+            ctx.data_mut(|d| d.insert_temp(open_id, !open));
+        }
+
+        let panel_open = ctx.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
+        ui.add_space(4.0);
+        let closed = unfold(ui, open_id.with("panel"), panel_open, dur, |ui| {
+            ui.add_space(10.0);
+            self.folder_panel(ui, idx, accent, &mut changed, &mut refused_last)
+        });
+        if closed == Some(true) {
+            ctx.data_mut(|d| d.insert_temp(open_id, false));
+        }
+        if refused_last {
+            self.toast_error("Une règle doit garder au moins un dossier.");
+        }
+        changed
+    }
+
+    /// Panneau « tous les dossiers suivis » : une tuile par dossier, coche animée. Renvoie vrai quand on le referme.
+    fn folder_panel(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32, changed: &mut bool, refused_last: &mut bool) -> bool {
+        let dur = self.motion_secs();
+        let mut close = false;
+        if self.folders.is_empty() {
+            ui.label(RichText::new("Aucun dossier suivi : ajoutez-en dans « Dossiers suivis ».").size(14.0).color(text_dim()));
+            return close;
+        }
+        let query_id = egui::Id::new(("simple-folders-query", self.rules[idx].id));
+        let mut query: String = ui.data_mut(|d| d.get_temp(query_id)).unwrap_or_default();
+        if self.folders.len() > SEARCH_FROM {
+            ui.add(
+                egui::TextEdit::singleline(&mut query)
+                    .margin(egui::Margin::symmetric(8.0, 6.0))
+                    .desired_width(300.0)
+                    .hint_text("Rechercher un dossier…"),
+            );
+            ui.add_space(8.0);
+        }
+        ui.data_mut(|d| d.insert_temp(query_id, query.clone()));
+        let q = tags::fold(&query);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
+            for fi in 0..self.folders.len() {
+                let (fid, path) = (self.folders[fi].id, self.folders[fi].path.display().to_string());
+                if !q.is_empty() && !tags::fold(&path).contains(&q) {
+                    continue;
+                }
+                let label = tags::folder_label(&self.folders, fid);
+                let selected = self.rules[idx].folder_ids.contains(&fid);
+                if folder_tile(ui, &label, &shorten(&path), selected, accent, dur).clicked() {
+                    let ids = &mut self.rules[idx].folder_ids;
+                    if !selected {
+                        ids.push(fid);
+                        *changed = true;
+                    } else if ids.len() > 1 {
+                        ids.retain(|id| *id != fid);
+                        *changed = true;
+                    } else {
+                        *refused_last = true;
+                    }
                 }
             }
         });
-    }
-
-    fn step_folders(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) -> bool {
-        step_title(
-            ui,
-            "Quels dossiers voulez-vous ranger ?",
-            "Choisissez les dossiers à surveiller. Vos fichiers ne bougent que si les conditions de l'étape suivante sont remplies.",
-        );
-        self.target_folders_ui(ui, idx, accent)
+        ui.add_space(10.0);
+        if btn(ui, "Terminé", Btn::Primary, accent, Some(Icon::Tick)).clicked() {
+            close = true;
+        }
+        ui.add_space(4.0);
+        close
     }
 
     fn step_conditions(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) {
+        let dur = self.motion_secs();
         step_title(
             ui,
             "Quels fichiers sont concernés ?",
-            "Cliquez sur un modèle, ou ajoutez votre propre critère. Un fichier est rangé seulement s'il remplit toutes les conditions.",
+            "Touchez les modèles qui vous parlent. Un fichier est rangé seulement s'il remplit toutes les conditions.",
         );
         ui.label(caps("MODÈLES"));
-        ui.add_space(4.0);
+        ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
             for preset in PRESETS {
-                if btn(ui, preset.label, Btn::Sky, accent, None).clicked() {
-                    self.rules[idx].conditions.push((preset.make)());
+                let on = preset_active(&self.rules[idx], preset);
+                if choice_card(ui, preset.icon, preset.tint, preset.label, on, accent, dur).clicked() {
+                    toggle_preset(&mut self.rules[idx], preset);
                 }
             }
         });
-        ui.add_space(12.0);
+        ui.add_space(14.0);
 
         let rid = self.rules[idx].id;
+        if !self.rules[idx].conditions.is_empty() {
+            ui.label(caps("VOS CONDITIONS"));
+            ui.add_space(6.0);
+        }
         let mut remove: Option<usize> = None;
         for ci in 0..self.rules[idx].conditions.len() {
             row_frame(ui, |ui| {
                 ui.horizontal(|ui| {
+                    let (icon, tint) = condition_icon(self.rules[idx].conditions[ci].field);
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(30.0), egui::Sense::hover());
+                    icon_tile(ui.painter(), r, icon, tint);
+                    ui.add_space(4.0);
                     if self.simple_condition_row(ui, idx, ci, rid, accent) {
                         remove = Some(ci);
                     }
@@ -474,13 +863,15 @@ impl App {
     }
 
     fn step_action(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32) {
-        step_title(ui, "Que faire de ces fichiers ?", "Une seule action suffit pour commencer. Rien n'est supprimé définitivement.");
+        let dur = self.motion_secs();
+        step_title(ui, "Que faire de ces fichiers ?", "Choisissez une action. Rien n'est supprimé définitivement.");
         let current = self.rules[idx].actions.first().map(|a| a.kind.clone());
         ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
             for kind in SIMPLE_ACTIONS {
                 let on = current.as_ref() == Some(kind);
-                let (fg, bg) = if on { (accent, with_alpha(accent, 50)) } else { (text_dim(), glass(14)) };
-                if chip_button(ui, simple_action_label(kind), fg, bg).clicked() && !on {
+                let (icon, tint) = action_icon(kind);
+                if choice_card(ui, icon, tint, simple_action_label(kind), on, accent, dur).clicked() && !on {
                     let mut action = Action::new(kind.clone());
                     if matches!(kind, ActionKind::Move | ActionKind::Copy) {
                         action.params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_NUMBER.into());
@@ -490,33 +881,42 @@ impl App {
             }
         });
         let Some(kind) = self.rules[idx].actions.first().map(|a| a.kind.clone()) else { return };
-        ui.add_space(12.0);
-        match kind {
-            ActionKind::Move | ActionKind::Copy => self.destination_fields(ui, idx, accent),
-            ActionKind::Rename => {
-                ui.label(caps("NOUVEAU NOM"));
-                self.param_field(ui, idx, "pattern", "{name}-{current_date}.{extension}");
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new("{name} = nom actuel · {extension} = extension · {current_date} = date du jour.")
-                        .size(13.5)
-                        .color(text_dim()),
-                );
+        ui.add_space(14.0);
+        // Les réglages de l'action apparaissent en fondu à chaque changement d'action.
+        let appear = ui.ctx().animate_bool_with_time(egui::Id::new(("simple-action-params", self.rules[idx].id, kind.raw())), true, dur);
+        ui.scope(|ui| {
+            ui.set_opacity(appear);
+            match kind {
+                ActionKind::Move | ActionKind::Copy => self.destination_fields(ui, idx, accent),
+                ActionKind::Rename => {
+                    ui.label(caps("NOUVEAU NOM"));
+                    self.param_field(ui, idx, "pattern", "{name}-{current_date}.{extension}");
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new("{name} = nom actuel · {extension} = extension · {current_date} = date du jour.")
+                            .size(13.5)
+                            .color(text_dim()),
+                    );
+                }
+                ActionKind::AddTag => {
+                    ui.label(caps("ÉTIQUETTE"));
+                    self.param_field(ui, idx, "tags", "ex. Factures");
+                }
+                ActionKind::Trash => {
+                    ui.label(
+                        RichText::new("Les fichiers vont dans la corbeille : vous pouvez les récupérer.").size(14.5).color(text_dim()),
+                    );
+                }
+                ActionKind::Compress => {
+                    ui.label(
+                        RichText::new("Chaque fichier est compressé dans une archive ZIP, posée à côté de lui.")
+                            .size(14.5)
+                            .color(text_dim()),
+                    );
+                }
+                _ => {}
             }
-            ActionKind::AddTag => {
-                ui.label(caps("ÉTIQUETTE"));
-                self.param_field(ui, idx, "tags", "ex. Factures");
-            }
-            ActionKind::Trash => {
-                ui.label(RichText::new("Les fichiers vont dans la corbeille : vous pouvez les récupérer.").size(14.5).color(text_dim()));
-            }
-            ActionKind::Compress => {
-                ui.label(
-                    RichText::new("Chaque fichier est compressé dans une archive ZIP, posée à côté de lui.").size(14.5).color(text_dim()),
-                );
-            }
-            _ => {}
-        }
+        });
     }
 
     fn param_field(&mut self, ui: &mut egui::Ui, idx: usize, key: &str, hint: &str) {
@@ -556,6 +956,41 @@ impl App {
             self.rules[idx].actions[0].params.insert(ON_CONFLICT_PARAM_KEY.into(), CONFLICT_CHOICES[i].0.into());
         }
     }
+}
+
+/// Tuile d'un dossier suivi (panneau de l'étape 1) : pastille, nom, chemin court, coche animée.
+fn folder_tile(ui: &mut egui::Ui, name: &str, path: &str, selected: bool, accent: Color32, dur: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(FOLDER_TILE_W, FOLDER_TILE_H), egui::Sense::click());
+    let ctx = ui.ctx().clone();
+    let hover = ctx.animate_bool_with_time(resp.id.with("hover"), resp.hovered(), dur);
+    let chosen = ctx.animate_bool_with_time(resp.id.with("chosen"), selected, dur);
+    let painter = ui.painter();
+    painter.rect_filled(rect, Rounding::same(12.0), glass((12.0 + 10.0 * hover) as u8));
+    if chosen > 0.0 {
+        painter.rect_filled(rect, Rounding::same(12.0), with_alpha(accent, (36.0 * chosen) as u8));
+        painter.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.5, with_alpha(accent, (220.0 * chosen) as u8)));
+    } else {
+        painter.rect_stroke(rect, Rounding::same(12.0), Stroke::new(1.0, glass(22)));
+    }
+    let tile = Rect::from_min_size(rect.left_top() + Vec2::new(10.0, 10.0), Vec2::splat(38.0));
+    icon_tile(painter, tile, Icon::FolderOpen, if selected { accent } else { BLUE });
+    let text_x = tile.right() + 12.0;
+    let max_w = rect.right() - 44.0 - text_x;
+    let font = egui::FontId::new(14.5, semibold());
+    let name = ellipsize(painter, name, &font, max_w);
+    painter.text(Pos2::new(text_x, rect.top() + 11.0), egui::Align2::LEFT_TOP, name, font, text_primary());
+    let small = egui::FontId::proportional(12.5);
+    let path = ellipsize(painter, path, &small, max_w);
+    painter.text(Pos2::new(text_x, rect.top() + 32.0), egui::Align2::LEFT_TOP, path, small, text_dim());
+    let c = Pos2::new(rect.right() - 22.0, rect.center().y);
+    painter.circle_stroke(c, 10.0, Stroke::new(1.5, with_alpha(text_dim(), 150)));
+    if chosen > 0.0 {
+        painter.circle_filled(c, 10.0 * chosen, accent);
+        if chosen > 0.6 {
+            draw_icon(painter, c, Icon::Tick, Color32::WHITE, 13.0);
+        }
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Champ « nombre + unité » : renvoie la nouvelle valeur enregistrée (« 30 days », « 100 MB ») si elle change.
@@ -697,7 +1132,7 @@ mod tests {
             rule_sentence(&r, &folders),
             "Dans Téléchargements, quand un fichier est une image, le déplacer vers « /Users/a/Images »."
         );
-        let mut r = rule(vec![(PRESETS[4].make)(), (PRESETS[6].make)()], vec![Action::new(ActionKind::Trash)]);
+        let mut r = rule(vec![(PRESETS[6].make)(), (PRESETS[8].make)()], vec![Action::new(ActionKind::Trash)]);
         r.folder_ids = vec![1, 2];
         assert_eq!(
             rule_sentence(&r, &folders),
@@ -719,6 +1154,61 @@ mod tests {
         for kind in SIMPLE_ACTIONS {
             assert!(!simple_action_label(kind).is_empty());
         }
+    }
+
+    fn preset(label: &str) -> &'static Preset {
+        PRESETS.iter().find(|p| p.label == label).unwrap_or_else(|| panic!("modèle introuvable : {label}"))
+    }
+
+    #[test]
+    fn a_preset_card_lights_up_when_its_condition_is_present_and_toggles() {
+        let mut r = rule(vec![], vec![]);
+        let image = preset("C'est une image");
+        assert!(!preset_active(&r, image));
+        toggle_preset(&mut r, image);
+        assert!(preset_active(&r, image) && r.conditions.len() == 1);
+        assert!(!preset_active(&r, preset("C'est une vidéo")), "un autre type n'allume pas la carte");
+        toggle_preset(&mut r, image);
+        assert!(r.conditions.is_empty(), "un second clic retire la condition");
+    }
+
+    #[test]
+    fn free_value_presets_stay_lit_whatever_the_value() {
+        let mut r = rule(vec![], vec![]);
+        toggle_preset(&mut r, preset("Plus gros que…"));
+        r.conditions[0].value = "2 GB".into();
+        assert!(preset_active(&r, preset("Plus gros que…")), "la taille choisie ne change rien à l'état de la carte");
+        r.conditions.push(cond(Field::DateModified, Op::NotWithinLast, "6 months"));
+        assert!(preset_active(&r, preset("Plus ancien que 30 jours")));
+        toggle_preset(&mut r, preset("Plus gros que…"));
+        assert_eq!(r.conditions.len(), 1, "seule la condition de taille est retirée");
+    }
+
+    #[test]
+    fn every_preset_and_action_has_an_icon_and_a_distinct_label() {
+        let mut labels: Vec<&str> = PRESETS.iter().map(|p| p.label).collect();
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(labels.len(), PRESETS.len());
+        for kind in SIMPLE_ACTIONS {
+            let (_, tint) = action_icon(kind);
+            assert_ne!(tint, Color32::TRANSPARENT);
+        }
+        for field in FIELDS {
+            let (_, tint) = condition_icon(*field);
+            assert_ne!(tint, Color32::TRANSPARENT);
+        }
+    }
+
+    #[test]
+    fn the_sentence_parts_highlight_the_key_words_and_rebuild_the_sentence() {
+        let folders = vec![folder(1, "/Users/a/Téléchargements")];
+        let r = rule(vec![(preset("C'est une image").make)()], vec![move_to("/Users/a/Images")]);
+        let parts = rule_sentence_parts(&r, &folders);
+        let highlighted: Vec<&str> = parts.iter().filter(|(_, key)| *key).map(|(t, _)| t.as_str()).collect();
+        assert_eq!(highlighted, ["Téléchargements", "est une image", "le déplacer vers « /Users/a/Images »"]);
+        let joined: String = parts.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(joined, rule_sentence(&r, &folders));
     }
 
     #[test]
