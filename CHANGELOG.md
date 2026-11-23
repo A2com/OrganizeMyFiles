@@ -7,6 +7,10 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+### Ajouté
+
+- Logotype « OrganizeMyFiles » (SVG fourni par Andy) intégré avec discrétion : barre latérale, pied de l'écran de bienvenue, Réglages › À propos.
+
 ### Corrigé
 
 - Écran de bienvenue : « Bienvenue » s'écrit en un geste continu (lettres liées, stylo à vitesse régulière, point du « i » en dernier) au lieu de lettres posées les unes après les autres.

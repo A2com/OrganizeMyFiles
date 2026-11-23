@@ -74,6 +74,12 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [x] | « ⌘ K », « Actif », « Aperçu simulation » et « Organiser » ne se chevauchent à aucune largeur de fenêtre (980, 1180, 1300, 1500 px) | Captures relues (2026-11-22) |
 | [ ] | Même contrôle en agrandissant et réduisant la fenêtre à la main (écran Retina) | À faire (Andy, Mac) |
 
+## 3 septies. Logotype
+| | Contrôle | État |
+|---|---|---|
+| [ ] | Le logotype blanc s'affiche dans la barre latérale (à côté de l'icône), en pied de l'écran de bienvenue (discret) et dans Réglages › À propos | À faire (Andy, Mac) |
+| [x] | Captures 980 / 1180 / intro / Réglages relues : net, bien aligné, sans débordement | Captures relues (2026-11-23) |
+
 ## 3 sexies. Écran de bienvenue
 | | Contrôle | État |
 |---|---|---|
