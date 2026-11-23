@@ -202,6 +202,9 @@ struct UndoFolder {
     at: std::time::Instant,
 }
 
+/// Intensité des halos lumineux (1 = d'origine) : réduite, ils étaient trop brillants. Un seul réglage pour tous.
+const GLOW_SOFTNESS: f32 = 0.45;
+
 const UNDO_SECONDS: u64 = 8;
 
 /// Barre du haut : largeurs fixes et places à réserver.
@@ -275,12 +278,14 @@ impl IntroState {
 /// Illustration du dossier (écran Règles, mode simple).
 const FOLDER_ART_PNG: &[u8] = include_bytes!("../../assets/ui/folder.png");
 const INTRO_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/intro-600.png");
+/// Taille du mot « Bienvenue » par rapport à sa taille d'origine (réduit de moitié à la demande d'Andy).
+const WORD_SCALE: f32 = 0.5;
 /// Largeurs d'affichage du logotype (points) : barre latérale, écran de bienvenue, « À propos ».
 const WORDMARK_SIDEBAR_W: f32 = 128.0;
 const WORDMARK_INTRO_W: f32 = 170.0;
 const WORDMARK_ABOUT_W: f32 = 150.0;
 /// Logotype « OrganizeMyFiles » (texte blanc, dégradé sur « O » et « My »), généré par `scripts/generer-logo.py`.
-const WORDMARK_PNG: &[u8] = include_bytes!("../../assets/logo/wordmark-white-480.png");
+const WORDMARK_PNG: &[u8] = include_bytes!("../../assets/logo/wordmark-white-640.png");
 
 pub struct App {
     tab: Tab,
@@ -783,7 +788,7 @@ impl App {
 
         // Disposition : bloc centré (icône, mot, présentation, bouton).
         let icon_size = (screen.height() * 0.34).min(300.0);
-        let word_w = (icon_size * 1.85).min(screen.width() * 0.7);
+        let word_w = (icon_size * 1.85).min(screen.width() * 0.7) * WORD_SCALE;
         let strokes = intro::word();
         let k = word_w / strokes.width;
         let word_h = strokes.height * k;
@@ -1654,7 +1659,7 @@ fn outer_glow(ctx: &egui::Context, rect: Rect, radius: f32, color: Color32, inte
             .clone()
     };
     let margin = crate::glow::margin(crate::glow::SOFT) as f32 + grow;
-    let tint = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (intensity.clamp(0.0, 1.0) * 255.0) as u8);
+    let tint = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (intensity.clamp(0.0, 1.0) * GLOW_SOFTNESS * 255.0) as u8);
     egui::Shape::image(texture.id(), rect.expand(margin).translate(Vec2::ZERO), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint)
 }
 
@@ -1673,7 +1678,7 @@ fn state_is_live(intro: &Option<IntroState>) -> bool {
 fn radial_glow(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32, alpha: f32) {
     const SEGMENTS: usize = 64;
     let mut mesh = egui::epaint::Mesh::default();
-    let inner = with_alpha(color, alpha.clamp(0.0, 255.0) as u8);
+    let inner = with_alpha(color, (alpha * GLOW_SOFTNESS).clamp(0.0, 255.0) as u8);
     let outer = with_alpha(color, 0);
     mesh.colored_vertex(center, inner);
     for i in 0..=SEGMENTS {
@@ -1784,7 +1789,7 @@ fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<I
     let (fill, fg) = if enabled { (fill, fg) } else { (glass(12), with_alpha(Color32::WHITE, 70)) };
     let p = ui.painter();
     if kind == Btn::Primary && enabled {
-        p.rect_filled(rect.expand(3.0), Rounding::same(10.0), with_alpha(accent, 40));
+        p.rect_filled(rect.expand(3.0), Rounding::same(10.0), with_alpha(accent, (40.0 * GLOW_SOFTNESS) as u8));
     }
     if matches!(kind, Btn::Sky) {
         p.rect_filled(rect, Rounding::same(8.0), with_alpha(CANVAS, 140));
@@ -1918,10 +1923,10 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
     let font = egui::FontId::new(14.0, semibold());
     let widths: Vec<f32> =
         labels.iter().map(|l| ui.painter().layout_no_wrap(l.to_string(), font.clone(), Color32::WHITE).size().x + 28.0).collect();
-    let total = widths.iter().sum::<f32>() + 8.0;
+    let total = segmented_width(&widths);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(total, 34.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, Rounding::same(9.0), with_alpha(CANVAS, 150));
-    let mut x = rect.left() + 4.0;
+    let mut x = rect.left() + SEGMENT_PAD;
     let mut out = None;
     for (i, label) in labels.iter().enumerate() {
         let seg = Rect::from_min_size(Pos2::new(x, rect.top() + 4.0), Vec2::new(widths[i], 26.0));
@@ -1936,9 +1941,18 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
         if resp.clicked() {
             out = Some(i);
         }
-        x += widths[i];
+        x += widths[i] + SEGMENT_GAP;
     }
     out
+}
+
+/// Espace autour et entre les segments d'un sélecteur (points) : régulier, pour que les boutons ne se touchent pas.
+const SEGMENT_PAD: f32 = 4.0;
+const SEGMENT_GAP: f32 = 4.0;
+
+/// Largeur totale d'un sélecteur : segments, espaces entre eux et marge de chaque côté.
+fn segmented_width(widths: &[f32]) -> f32 {
+    widths.iter().sum::<f32>() + SEGMENT_GAP * widths.len().saturating_sub(1) as f32 + 2.0 * SEGMENT_PAD
 }
 
 /// Bouton-icône carré (28 px) ; `danger` = teinte rouge au survol. true si cliqué.
@@ -3534,7 +3548,7 @@ impl App {
                 if btn(ui, "Nouvelle règle", Btn::Sky, accent, Some(Icon::Add)).clicked() {
                     self.new_rule();
                 }
-                ui.add_space(8.0);
+                ui.add_space(4.0); // + l'écart habituel entre widgets : 12 pt au total
                 let current = if self.rules_mode == RulesMode::Simple { 0 } else { 1 };
                 if let Some(i) = segmented(ui, egui::Id::new("rules-mode"), &["Simple", "Avancé"], current, SKY_DEEP) {
                     self.rules_mode = if i == 0 { RulesMode::Simple } else { RulesMode::Advanced };
@@ -4215,6 +4229,14 @@ mod tests {
         assert!((6.5..7.2).contains(&ratio), "rapport largeur/hauteur du logotype : {ratio}");
         // Fond transparent : le logotype se pose sur le thème sombre sans cadre.
         assert_eq!(img.to_rgba8().get_pixel(0, 0)[3], 0);
+    }
+
+    #[test]
+    fn segmented_buttons_never_touch() {
+        // Deux segments de 60 pt : 4 de marge de chaque côté et 4 entre eux, régulier quel que soit leur nombre.
+        assert_eq!(segmented_width(&[60.0, 60.0]), 60.0 + 60.0 + 4.0 + 8.0);
+        assert_eq!(segmented_width(&[60.0]), 68.0);
+        assert!(segmented_width(&[50.0, 50.0, 50.0]) - 150.0 >= 2.0 * SEGMENT_GAP + 2.0 * SEGMENT_PAD);
     }
 
     #[test]

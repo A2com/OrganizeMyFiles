@@ -34,11 +34,11 @@ const RED_TINT: Color32 = Color32::from_rgb(0xe5, 0x4d, 0x4d);
 const VIOLET: Color32 = Color32::from_rgb(0x8b, 0x5c, 0xf6);
 const INDIGO: Color32 = Color32::from_rgb(0x55, 0x6b, 0xf0);
 const PINK_TINT: Color32 = Color32::from_rgb(0xd9, 0x4f, 0xa0);
-const AMBER: Color32 = Color32::from_rgb(0xe0, 0x9a, 0x1f);
-const ORANGE_TINT: Color32 = Color32::from_rgb(0xf0, 0x6a, 0x2a);
-const TEAL: Color32 = Color32::from_rgb(0x14, 0xa8, 0xa0);
-const GREEN_TINT: Color32 = Color32::from_rgb(0x2f, 0xb4, 0x62);
-const CYAN: Color32 = Color32::from_rgb(0x1f, 0xb6, 0xd8);
+const AMBER: Color32 = Color32::from_rgb(0xc2, 0x7c, 0x0e);
+const ORANGE_TINT: Color32 = Color32::from_rgb(0xe0, 0x55, 0x1c);
+const TEAL: Color32 = Color32::from_rgb(0x0f, 0x8f, 0x88);
+const GREEN_TINT: Color32 = Color32::from_rgb(0x1f, 0x95, 0x4e);
+const CYAN: Color32 = Color32::from_rgb(0x0e, 0x8f, 0xb0);
 
 pub const PRESETS: &[Preset] = &[
     Preset { label: "C'est une image", icon: Icon::Image, tint: BLUE, make: || cond(Field::Kind, Op::Is, "image") },
@@ -353,15 +353,10 @@ fn step_title(ui: &mut egui::Ui, title: &str, hint: &str) {
     ui.add_space(14.0);
 }
 
-/// Pastille illustrée : carré arrondi teinté, reflet « verre » en haut, pictogramme blanc.
+/// Pastille illustrée : carré arrondi **plat** (couleur unie, sans reflet ni contour) et pictogramme blanc bien lisible.
 fn icon_tile(painter: &egui::Painter, rect: Rect, icon: Icon, tint: Color32) {
-    let r = rect.width() * 0.3;
-    painter.rect_filled(rect.translate(Vec2::new(0.0, 2.0)), Rounding::same(r), with_alpha(tint, 70));
-    painter.rect_filled(rect, Rounding::same(r), tint);
-    let top = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.center().y));
-    painter.rect_filled(top, Rounding { nw: r, ne: r, sw: 0.0, se: 0.0 }, with_alpha(Color32::WHITE, 34));
-    painter.rect_stroke(rect, Rounding::same(r), Stroke::new(1.0_f32, with_alpha(Color32::WHITE, 70)));
-    draw_icon(painter, rect.center(), icon, Color32::WHITE, rect.width() * 0.52);
+    painter.rect_filled(rect, Rounding::same(rect.width() * 0.28), tint);
+    draw_icon(painter, rect.center(), icon, Color32::WHITE, rect.width() * 0.62);
 }
 
 /// Carte illustrée cliquable : pastille, libellé, état « choisi » (contour et coche d'accent), léger relief au survol.
@@ -457,24 +452,23 @@ impl App {
             if step > 1 && btn(ui, "Précédent", Btn::Ghost, accent, None).clicked() {
                 self.simple_step = step - 1;
             }
-            if step < LAST_STEP {
-                ui.add_enabled_ui(ready.is_ok(), |ui| {
-                    if btn(ui, "Suivant", Btn::Primary, accent, None).clicked() {
-                        self.simple_step = step + 1;
-                    }
-                });
-            } else {
-                ui.add_enabled_ui(ready.is_ok(), |ui| {
-                    if btn(ui, "Terminer", Btn::Primary, accent, Some(Icon::Tick)).clicked() {
-                        self.toast("Règle enregistrée : elle s'applique dès maintenant.".to_string());
-                        self.simple_step = 1;
-                    }
-                });
-            }
             if let Err(why) = ready {
                 ui.add_space(8.0);
                 ui.label(RichText::new(why).size(14.5).color(text_dim()));
             }
+            // « Suivant » (ou « Terminer ») à droite : c'est là qu'on l'attend.
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_enabled_ui(ready.is_ok(), |ui| {
+                    if step < LAST_STEP {
+                        if btn(ui, "Suivant", Btn::Primary, accent, None).clicked() {
+                            self.simple_step = step + 1;
+                        }
+                    } else if btn(ui, "Terminer", Btn::Primary, accent, Some(Icon::Tick)).clicked() {
+                        self.toast("Règle enregistrée : elle s'applique dès maintenant.".to_string());
+                        self.simple_step = 1;
+                    }
+                });
+            });
         });
         ui.add_space(16.0);
         self.summary_card(ui, idx, accent, step);
@@ -485,7 +479,6 @@ impl App {
     /// « En résumé » : la règle en une phrase, mise en évidence (fond et contour d'accent, mots clés colorés).
     fn summary_card(&mut self, ui: &mut egui::Ui, idx: usize, accent: Color32, step: u8) {
         let parts = rule_sentence_parts(&self.rules[idx], &self.folders);
-        let ctx = ui.ctx().clone();
         let (_, rect) = panel_card_with(ui, Some(with_alpha(accent, 24)), 20.0, |ui| {
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(28.0), egui::Sense::hover());
@@ -497,18 +490,9 @@ impl App {
             let mut job = egui::text::LayoutJob::default();
             job.wrap.max_width = ui.available_width();
             for (text, key) in parts {
-                let format = if key {
-                    // Mots clés « surlignés » : texte blanc gras sur fond d'accent, lisible quelle que soit la couleur du thème.
-                    egui::text::TextFormat {
-                        font_id: egui::FontId::new(19.5, semibold()),
-                        color: Color32::WHITE,
-                        background: with_alpha(accent, 120),
-                        ..Default::default()
-                    }
-                } else {
-                    egui::text::TextFormat { font_id: egui::FontId::proportional(19.0), color: text_primary(), ..Default::default() }
-                };
-                job.append(&text, 0.0, format);
+                // Mots clés en gras seulement : même couleur que le reste de la phrase, pas de fond.
+                let font = if key { egui::FontId::new(19.5, semibold()) } else { egui::FontId::proportional(19.5) };
+                job.append(&text, 0.0, egui::text::TextFormat { font_id: font, color: text_primary(), ..Default::default() });
             }
             ui.label(job);
             if step == LAST_STEP {
@@ -527,21 +511,8 @@ impl App {
                 }
             }
         });
-        // Halo lumineux (anneaux d'accent de plus en plus pâles) puis contour net : la carte ressort du reste.
-        let pulse = if self.animate_bg { 1.0 + 0.18 * (ctx.input(|i| i.time) as f32 * 1.4).sin() } else { 1.0 };
-        let painter = ui.painter();
-        for k in 1..=7 {
-            let alpha = ((46.0 - k as f32 * 6.0) * pulse).clamp(0.0, 255.0) as u8;
-            painter.rect_stroke(
-                rect.expand(k as f32 * 1.8),
-                Rounding::same(CARD_RADIUS + k as f32 * 1.8),
-                Stroke::new(2.0_f32, with_alpha(accent, alpha)),
-            );
-        }
-        painter.rect_stroke(rect, Rounding::same(CARD_RADIUS), Stroke::new(1.5_f32, with_alpha(accent, 200)));
-        if self.animate_bg {
-            ctx.request_repaint_after(std::time::Duration::from_millis(60));
-        }
+        // Contour fin d'accent, sans halo : la carte se distingue par sa teinte.
+        ui.painter().rect_stroke(rect, Rounding::same(CARD_RADIUS), Stroke::new(1.5_f32, with_alpha(accent, 170)));
     }
 
     /// Règle qui utilise des réglages que l'assistant ne sait pas présenter : on la laisse intacte.
@@ -593,7 +564,7 @@ impl App {
                 }
             }
             if current {
-                painter.circle_filled(center, 21.0, with_alpha(accent, 40));
+                painter.circle_filled(center, 21.0, with_alpha(accent, 26));
             }
             painter.circle_filled(center, 15.0, if on > 0.0 { accent } else { glass(26) });
             if done {

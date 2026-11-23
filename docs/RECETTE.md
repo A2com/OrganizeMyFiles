@@ -104,6 +104,15 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [ ] | « Bienvenue » s'écrit d'un seul geste fluide (lettres liées, sans décalage entre les lettres), le point du « i » arrive à la fin | À faire (Andy, Mac) |
 | [x] | Captures de l'intro à 2,2 / 3,0 / 3,8 / 5,4 s relues : mot lié, point du « i » visible | Captures relues (2026-11-23) |
 
+## 3 nonies. Retouches après essai
+| | Contrôle | État |
+|---|---|---|
+| [ ] | Les halos lumineux ne « piquent » plus les yeux (intro, boutons, Aperçu, règles) | À faire (Andy, Mac) |
+| [ ] | Pastilles d'icônes plates et lisibles ; résumé : mots clés en gras seulement | À faire (Andy, Mac) |
+| [ ] | « Suivant » / « Terminer » à droite ; sélecteur Simple / Avancé bien espacé | À faire (Andy, Mac) |
+| [ ] | Nouveau logotype ; « Bienvenue » deux fois plus petit | À faire (Andy, Mac) |
+| [x] | Captures de l'intro, des 3 étapes et de l'en-tête Règles relues | Captures relues (2026-11-23) |
+
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
 |---|---|---|

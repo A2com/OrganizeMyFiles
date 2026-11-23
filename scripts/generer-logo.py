@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
-"""Génère le logotype PNG embarqué dans l'appli depuis assets/logo/wordmark-white.svg.
+"""Génère le logotype PNG embarqué dans l'appli depuis assets/logo/wordmark-white.png (fourni par Andy, 2216 × 322).
 
-egui ne lit pas le SVG et on évite une dépendance de plus : le PNG est versionné, comme assets/icons/.
-Le thème de l'appli est sombre : on utilise la version à texte blanc (dégradé conservé sur « O » et « My »).
-Usage : uv run --with cairosvg --with pillow scripts/generer-logo.py
+Le PNG source est trop grand pour l'afficher directement (egui sans mipmaps crénelle quand on réduit beaucoup) :
+on en tire une version de 640 px de large, nette en Retina pour les 128 à 170 pt d'affichage.
+Les SVG (wordmark.svg, wordmark-white.svg) restent les sources vectorielles d'origine.
+Usage : uv run --with pillow scripts/generer-logo.py
 """
-import io
 from pathlib import Path
 
-import cairosvg
 from PIL import Image
 
 RACINE = Path(__file__).resolve().parent.parent
-SOURCE = RACINE / "assets" / "logo" / "wordmark-white.svg"
-LARGEUR = 480  # points : assez pour la barre latérale, l'écran de bienvenue et « À propos » en Retina
+SOURCE = RACINE / "assets" / "logo" / "wordmark-white.png"
+LARGEUR = 640
 
 
 def main() -> None:
-    # Rendu à 2× puis réduction : bords plus nets que le rendu direct.
-    png = cairosvg.svg2png(url=str(SOURCE), output_width=LARGEUR * 2)
-    image = Image.open(io.BytesIO(png)).convert("RGBA")
+    image = Image.open(SOURCE).convert("RGBA")
     hauteur = round(image.height * LARGEUR / image.width)
     image.resize((LARGEUR, hauteur), Image.LANCZOS).save(RACINE / "assets" / "logo" / f"wordmark-white-{LARGEUR}.png", optimize=True)
     print(f"OK : {LARGEUR} × {hauteur}")
