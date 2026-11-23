@@ -9,6 +9,10 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ### Modifié
 
+- Accessibilité : les contrôles dessinés à la main (cartes de choix, tuiles de dossiers, étapes, cases, interrupteurs, curseur, sélecteurs, boutons, pastilles) ont maintenant un libellé et un état pour VoiceOver.
+- Cibles de clic agrandies (cases, interrupteurs, pastilles « Annuler » et croix) ; case vide avec un contour visible ; textes de 12 à 13 px relevés à 13,5 px.
+- Le réglage macOS « Réduire les animations » coupe aussi les animations de l'appli.
+- Réglages : plus de nom de variable (`history_max_days`) affiché ; données de démonstration de l'Historique en français.
 - Images et formes plus lisses : textures avec versions réduites précalculées (mipmaps) et lissage matériel des bords (MSAA ×4).
 - Règles (mode simple) : les pictogrammes plats sont remplacés par les icônes illustrées fournies par Andy (`assets/ui/rules/`, préparées par `scripts/generer-icones-regles.sh`) : cartes agrandies, icône sur un halo de sa teinte qui s'intensifie au choix et au survol, dossier illustré pour l'étape 1 et la liste des dossiers.
 - Halos lumineux adoucis (réglage unique `GLOW_SOFTNESS`), pastilles d'icônes plates et plus lisibles, mots clés du résumé en gras seulement.

@@ -119,6 +119,9 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [ ] | Étapes 1, 2, 3 des règles : icônes illustrées nettes, halo, survol qui grossit, carte choisie lisible | À faire (Andy, Mac) |
 | [ ] | Bords des images, du logo et des formes moins crénelés (écran Retina et externe) | À faire (Andy, Mac) |
 | [x] | Captures des 3 étapes et de la liste des dossiers relues | Captures relues (2026-11-23) |
+| [ ] | VoiceOver (⌘F5) : cartes, tuiles, étapes, cases et boutons sont annoncés avec leur nom et leur état | À faire (Andy, Mac) |
+| [ ] | Navigation au clavier (Tab) : les contrôles reçoivent le focus | À faire (Andy, Mac) |
+| [ ] | Réglages Système › Accessibilité › Réduire les animations : le fond et le dossier ne bougent plus | À faire (Andy, Mac) |
 
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |

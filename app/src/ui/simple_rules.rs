@@ -458,6 +458,7 @@ fn choice_card(ui: &mut egui::Ui, art: RuleArt, tint: Color32, label: &str, sele
     let ctx = ui.ctx().clone();
     let hover = ctx.animate_bool_with_time(resp.id.with("hover"), resp.hovered(), dur);
     let chosen = ctx.animate_bool_with_time(resp.id.with("chosen"), selected, dur);
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, selected, label));
     let rect = slot.translate(Vec2::new(0.0, -2.0 * hover));
     let painter = ui.painter();
     painter.rect_filled(rect, Rounding::same(14.0), glass(((12.0 + 10.0 * hover) as u8).max(10)));
@@ -514,7 +515,7 @@ fn unfold<R>(ui: &mut egui::Ui, id: egui::Id, open: bool, dur: f32, content: imp
 impl App {
     /// Durée des animations de l'assistant : nulle quand le mouvement est réduit (« Animer le fond » coupé).
     fn motion_secs(&self) -> f32 {
-        if self.animate_bg {
+        if self.animated() {
             0.24
         } else {
             0.0
@@ -646,6 +647,7 @@ impl App {
             let center = Pos2::new(origin + 18.0, rect.center().y);
             let hit = Rect::from_min_size(Pos2::new(origin, rect.top()), Vec2::new(seg - 8.0, rect.height()));
             let resp = ui.interact(hit, ui.id().with(("simple-step", n)), egui::Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Étape {n} : {name}")));
             let current = n == step;
             let done = n < step && step_ready(n, &self.rules[idx]).is_ok();
             let on = ctx.animate_bool_with_time(resp.id.with("on"), current || done, dur);
@@ -693,7 +695,7 @@ impl App {
         }
         let open: bool = ctx.data(|d| d.get_temp(open_id)).unwrap_or(false);
         let art = rule_art_texture(&ctx, RuleArt::Folder);
-        let float = if self.animate_bg { (ctx.input(|i| i.time) as f32 * 1.2).sin() * 2.5 } else { 0.0 };
+        let float = if self.animated() { (ctx.input(|i| i.time) as f32 * 1.2).sin() * 2.5 } else { 0.0 };
         let mut changed = false;
         let mut toggle = false;
         let mut refused_last = false;
@@ -711,7 +713,7 @@ impl App {
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Choisir les dossiers à ranger").clicked() {
                 toggle = true;
             }
-            if self.animate_bg {
+            if self.animated() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(40));
             }
             ui.add_space(6.0);
@@ -1028,6 +1030,7 @@ impl App {
 fn folder_tile(ui: &mut egui::Ui, name: &str, path: &str, selected: bool, accent: Color32, dur: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(FOLDER_TILE_W, FOLDER_TILE_H), egui::Sense::click());
     let ctx = ui.ctx().clone();
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, selected, format!("{name}, {path}")));
     let hover = ctx.animate_bool_with_time(resp.id.with("hover"), resp.hovered(), dur);
     let chosen = ctx.animate_bool_with_time(resp.id.with("chosen"), selected, dur);
     let painter = ui.painter();
@@ -1046,7 +1049,7 @@ fn folder_tile(ui: &mut egui::Ui, name: &str, path: &str, selected: bool, accent
     let font = egui::FontId::new(14.5, semibold());
     let name = ellipsize(painter, name, &font, max_w);
     painter.text(Pos2::new(text_x, rect.top() + 11.0), egui::Align2::LEFT_TOP, name, font, text_primary());
-    let small = egui::FontId::proportional(12.5);
+    let small = egui::FontId::proportional(13.5);
     let path = ellipsize(painter, path, &small, max_w);
     painter.text(Pos2::new(text_x, rect.top() + 32.0), egui::Align2::LEFT_TOP, path, small, text_dim());
     let c = Pos2::new(rect.right() - 22.0, rect.center().y);

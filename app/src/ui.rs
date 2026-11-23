@@ -284,6 +284,8 @@ pub struct App {
     menu_bar: bool,
     notify: bool,
     animate_bg: bool,
+    /// Réglage macOS « Réduire les animations » (lu au lancement) : coupe les animations en plus de « Animer le fond ».
+    system_reduce_motion: bool,
     bg_offset: f64,
     retention_days: u32,
     add_folder_text: String,
@@ -412,6 +414,7 @@ impl App {
             menu_bar: true,
             notify: true,
             animate_bg: true,
+            system_reduce_motion: system_reduces_motion(),
             bg_offset: bg_time,
             retention_days: HISTORY_RETENTION_DEFAULT_DAYS,
             add_folder_text: String::new(),
@@ -486,7 +489,7 @@ impl App {
             self.history.push(HistoryEntry {
                 batch_id: 1,
                 rule_name: ["Tri Bureau & Téléchargements", "Compression Médias"][i % 2].into(),
-                action_label: ["Move to folder", "Rename with pattern", "Compress (ZIP)"][i % 3].into(),
+                action_label: ["Déplacer vers un dossier", "Renommer avec un motif", "Compresser (ZIP)"][i % 3].into(),
                 original_path: PathBuf::from(format!("{home}/Downloads/file-{i}.pdf")),
                 result_path: PathBuf::from(format!("{home}/Documents/Archive/2026-11/file-{i}.pdf")),
                 undo: if i % 3 == 0 {
@@ -709,7 +712,7 @@ impl App {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         let accent = self.accent();
-        let animated = self.animate_bg;
+        let animated = self.animated();
         let texture = self.intro_texture(&ctx);
         let Some(state) = self.intro.as_mut() else { return };
 
@@ -1571,6 +1574,7 @@ fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool
         let tc = Color32::WHITE;
         ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(font), tc);
     }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), text));
     response
 }
 
@@ -1635,6 +1639,20 @@ fn state_is_live(intro: &Option<IntroState>) -> bool {
 }
 
 /// Halo doux : disque dont l'opacité décroît du centre (`alpha` au centre) vers le bord (transparent).
+/// Vrai si macOS demande de réduire les animations (Réglages Système › Accessibilité › Écran).
+#[cfg(target_os = "macos")]
+fn system_reduces_motion() -> bool {
+    std::process::Command::new("defaults")
+        .args(["read", "com.apple.universalaccess", "reduceMotion"])
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_reduces_motion() -> bool {
+    false
+}
+
 /// Réglage des textures d'images : filtrage linéaire et mipmaps (versions réduites précalculées), pour que les images
 /// affichées bien plus petites que leur taille d'origine restent lisses au lieu de crénelées.
 const SMOOTH_TEXTURE: egui::TextureOptions = egui::TextureOptions {
@@ -1763,6 +1781,7 @@ fn btn(ui: &mut egui::Ui, text: &str, kind: Btn, accent: Color32, icon: Option<I
         x += icon_w;
     }
     p.text(Pos2::new(x, rect.center().y), egui::Align2::LEFT_CENTER, text, font, fg);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
     resp
 }
 
@@ -1790,11 +1809,13 @@ fn hero_sub_pill(ui: &mut egui::Ui, text: &str, accent: Color32) {
 fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui::Response {
     let font = egui::FontId::new(14.0, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, fg);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 18.0, 22.0), egui::Sense::click());
-    ui.painter().rect_filled(rect, Rounding::same(11.0), with_alpha(CANVAS, 140));
-    ui.painter().rect_filled(rect, Rounding::same(11.0), if resp.hovered() { with_alpha(fg, 70) } else { bg });
-    let pos = Pos2::new(rect.left() + 9.0, rect.center().y - galley.size().y / 2.0);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 22.0, 26.0), egui::Sense::click());
+    ui.painter().rect_filled(rect, Rounding::same(13.0), with_alpha(CANVAS, 140));
+    ui.painter().rect_filled(rect, Rounding::same(13.0), if resp.hovered() { with_alpha(fg, 70) } else { bg });
+    let pos = Pos2::new(rect.left() + 11.0, rect.center().y - galley.size().y / 2.0);
+    let label = text.to_string();
     ui.painter().galley(pos, galley, fg);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -1802,14 +1823,18 @@ fn chip_button(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) -> egui:
 fn check_box(ui: &mut egui::Ui, on: &mut bool, label: &str, accent: Color32) -> egui::Response {
     let font = egui::FontId::proportional(15.0);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), text_primary());
-    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(26.0 + galley.size().x, 22.0), egui::Sense::click());
+    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(26.0 + galley.size().x, 26.0), egui::Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *on, label));
     let b = Rect::from_min_size(Pos2::new(rect.left(), rect.center().y - 9.0), Vec2::splat(18.0));
     let fill = if *on { accent } else { glass(if resp.hovered() { 36 } else { 24 }) };
     ui.painter().rect_filled(b, Rounding::same(5.0), fill);
+    if !*on {
+        ui.painter().rect_stroke(b, Rounding::same(5.0), Stroke::new(1.5_f32, with_alpha(text_dim(), 150)));
+    }
     if *on {
         let st = Stroke::new(2.0f32, Color32::WHITE);
         let m = Pos2::new(b.left() + 8.0, b.bottom() - 5.0);
@@ -1835,6 +1860,7 @@ fn slim_slider(ui: &mut egui::Ui, value: &mut u32, min: u32, max: u32, accent: C
             }
         }
     }
+    resp.widget_info(|| egui::WidgetInfo::slider(true, f64::from(*value), "Réglette"));
     let t = (*value - min) as f32 / (max - min) as f32;
     let y = rect.center().y;
     let knob = Pos2::new(x0 + t * (x1 - x0), y);
@@ -1864,11 +1890,13 @@ fn recursion_control(ui: &mut egui::Ui, rule: &mut Rule, accent: Color32) {
 }
 
 fn toggle(ui: &mut egui::Ui, on: &mut bool, accent: Color32) -> egui::Response {
-    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(38.0, 22.0), egui::Sense::click());
+    let (slot, mut resp) = ui.allocate_exact_size(Vec2::new(38.0, 26.0), egui::Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *on, "Interrupteur"));
+    let rect = Rect::from_center_size(slot.center(), Vec2::new(38.0, 22.0));
     let t = ui.ctx().animate_bool(resp.id, *on);
     let fill = if *on { accent } else { Color32::from_rgb(0x3a, 0x3d, 0x4a) };
     if *on {
@@ -1894,6 +1922,7 @@ fn segmented(ui: &mut egui::Ui, id: egui::Id, labels: &[&str], selected: usize, 
         let seg = Rect::from_min_size(Pos2::new(x, rect.top() + 4.0), Vec2::new(widths[i], 26.0));
         let resp = ui.interact(seg, id.with(i), egui::Sense::click());
         let on = i == selected;
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, on, *label));
         if on {
             ui.painter().rect_filled(seg, Rounding::same(6.0), active);
         } else if resp.hovered() {
@@ -1932,6 +1961,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, danger: bool) -> bool {
         text_dim()
     };
     draw_icon(&ui.painter().clone(), r.center(), icon, col, 16.0);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
     resp.on_hover_text(tip).clicked()
 }
 
@@ -1939,11 +1969,12 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str, danger: bool) -> bool {
 fn removable_chip(ui: &mut egui::Ui, text: &str, tip: &str, accent: Color32) -> bool {
     let font = egui::FontId::new(14.0, semibold());
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, accent);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 34.0, 24.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 36.0, 28.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{tip} : {text}")));
     ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(CANVAS, 140));
     ui.painter().rect_filled(rect, Rounding::same(12.0), with_alpha(accent, 38));
     ui.painter().galley(Pos2::new(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0), galley, accent);
-    let cross = Rect::from_center_size(Pos2::new(rect.right() - 12.0, rect.center().y), Vec2::splat(18.0));
+    let cross = Rect::from_center_size(Pos2::new(rect.right() - 13.0, rect.center().y), Vec2::splat(20.0));
     let over_cross = resp.hover_pos().is_some_and(|p| cross.contains(p));
     if over_cross {
         ui.painter().circle_filled(cross.center(), 8.0, with_alpha(RED, 60));
@@ -2068,7 +2099,7 @@ fn row_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui
 }
 
 fn caps(text: &str) -> RichText {
-    RichText::new(text).size(12.5).family(semibold()).color(text_label())
+    RichText::new(text).size(13.0).family(semibold()).color(text_label())
 }
 
 fn rule_tab(ui: &mut egui::Ui, label: &str, active: bool, enabled: bool, accent: Color32) -> egui::Response {
@@ -2184,12 +2215,12 @@ fn kpi_tile(ui: &mut egui::Ui, w: f32, icon: Icon, label: &str, value: &str, sub
     draw_icon(&p, tile.center(), icon, Color32::WHITE, 17.0);
     // Les textes sont tronqués à la largeur disponible : en fenêtre étroite,
     // ils dépassaient de la tuile (peints sans limite de largeur).
-    let label = ellipsize(&p, label, &egui::FontId::new(12.5, semibold()), (r.right() - 16.0 - (tile.right() + 10.0)).max(20.0));
+    let label = ellipsize(&p, label, &egui::FontId::new(13.0, semibold()), (r.right() - 16.0 - (tile.right() + 10.0)).max(20.0));
     p.text(
         Pos2::new(tile.right() + 10.0, tile.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::new(12.5, semibold()),
+        egui::FontId::new(13.0, semibold()),
         text_label(),
     );
     let value = ellipsize(&p, value, &egui::FontId::new(38.0, bold()), (w - 32.0).max(20.0));
@@ -2295,7 +2326,7 @@ impl eframe::App for App {
             self.last_tab = self.tab;
             self.tab_since = ctx.input(|i| i.time);
         }
-        let bg_time = if self.animate_bg {
+        let bg_time = if self.animated() {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
             ctx.input(|i| i.time) + self.bg_offset
         } else {
@@ -2631,6 +2662,11 @@ impl App {
         *self.folder_counts.entry(id).or_insert_with(|| count_top_level_files(path))
     }
 
+    /// Animations actives : réglage « Animer le fond » et mouvement non réduit dans macOS.
+    fn animated(&self) -> bool {
+        self.animate_bg && !self.system_reduce_motion
+    }
+
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let accent = self.accent();
         // Identité de l'app, avant le menu.
@@ -2769,7 +2805,7 @@ impl App {
         let (hero, _) = ui.allocate_exact_size(Vec2::new(avail, 214.0), egui::Sense::hover());
         ui.painter().add(glass_shapes(hero));
         {
-            let t = if self.animate_bg { ctx.input(|i| i.time) } else { 0.0 };
+            let t = if self.animated() { ctx.input(|i| i.time) } else { 0.0 };
             let drift = (t * 0.3).sin() as f32 * 0.05;
             glow_in_rounded(
                 ui.painter(),
@@ -2788,7 +2824,7 @@ impl App {
         let text_w = (avail - 250.0).max(260.0);
         let inner = Rect::from_min_size(hero.min + Vec2::new(28.0, 24.0), Vec2::new(text_w, hero.height() - 48.0));
         let mut c = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
-        c.label(RichText::new("APERÇU").size(12.5).family(semibold()).color(text_label()));
+        c.label(RichText::new("APERÇU").size(13.0).family(semibold()).color(text_label()));
         c.add_space(4.0);
         c.label(RichText::new(&title).size(34.0).family(bold()).color(Color32::WHITE));
         c.add_space(2.0);
@@ -2822,7 +2858,7 @@ impl App {
                 let glow_slot = ui.painter().add(egui::Shape::Noop);
                 let run = pill(ui, "Organiser maintenant", accent, true, true)
                     .on_hover_text("Lance toutes les règles maintenant (annulable dans l'Historique).");
-                let animated = self.animate_bg && self.app_enabled;
+                let animated = self.animated() && self.app_enabled;
                 let phase = if animated { (ctx.input(|i| i.time) / 1.8).fract() as f32 } else { 0.3 };
                 if self.app_enabled {
                     ui.painter().set(
@@ -2862,7 +2898,7 @@ impl App {
             Pos2::new(center.x, center.y - 78.0),
             egui::Align2::CENTER_CENTER,
             kicker,
-            egui::FontId::new(12.0, semibold()),
+            egui::FontId::new(13.0, semibold()),
             text_label(),
         );
         p.text(center, egui::Align2::CENTER_CENTER, pct_text, egui::FontId::new(26.0, bold()), Color32::WHITE);
@@ -2983,7 +3019,7 @@ impl App {
                     Pos2::new(tile.right() + 12.0, rect.center().y + 11.0),
                     egui::Align2::LEFT_CENTER,
                     shorten(&f.path.display().to_string()),
-                    egui::FontId::proportional(13.0),
+                    egui::FontId::proportional(13.5),
                     text_dim(),
                 );
                 let mut right = ui.new_child(
@@ -3057,7 +3093,7 @@ impl App {
                     Pos2::new(rect.left() + 32.0, rect.center().y + 11.0),
                     egui::Align2::LEFT_CENTER,
                     format!("{} · {}", e.action_label, ago(e.created, now)),
-                    egui::FontId::proportional(13.0),
+                    egui::FontId::proportional(13.5),
                     text_dim(),
                 );
                 if can_undo {
@@ -4017,7 +4053,7 @@ impl App {
             if failed {
                 ui.horizontal(|ui| {
                     ui.add_space(22.0);
-                    ui.add(egui::Label::new(RichText::new(fr_message(&e.message)).size(13.0).color(status_color(e.status))).wrap());
+                    ui.add(egui::Label::new(RichText::new(fr_message(&e.message)).size(13.5).color(status_color(e.status))).wrap());
                 });
             }
         });
@@ -4109,7 +4145,7 @@ impl App {
             });
             ui.add_space(4.0);
             ui.label(RichText::new("Les entrées plus anciennes sont purgées.").size(13.5).color(text_dim()));
-            ui.label(RichText::new(format!("{HISTORY_RETENTION_SETTING_KEY} · de 1 à 365 jours")).size(13.5).color(text_dim()));
+            ui.label(RichText::new("Entre 1 et 365 jours.").size(13.5).color(text_dim()));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.add(egui::Button::new(RichText::new("Purger l'ancien historique").size(14.0)).fill(glass(34))).clicked() {

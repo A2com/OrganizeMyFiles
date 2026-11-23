@@ -10,9 +10,6 @@ pub const OCR_LIMIT_BYTES: u64 = 26214400;
 /// OCR image dimension cap in pixels: width > 12000 or height >= 12001 refused
 /// (0x2ee0/0x2ee1 in ContentExtractor.extractImageOCR at 0x100150c7c).
 pub const OCR_IMAGE_DIMENSION_LIMIT: u32 = 12000;
-/// App-settings key for the history retention, read by AppModel (0x10000a048)
-/// and written by setHistoryMaxDays (0x10000c210), string at 0x1001ded10.
-pub const HISTORY_RETENTION_SETTING_KEY: &str = "history_max_days";
 /// Action parameter key for the conflict policy, ActionParam.onConflict
 /// (0x100174b34), string at 0x1001ab120; values "replace" or "skip".
 pub const ON_CONFLICT_PARAM_KEY: &str = "on_conflict";
