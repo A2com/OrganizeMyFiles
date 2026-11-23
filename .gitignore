@@ -23,6 +23,9 @@ app/target/
 # Captures d'écran de contrôle
 /captures/
 
+# macOS
+.DS_Store
+
 # Python
 __pycache__/
 *.pyc
