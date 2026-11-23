@@ -275,3 +275,30 @@ fn update_check_setting_is_remembered() {
     again.restore(state);
     assert!(!again.check_updates);
 }
+
+#[test]
+fn the_folder_panel_opens_selects_and_keeps_at_least_one_folder() {
+    let dir = temp_dir("simple-panel");
+    let (second, third) = (temp_dir("simple-panel-2"), temp_dir("simple-panel-3"));
+    let mut app = blank_app();
+    app.add_folders(vec![dir.clone(), second, third]);
+    let folder_id = app.folders[0].id;
+    app.new_rule_in(folder_id);
+    let rid = app.rules.last().unwrap().id;
+    app.selected_rule = app.rule_order().iter().position(|r| *r == rid).unwrap();
+    app.simple_step = 1;
+
+    let ctx = egui::Context::default();
+    load_fonts(&ctx);
+    apply_theme(&ctx);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(("simple-folders-open", rid)), true));
+    for _ in 0..3 {
+        draw_rules(&mut app, &ctx); // plusieurs images : le panneau se déroule puis reste ouvert
+    }
+    assert_eq!(app.rules.last().unwrap().folder_ids, vec![folder_id], "dessiner ne change pas la sélection");
+
+    // Réduit au minimum : un seul dossier, la règle le garde.
+    app.animate_bg = false;
+    draw_rules(&mut app, &ctx);
+    assert_eq!(app.rules.last().unwrap().folder_ids.len(), 1);
+}

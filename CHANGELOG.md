@@ -10,6 +10,15 @@ décrite dans `docs/VERSIONNEMENT.md`.
 ### Modifié
 
 - Installateur `.dmg` illustré : fond, icône de l'appli à gauche, raccourci « Applications » avec son icône à droite (glisser-déposer).
+- Règles (mode simple) plus « friendly » : grande illustration du dossier qui déroule, avec animation, la liste de tous les dossiers suivis ; modèles de conditions et actions en cartes illustrées (pictogrammes colorés, état choisi, coche) ; frise d'étapes à pastilles ; carte « En résumé » mise en évidence (mots clés surlignés) ; animations coupées en mouvement réduit.
+
+### Ajouté
+
+- Logotype « OrganizeMyFiles » (SVG fourni par Andy) intégré avec discrétion : barre latérale, pied de l'écran de bienvenue, Réglages › À propos.
+
+### Corrigé
+
+- Écran de bienvenue : « Bienvenue » s'écrit en un geste continu (lettres liées, stylo à vitesse régulière, point du « i » en dernier) au lieu de lettres posées les unes après les autres.
 
 ## [0.2.1] - 2026-11-22
 
