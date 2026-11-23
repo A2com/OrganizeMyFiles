@@ -607,10 +607,13 @@ impl App {
         purge_history(&mut self.history, self.retention_days, SystemTime::now());
     }
 
-    /// Premier lancement : rien à faire. Sinon restaure les données ; un fichier illisible est mis de côté.
+    /// Premier lancement : rien à faire. Sinon restaure les données. Un fichier illisible est mis de côté
+    /// et, si une copie de secours existe, elle est restaurée automatiquement.
     fn load_saved_state(&mut self) {
         let path = store::state_path();
-        match store::load(&path) {
+        let loaded = store::load_with_backup(&path);
+        let restored_from_backup = matches!(&loaded, Loaded::RestoredFromBackup { .. });
+        match loaded {
             Loaded::Fresh => {
                 // Tout premier lancement : on commence par l'écran d'introduction (sauf démarrage en arrière-plan).
                 if !self.start_hidden {
@@ -619,11 +622,22 @@ impl App {
                 }
             }
             Loaded::Restored(state) => self.restore(*state),
+            Loaded::RestoredFromBackup { state, backup, reason } => {
+                self.restore(*state);
+                self.toast_error(format!("Données abîmées ({reason}) : copie de secours restaurée depuis {}", backup.display()));
+            }
             Loaded::Unreadable { backup, reason } => {
                 self.toast_error(format!("Données illisibles ({reason}) : copie gardée dans {}", backup.display()));
             }
         }
         self.last_saved = store::to_json(&self.snapshot());
+        if restored_from_backup {
+            // Le fichier principal a été mis en quarantaine : on le réécrit tout de suite, sinon les données
+            // restaurées seraient perdues au prochain démarrage si l'utilisateur ne change rien.
+            if let Err(e) = store::save(&path, &self.last_saved) {
+                self.toast_error(format!("Sauvegarde impossible : {e}"));
+            }
+        }
         self.store_path = Some(path);
     }
 
