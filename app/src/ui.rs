@@ -213,12 +213,6 @@ fn top_bar_right_width(run_w: f32, preview_w: f32, wide: bool, gap: f32) -> f32 
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/app-256.png");
 
-fn app_icon_image() -> egui::ColorImage {
-    let img = image::load_from_memory(APP_ICON_PNG).expect("icône embarquée valide").to_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
-}
-
 /// Icône de la fenêtre (barre des tâches). Sous macOS, on n'en impose aucune : le Dock affiche l'icône du `.app`,
 /// qui respecte le gabarit Apple (corps de 824 px sur 1024) ; l'image pleine taille la ferait paraître trop grosse.
 pub fn app_icon() -> egui::IconData {
@@ -269,8 +263,8 @@ const WORD_SCALE: f32 = 0.5;
 const WORDMARK_SIDEBAR_W: f32 = 128.0;
 const WORDMARK_INTRO_W: f32 = 170.0;
 const WORDMARK_ABOUT_W: f32 = 150.0;
-/// Logotype « OrganizeMyFiles » (texte blanc, dégradé sur « O » et « My »), généré par `scripts/generer-logo.py`.
-const WORDMARK_PNG: &[u8] = include_bytes!("../../assets/logo/wordmark-white-640.png");
+/// Logotype « OrganizeMyFiles » (texte blanc, dégradé sur « O » et « My »), fourni par Andy (2216 px), réduit à l'affichage par `fitted_texture`.
+const WORDMARK_PNG: &[u8] = include_bytes!("../../assets/logo/wordmark-white.png");
 
 pub struct App {
     tab: Tab,
@@ -315,16 +309,12 @@ pub struct App {
     sounds: Option<Sounds>,
     /// Le son d'ouverture de l'Aperçu a déjà été traité pour ce lancement.
     launch_sound_done: bool,
-    intro_icon: Option<egui::TextureHandle>,
     /// Dossiers suivis que macOS ne laisse pas lire (rafraîchi régulièrement).
     denied_folders: Vec<PathBuf>,
     next_access_check: f64,
     /// Surveillance automatique ; `None` en mode capture d'écran et dans les tests.
     watcher: Option<Watcher>,
     watch_key: String,
-    /// Logo de la barre latérale (chargé au premier affichage).
-    logo: Option<egui::TextureHandle>,
-    wordmark: Option<egui::TextureHandle>,
     /// Icône et menu de la barre des menus (macOS).
     menubar: Option<MenuBar>,
     menubar_failed: bool,
@@ -435,13 +425,10 @@ impl App {
             sounds_on: true,
             sounds: None,
             launch_sound_done: false,
-            intro_icon: None,
             denied_folders: Vec::new(),
             next_access_check: 0.0,
             watcher: None,
             watch_key: String::new(),
-            logo: None,
-            wordmark: None,
             menubar: None,
             menubar_failed: false,
             quitting: false,
@@ -697,15 +684,6 @@ impl App {
         }
     }
 
-    /// Texture du logotype (chargée une seule fois).
-    fn wordmark_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
-        self.wordmark.get_or_insert_with(|| smooth_texture(ctx, "wordmark", WORDMARK_PNG)).clone()
-    }
-
-    fn intro_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
-        self.intro_icon.get_or_insert_with(|| smooth_texture(ctx, "intro-icon", INTRO_ICON_PNG)).clone()
-    }
-
     /// Écran d'introduction : icône, « Bienvenue » écrit à la main, présentation et bouton « Commencer »,
     /// sur le fond animé. Remplace toute l'interface tant qu'il est affiché.
     fn intro_ui(&mut self, ui: &mut egui::Ui, screen: Rect) {
@@ -713,7 +691,8 @@ impl App {
         let now = ctx.input(|i| i.time);
         let accent = self.accent();
         let animated = self.animated();
-        let texture = self.intro_texture(&ctx);
+        let intro_icon_size = (ctx.screen_rect().height() * 0.34).min(300.0);
+        let texture = fitted_texture(&ctx, "intro-icon", INTRO_ICON_PNG, intro_icon_size);
         let Some(state) = self.intro.as_mut() else { return };
 
         // Temps de l'animation : figé (captures), final (mouvement réduit ou passée) ou horloge.
@@ -766,12 +745,7 @@ impl App {
         let breath = if animated { 1.0 + 0.05 * ((now as f32) * 1.6).sin() } else { 1.0 };
         radial_glow(&painter, icon_center, icon_size * 0.95 * breath * f.icon_scale, accent, 170.0 * f.icon_alpha * fade_out);
         let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size * f.icon_scale));
-        painter.image(
-            texture.id(),
-            icon_rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            Color32::from_white_alpha(alpha(f.icon_alpha)),
-        );
+        paint_fitted(&painter, &texture, icon_rect, Color32::from_white_alpha(alpha(f.icon_alpha)));
 
         // « Bienvenue » : tracé du stylo, bouts arrondis, pointe lumineuse (pas d'ombre).
         let word_left = cx - word_w / 2.0;
@@ -802,16 +776,11 @@ impl App {
 
         // Signature discrète : le logotype en pied d'écran, il apparaît après le bouton.
         {
-            let mark = self.wordmark_texture(&ctx);
             let w = WORDMARK_INTRO_W;
+            let mark = fitted_texture(&ctx, "wordmark", WORDMARK_PNG, w);
             let h = w * mark.size_vec2().y / mark.size_vec2().x;
             let rect = Rect::from_center_size(Pos2::new(cx, screen.bottom() - 44.0 - h / 2.0), Vec2::new(w, h));
-            painter.image(
-                mark.id(),
-                rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::from_white_alpha(alpha(f.button * 0.55)),
-            );
+            paint_fitted(&painter, &mark, rect, Color32::from_white_alpha(alpha(f.button * 0.55)));
         }
 
         // Clic n'importe où ou Entrée / Espace / Échap : on saute à la fin (sans quitter l'écran).
@@ -1653,20 +1622,61 @@ fn system_reduces_motion() -> bool {
     false
 }
 
-/// Réglage des textures d'images : filtrage linéaire et mipmaps (versions réduites précalculées), pour que les images
-/// affichées bien plus petites que leur taille d'origine restent lisses au lieu de crénelées.
-const SMOOTH_TEXTURE: egui::TextureOptions = egui::TextureOptions {
-    magnification: egui::TextureFilter::Linear,
-    minification: egui::TextureFilter::Linear,
-    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-    mipmap_mode: Some(egui::TextureFilter::Linear),
-};
+/// Texture d'une image embarquée, **réduite à la taille exacte d'affichage** (`width_pt` points, soit `width_pt ×
+/// pixels_per_point` pixels) par un filtre de Lanczos. Les contours sont lisses (échantillonnage précis) et nets (un
+/// pixel d'image = un pixel d'écran, voir `paint_fitted`). Calculée une fois par taille et gardée en mémoire.
+/// La taille de la texture est en pixels physiques : le rapport largeur/hauteur reste celui de l'image.
+fn fitted_texture(ctx: &egui::Context, key: &str, png: &[u8], width_pt: f32) -> egui::TextureHandle {
+    let width_px = (width_pt * ctx.pixels_per_point()).round().max(1.0) as u32;
+    let id = egui::Id::new(("fitted-texture", key, width_px));
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return tex;
+    }
+    let source = image::load_from_memory(png).expect("image embarquée valide").to_rgba8();
+    let image = resize_premultiplied(&source, width_px);
+    let tex = ctx.load_texture(format!("{key}-{width_px}"), image, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    tex
+}
 
-/// Décode un PNG embarqué et en fait une texture lisse.
-fn smooth_texture(ctx: &egui::Context, name: &str, png: &[u8]) -> egui::TextureHandle {
-    let img = image::load_from_memory(png).expect("image embarquée valide").to_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    ctx.load_texture(name, egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), SMOOTH_TEXTURE)
+/// Réduit `source` à `width_px` de large (jamais d'agrandissement), en alpha **prémultiplié** : sans cela, la couleur
+/// des pixels transparents déteint sur les contours (liseré sombre autour d'un logo blanc). Les valeurs sont ramenées
+/// à 0-1 : c'est la plage que `imageops::resize` conserve pour des flottants.
+fn resize_premultiplied(source: &image::RgbaImage, width_px: u32) -> egui::ColorImage {
+    let (w, h) = source.dimensions();
+    let width_px = width_px.min(w);
+    let height_px = ((h as f32 * width_px as f32 / w as f32).round() as u32).max(1);
+    let premultiplied: Vec<f32> = source
+        .pixels()
+        .flat_map(|p| {
+            let a = f32::from(p[3]) / 255.0;
+            [f32::from(p[0]) / 255.0 * a, f32::from(p[1]) / 255.0 * a, f32::from(p[2]) / 255.0 * a, a]
+        })
+        .collect();
+    let buffer = image::ImageBuffer::<image::Rgba<f32>, Vec<f32>>::from_raw(w, h, premultiplied).expect("dimensions cohérentes");
+    let out =
+        if width_px == w { buffer } else { image::imageops::resize(&buffer, width_px, height_px, image::imageops::FilterType::Lanczos3) };
+    let bytes: Vec<u8> = out
+        .pixels()
+        .flat_map(|p| {
+            let a = p[3].clamp(0.0, 1.0);
+            [p[0].clamp(0.0, a), p[1].clamp(0.0, a), p[2].clamp(0.0, a), a].map(|v| (v * 255.0).round() as u8)
+        })
+        .collect();
+    egui::ColorImage::from_rgba_premultiplied([width_px as usize, height_px as usize], &bytes)
+}
+
+/// Dessine une texture de `fitted_texture`. Quand `rect` a la taille prévue, l'image est posée **sur la grille de pixels** :
+/// un pixel d'image tombe pile sur un pixel d'écran (net). Sinon (animation d'échelle), elle est simplement étirée.
+fn paint_fitted(painter: &egui::Painter, tex: &egui::TextureHandle, rect: Rect, tint: Color32) {
+    let ppp = painter.ctx().pixels_per_point();
+    let exact = tex.size_vec2() / ppp;
+    let rect = if (rect.width() - exact.x).abs() * ppp < 0.5 {
+        Rect::from_min_size(painter.round_pos_to_pixels(rect.center() - exact / 2.0), exact)
+    } else {
+        rect
+    };
+    painter.image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint);
 }
 
 fn radial_glow(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32, alpha: f32) {
@@ -2674,17 +2684,14 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(20.0);
             let (r, _) = ui.allocate_exact_size(Vec2::splat(36.0), egui::Sense::hover());
-            let logo = self.logo.get_or_insert_with(|| {
-                let img = app_icon_image();
-                ui.ctx().load_texture("app-logo", img, SMOOTH_TEXTURE)
-            });
-            ui.painter().image(logo.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            let logo = fitted_texture(ui.ctx(), "app-logo", APP_ICON_PNG, r.width());
+            paint_fitted(ui.painter(), &logo, r, Color32::WHITE);
             ui.add_space(10.0);
-            let mark = self.wordmark_texture(ui.ctx());
             let width = WORDMARK_SIDEBAR_W;
+            let mark = fitted_texture(ui.ctx(), "wordmark", WORDMARK_PNG, width);
             let (rect, resp) =
                 ui.allocate_exact_size(Vec2::new(width, width * mark.size_vec2().y / mark.size_vec2().x), egui::Sense::hover());
-            ui.painter().image(mark.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            paint_fitted(ui.painter(), &mark, rect, Color32::WHITE);
             resp.on_hover_text("OrganizeMyFiles");
         });
         ui.add_space(22.0);
@@ -4159,10 +4166,10 @@ impl App {
         card(ui, Vec2::new(756.0, 305.0), |ui| {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
-            let mark = self.wordmark_texture(ui.ctx());
             let w = WORDMARK_ABOUT_W;
+            let mark = fitted_texture(ui.ctx(), "wordmark", WORDMARK_PNG, w);
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, w * mark.size_vec2().y / mark.size_vec2().x), egui::Sense::hover());
-            ui.painter().image(mark.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            paint_fitted(ui.painter(), &mark, rect, Color32::WHITE);
             resp.on_hover_text("OrganizeMyFiles");
             ui.add_space(4.0);
             ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(14.5).color(text_primary()));
@@ -4227,6 +4234,42 @@ mod tests {
         assert!((6.5..7.2).contains(&ratio), "rapport largeur/hauteur du logotype : {ratio}");
         // Fond transparent : le logotype se pose sur le thème sombre sans cadre.
         assert_eq!(img.to_rgba8().get_pixel(0, 0)[3], 0);
+    }
+
+    #[test]
+    fn a_reduced_white_logo_keeps_a_valid_premultiplied_edge() {
+        // Carré blanc opaque sur fond transparent « noir » : sans prémultiplication, les contours réduits seraient gris.
+        let mut img = image::RgbaImage::from_pixel(64, 64, image::Rgba([0, 0, 0, 0]));
+        for y in 16..48 {
+            for x in 16..48 {
+                img.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+            }
+        }
+        let small = resize_premultiplied(&img, 20);
+        assert_eq!(small.size, [20, 20]);
+        for p in &small.pixels {
+            let [r, g, b, a] = p.to_array();
+            assert!(r <= a && g <= a && b <= a, "couleur prémultipliée invalide : {p:?}");
+            assert_eq!((r, g), (g, b), "le blanc reste neutre, même sur les contours");
+            assert_eq!(r, a, "un blanc à demi transparent prémultiplié vaut son opacité (pas de liseré gris)");
+        }
+        assert!(small.pixels.iter().any(|p| p.a() == 255) && small.pixels.iter().any(|p| p.a() == 0));
+    }
+
+    #[test]
+    fn an_image_is_never_enlarged() {
+        let img = image::RgbaImage::from_pixel(10, 4, image::Rgba([255, 255, 255, 255]));
+        assert_eq!(resize_premultiplied(&img, 50).size, [10, 4]);
+    }
+
+    #[test]
+    fn a_fitted_texture_has_the_exact_pixel_size_and_is_cached() {
+        let ctx = egui::Context::default();
+        let a = fitted_texture(&ctx, "wordmark", WORDMARK_PNG, 128.0);
+        let b = fitted_texture(&ctx, "wordmark", WORDMARK_PNG, 128.0);
+        assert_eq!(a.id(), b.id(), "la texture est calculée une seule fois par taille");
+        assert_eq!(a.size()[0], 128);
+        assert_eq!(a.size()[1], 19, "2216 × 322 réduit à 128 px de large");
     }
 
     #[test]

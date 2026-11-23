@@ -58,6 +58,28 @@ impl RuleArt {
         RuleArt::FolderZip,
     ];
 
+    /// Nom court de l'icône (clé du cache de textures).
+    fn key(self) -> &'static str {
+        match self {
+            RuleArt::Image => "art-image",
+            RuleArt::Pdf => "art-pdf",
+            RuleArt::Video => "art-video",
+            RuleArt::Document => "art-document",
+            RuleArt::Audio => "art-audio",
+            RuleArt::Archive => "art-archive",
+            RuleArt::Calendar => "art-calendar",
+            RuleArt::Text => "art-text",
+            RuleArt::Ruler => "art-ruler",
+            RuleArt::Folder => "art-folder",
+            RuleArt::FolderMove => "art-folder-move",
+            RuleArt::FolderCopy => "art-folder-copy",
+            RuleArt::FolderRename => "art-folder-rename",
+            RuleArt::FolderDelete => "art-folder-delete",
+            RuleArt::FolderTag => "art-folder-tag",
+            RuleArt::FolderZip => "art-folder-zip",
+        }
+    }
+
     fn png(self) -> &'static [u8] {
         macro_rules! art {
             ($name:literal) => {
@@ -429,26 +451,11 @@ fn icon_tile(painter: &egui::Painter, rect: Rect, icon: Icon, tint: Color32) {
     draw_icon(painter, rect.center(), icon, Color32::WHITE, rect.width() * 0.62);
 }
 
-/// Texture d'une icône illustrée (décodée une seule fois, gardée dans la mémoire temporaire d'egui).
-fn rule_art_texture(ctx: &egui::Context, art: RuleArt) -> egui::TextureHandle {
-    let id = egui::Id::new(("rule-art", art));
-    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
-        return tex;
-    }
-    let tex = smooth_texture(ctx, &format!("rule-art-{art:?}"), art.png());
-    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
-    tex
-}
-
-/// Dessine une icône illustrée centrée en `center`, avec la taille `size`.
-fn paint_art(painter: &egui::Painter, ctx: &egui::Context, art: RuleArt, center: Pos2, size: f32) {
-    let tex = rule_art_texture(ctx, art);
-    painter.image(
-        tex.id(),
-        Rect::from_center_size(center, Vec2::splat(size)),
-        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-        Color32::WHITE,
-    );
+/// Dessine une icône illustrée centrée en `center`. La texture est préparée à la taille `base` (points) ; `scale` ≠ 1
+/// l'étire légèrement (survol), sinon elle tombe pile sur la grille de pixels.
+fn paint_art(painter: &egui::Painter, ctx: &egui::Context, art: RuleArt, center: Pos2, base: f32, scale: f32) {
+    let tex = fitted_texture(ctx, art.key(), art.png(), base);
+    paint_fitted(painter, &tex, Rect::from_center_size(center, Vec2::splat(base * scale)), Color32::WHITE);
 }
 
 /// Carte illustrée cliquable : grande icône sur un halo de sa teinte, libellé, état « choisi » (contour et coche
@@ -470,7 +477,7 @@ fn choice_card(ui: &mut egui::Ui, art: RuleArt, tint: Color32, label: &str, sele
     }
     let center = Pos2::new(rect.center().x, rect.top() + 10.0 + ART_SIZE / 2.0 - 3.0 * hover);
     radial_glow(painter, center, ART_SIZE * 0.62, tint, 40.0 + 70.0 * chosen + 30.0 * hover);
-    paint_art(painter, &ctx, art, center, ART_SIZE * (1.0 + 0.06 * hover));
+    paint_art(painter, &ctx, art, center, ART_SIZE, 1.0 + 0.06 * hover);
     let mut job = egui::text::LayoutJob::simple(label.to_string(), egui::FontId::new(13.5, semibold()), text_primary(), CARD_W - 16.0);
     job.halign = Align::Center;
     let galley = painter.layout_job(job);
@@ -694,7 +701,7 @@ impl App {
             ctx.data_mut(|d| d.insert_temp(open_id, true));
         }
         let open: bool = ctx.data(|d| d.get_temp(open_id)).unwrap_or(false);
-        let art = rule_art_texture(&ctx, RuleArt::Folder);
+        let art = fitted_texture(&ctx, RuleArt::Folder.key(), RuleArt::Folder.png(), 128.0);
         let float = if self.animated() { (ctx.input(|i| i.time) as f32 * 1.2).sin() * 2.5 } else { 0.0 };
         let mut changed = false;
         let mut toggle = false;
@@ -709,7 +716,7 @@ impl App {
             radial_glow(painter, slot.center(), h * (0.75 + 0.1 * hover), accent, 55.0 + 55.0 * hover);
             let scale = 1.0 + 0.05 * hover;
             let img = Rect::from_center_size(slot.center() + Vec2::new(0.0, float - 2.0 * hover), Vec2::new(w, h) * scale);
-            painter.image(art.id(), img, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            paint_fitted(painter, &art, img, Color32::WHITE);
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Choisir les dossiers à ranger").clicked() {
                 toggle = true;
             }
@@ -850,7 +857,7 @@ impl App {
                     let (art, tint) = condition_icon(self.rules[idx].conditions[ci].field);
                     let (r, _) = ui.allocate_exact_size(Vec2::splat(36.0), egui::Sense::hover());
                     radial_glow(ui.painter(), r.center(), 24.0, tint, 50.0);
-                    paint_art(ui.painter(), ui.ctx(), art, r.center(), 36.0);
+                    paint_art(ui.painter(), ui.ctx(), art, r.center(), 36.0, 1.0);
                     ui.add_space(4.0);
                     if self.simple_condition_row(ui, idx, ci, rid, accent) {
                         remove = Some(ci);
@@ -1043,7 +1050,7 @@ fn folder_tile(ui: &mut egui::Ui, name: &str, path: &str, selected: bool, accent
     }
     let tile = Rect::from_min_size(rect.left_top() + Vec2::new(10.0, 10.0), Vec2::splat(38.0));
     radial_glow(painter, tile.center(), 26.0, if selected { accent } else { BLUE }, 60.0);
-    paint_art(painter, &ctx, RuleArt::Folder, tile.center(), 42.0);
+    paint_art(painter, &ctx, RuleArt::Folder, tile.center(), 42.0, 1.0);
     let text_x = tile.right() + 12.0;
     let max_w = rect.right() - 44.0 - text_x;
     let font = egui::FontId::new(14.5, semibold());
