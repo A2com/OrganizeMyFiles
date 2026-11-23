@@ -1507,15 +1507,6 @@ fn glass_shapes(rect: Rect) -> egui::Shape {
     ])
 }
 
-/// Carte de verre de taille fixe.
-fn card(ui: &mut egui::Ui, size: Vec2, add: impl FnOnce(&mut egui::Ui)) {
-    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    ui.painter().add(glass_shapes(rect));
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(22.0, 18.0))).layout(Layout::top_down(Align::Min)));
-    child.set_min_size(size - Vec2::new(44.0, 36.0));
-    add(&mut child);
-}
-
 fn pill(ui: &mut egui::Ui, text: &str, accent: Color32, primary: bool, big: bool) -> egui::Response {
     let h = if big { 52.0 } else { 34.0 };
     let pad = if big { 30.0 } else { 18.0 };
@@ -4080,7 +4071,7 @@ impl App {
         let accent = self.accent();
         self.header(ui, "Réglages", "Appliqués immédiatement.");
 
-        card(ui, Vec2::new(756.0, 132.0), |ui| {
+        panel_card(ui, |ui| {
             ui.label(RichText::new("Couleur d'accent").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(12.0);
             ui.horizontal(|ui| {
@@ -4105,7 +4096,7 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 420.0), |ui| {
+        panel_card(ui, |ui| {
             let before = self.launch_at_login;
             check_box(ui, &mut self.launch_at_login, "Lancement au démarrage", accent);
             if self.launch_at_login != before {
@@ -4163,7 +4154,7 @@ impl App {
         });
 
         ui.add_space(16.0);
-        card(ui, Vec2::new(756.0, 305.0), |ui| {
+        panel_card(ui, |ui| {
             ui.label(RichText::new("À propos").size(15.0).family(semibold()).color(text_primary()));
             ui.add_space(8.0);
             let w = WORDMARK_ABOUT_W;
