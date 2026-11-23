@@ -113,9 +113,16 @@ impl App {
                         RichText::new(format!("Vous utilisez la version {}.", env!("CARGO_PKG_VERSION"))).size(14.0).color(text_dim()),
                     );
                     ui.add_space(8.0);
+                    let has_bundle = std::env::current_exe().ok().and_then(|exe| update::bundle_path(&exe)).is_some();
+                    // Sans empreinte publiée, pas d'installation automatique (échec fermé).
+                    let can_install = release.dmg_url.is_some() && release.sha256.is_some() && has_bundle;
+                    if release.dmg_url.is_some() && release.sha256.is_none() {
+                        ui.label(
+                            RichText::new("Cette version ne publie pas d'empreinte : téléchargement manuel.").size(13.0).color(text_dim()),
+                        );
+                        ui.add_space(4.0);
+                    }
                     ui.horizontal_wrapped(|ui| {
-                        let can_install =
-                            release.dmg_url.is_some() && std::env::current_exe().ok().and_then(|exe| update::bundle_path(&exe)).is_some();
                         let label = if can_install { "Installer et redémarrer" } else { "Télécharger" };
                         if btn(ui, label, Btn::Primary, accent, None).clicked() {
                             if can_install {

@@ -105,13 +105,17 @@ fn run_ok(runner: &dyn CommandRunner, program: &str, args: &[&str], timeout: Dur
 }
 
 /// Télécharge, vérifie, puis remplace `bundle` par la nouvelle version. L'ancienne appli reste intacte en cas d'échec.
+/// Sans empreinte SHA-256 publiée, l'installation automatique est refusée (échec fermé).
 /// `progress` reçoit une phrase courte à chaque étape.
 pub fn install(runner: &dyn CommandRunner, release: &Release, bundle: &Path, work: &Path, progress: &dyn Fn(&str)) -> Result<(), String> {
     let url = release.dmg_url.as_deref().ok_or("Cette version n'a pas de fichier .dmg à télécharger.")?;
+    let expected = release.sha256.as_deref().ok_or(
+        "Cette version ne publie pas d'empreinte SHA-256 : l'installation automatique est refusée. Téléchargez-la depuis la page de la version.",
+    )?;
     fs::create_dir_all(work).map_err(|e| format!("Dossier temporaire impossible : {e}"))?;
     let dmg = work.join("update.dmg");
     let mount = work.join("mnt");
-    let result = install_steps(runner, release, url, bundle, &dmg, &mount, progress);
+    let result = install_steps(runner, expected, url, bundle, &dmg, &mount, progress);
     // Nettoyage dans tous les cas : démontage puis suppression des fichiers temporaires.
     let _ = runner.run("hdiutil", &["detach".into(), "-force".into(), mount.to_string_lossy().into_owned()], TOOL_TIMEOUT);
     let _ = fs::remove_dir_all(work);
@@ -120,7 +124,7 @@ pub fn install(runner: &dyn CommandRunner, release: &Release, bundle: &Path, wor
 
 fn install_steps(
     runner: &dyn CommandRunner,
-    release: &Release,
+    expected: &str,
     url: &str,
     bundle: &Path,
     dmg: &Path,
@@ -132,13 +136,11 @@ fn install_steps(
     progress("Téléchargement…");
     run_ok(runner, "curl", &["-fsSL", "-m", "900", "-o", &dmg_s, url], DOWNLOAD_TIMEOUT, "Le téléchargement")?;
 
-    if let Some(expected) = &release.sha256 {
-        progress("Vérification…");
-        let out = run_ok(runner, "shasum", &["-a", "256", &dmg_s], TOOL_TIMEOUT, "La vérification")?;
-        let actual = out.split_whitespace().next().unwrap_or_default().to_lowercase();
-        if &actual != expected {
-            return Err("Le fichier téléchargé ne correspond pas à l'empreinte attendue : installation refusée.".into());
-        }
+    progress("Vérification…");
+    let out = run_ok(runner, "shasum", &["-a", "256", &dmg_s], TOOL_TIMEOUT, "La vérification")?;
+    let actual = out.split_whitespace().next().unwrap_or_default().to_lowercase();
+    if actual != expected.to_lowercase() {
+        return Err("Le fichier téléchargé ne correspond pas à l'empreinte attendue : installation refusée.".into());
     }
 
     progress("Installation…");
@@ -334,8 +336,8 @@ mod tests {
     fn a_failed_copy_keeps_the_old_app() {
         let dir = temp("ditto");
         let bundle = fake_app(&dir);
-        let runner = Script { calls: RefCell::new(vec![]), sha: String::new(), fail_on: Some("ditto") };
-        let err = install(&runner, &release(None), &bundle, &dir.join("work"), &|_| {}).unwrap_err();
+        let runner = Script { calls: RefCell::new(vec![]), sha: "abcdef".into(), fail_on: Some("ditto") };
+        let err = install(&runner, &release(Some("abcdef")), &bundle, &dir.join("work"), &|_| {}).unwrap_err();
         assert!(err.contains("La copie a échoué") && err.contains("glissez"));
         assert_eq!(fs::read_to_string(bundle.join("Contents/version")).unwrap(), "ancienne");
         let _ = fs::remove_dir_all(&dir);
@@ -345,10 +347,22 @@ mod tests {
     fn a_failed_download_stops_everything() {
         let dir = temp("curl");
         let bundle = fake_app(&dir);
-        let runner = Script { calls: RefCell::new(vec![]), sha: String::new(), fail_on: Some("curl") };
-        let err = install(&runner, &release(None), &bundle, &dir.join("work"), &|_| {}).unwrap_err();
+        let runner = Script { calls: RefCell::new(vec![]), sha: "abcdef".into(), fail_on: Some("curl") };
+        let err = install(&runner, &release(Some("abcdef")), &bundle, &dir.join("work"), &|_| {}).unwrap_err();
         assert!(err.contains("téléchargement"));
         assert_eq!(runner.calls.borrow()[0], "curl");
+        assert_eq!(fs::read_to_string(bundle.join("Contents/version")).unwrap(), "ancienne");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_release_without_digest_is_refused_before_any_download() {
+        let dir = temp("nodigest");
+        let bundle = fake_app(&dir);
+        let runner = Script { calls: RefCell::new(vec![]), sha: "abcdef".into(), fail_on: None };
+        let err = install(&runner, &release(None), &bundle, &dir.join("work"), &|_| {}).unwrap_err();
+        assert!(err.contains("empreinte"), "message explicite : {err}");
+        assert!(runner.calls.borrow().is_empty(), "rien n'est téléchargé sans empreinte");
         assert_eq!(fs::read_to_string(bundle.join("Contents/version")).unwrap(), "ancienne");
         let _ = fs::remove_dir_all(&dir);
     }
