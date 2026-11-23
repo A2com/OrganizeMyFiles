@@ -7,6 +7,11 @@ set -euo pipefail
 
 DMG="${1:?Usage : dmg-finder.sh <fichier.dmg>}"
 VOL="OrganizeMyFiles"
+# Taille du fond (en points) : le contenu de la fenêtre doit faire exactement cette taille.
+LARGEUR=658
+HAUTEUR=398
+GAUCHE=200
+HAUT=120
 WORK="$(mktemp -d)"
 MOUNT="/Volumes/$VOL"
 
@@ -23,10 +28,16 @@ if [ -e "$MOUNT" ]; then
   }
 fi
 
+# Les bornes AppleScript comptent la barre de titre, dont la hauteur dépend de la version de macOS : on la mesure.
+swiftc -O "$(dirname "$0")/hauteur-barre-titre.swift" -o "$WORK/hauteur-barre-titre"
+BARRE="$("$WORK/hauteur-barre-titre")"
+DROITE=$((GAUCHE + LARGEUR))
+BAS=$((HAUT + HAUTEUR + BARRE))
+
 hdiutil convert "$DMG" -format UDRW -o "$WORK/rw.dmg" -quiet
 hdiutil attach "$WORK/rw.dmg" -noverify -noautoopen -quiet
 
-# Fenêtre : 658 × 398 de contenu (426 avec la barre de titre), sans barre d'outils ni d'état, icônes de 125.
+# Fenêtre : contenu de 658 × 398 (+ barre de titre mesurée), sans barre d'outils ni d'état, icônes de 125.
 osascript <<OSA
 tell application "Finder"
   tell disk "$VOL"
@@ -35,7 +46,7 @@ tell application "Finder"
     set current view of cw to icon view
     set toolbar visible of cw to false
     set statusbar visible of cw to false
-    set the bounds of cw to {200, 120, 858, 546}
+    set the bounds of cw to {$GAUCHE, $HAUT, $DROITE, $BAS}
     set opts to the icon view options of cw
     set arrangement of opts to not arranged
     set icon size of opts to 125
@@ -63,4 +74,4 @@ done
 [ ! -e "$MOUNT" ] || { echo "ERREUR : impossible d'éjecter $MOUNT." >&2; exit 1; }
 
 hdiutil convert "$WORK/rw.dmg" -format UDZO -imagekey zlib-level=9 -ov -o "$DMG" -quiet
-echo "OK : mise en page Finder appliquée à $DMG"
+echo "OK : mise en page Finder appliquée à $DMG (fenêtre $LARGEUR × $((HAUTEUR + BARRE)), barre de titre $BARRE pt)"

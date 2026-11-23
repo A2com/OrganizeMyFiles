@@ -123,4 +123,9 @@ fidèlement. Cette étape exige une **session ouverte sur le Mac** et l'autorisa
 `emballer-mac.sh` avertit et garde l'image `dmgbuild`. Le fond vient de `~/…/OrganizeMyFiles/DMG Installer/`
 (fichier `installer-background.jpg` en 1316 × 796, réduit en 658 × 398 pour la version 1×).
 
+La fenêtre fait **exactement la taille du fond** : les bornes AppleScript de Finder comptent la barre de titre, dont la
+hauteur dépend de macOS (28 pt avant macOS 26, 32 pt ensuite). `dmg-finder.sh` la **mesure** (`hauteur-barre-titre.swift`)
+et ajoute le résultat aux 398 pt du fond ; sur macOS 27 : fenêtre de 658 × 430 pt, contenu de 658 × 398 pt. Un `.dmg`
+construit sur un autre macOS aurait donc la bonne taille pour **ce** macOS, à 4 pt près sur l'autre.
+
 L'appli reste à la **racine** du volume : la mise à jour intégrée l'y cherche.
