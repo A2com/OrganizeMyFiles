@@ -9,6 +9,9 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ### Ajouté
 
+- Journal local de diagnostic (`~/Library/Logs/OrganizeMyFiles/journal.log`, lisible par le seul propriétaire) :
+  démarrages, lots de rangement (scannés, retenus, actions, échecs), échecs avec la règle et le nom du fichier,
+  vérifications et installations de mises à jour. Rotation à 1 Mo, trois archives ; rien n'est envoyé sur le réseau.
 - Sauvegarde de l'état : avant chaque écriture, la version précédente de `state.json` est conservée en
   `state.json.bak`. Un fichier illisible (ou d'un format plus récent) est mis de côté et l'appli repart de cette
   copie de secours, avec un message explicite — les règles ne sont plus perdues.

@@ -14,6 +14,7 @@ mod extract;
 mod glow;
 mod history_view;
 mod intro;
+mod journal;
 mod login;
 mod mechanics;
 mod menubar;

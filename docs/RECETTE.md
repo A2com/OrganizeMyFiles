@@ -207,6 +207,8 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [x] | Fermer (Quitter) puis relancer : dossiers, règles, historique et réglages sont retrouvés | Validé par Andy (2026-11-12) |
 | [x] | Sauvegarde et restauration d'état (aller-retour, fichier corrompu, version inconnue) | Auto (2026-11-12) |
 | [x] | Fluidité du fond animé (pas de saccade, processeur raisonnable dans le Moniteur d'activité) | Validé par Andy (2026-11-12) |
+| [x] | Journal local : `~/Library/Logs/OrganizeMyFiles/journal.log` créé au démarrage (droits `600`), lignes horodatées avec niveau, lots (scannés / retenus / actions / échecs), échecs par règle, mises à jour ; rotation à 1 Mo, trois archives | Auto (2026-11-23, Mac Studio) |
+| [ ] | À la main : provoquer un échec (dossier protégé) puis ouvrir le journal : la ligne WARN nomme la règle et le fichier | À faire (Andy, Mac) |
 
 ## 10. Contrôles automatiques à relancer avant la recette
 ```
