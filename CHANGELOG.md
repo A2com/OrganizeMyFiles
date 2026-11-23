@@ -7,6 +7,10 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ## [Non publié]
 
+### Modifié
+
+- Règles (mode simple) plus « friendly » : grande illustration du dossier qui déroule, avec animation, la liste de tous les dossiers suivis ; modèles de conditions et actions en cartes illustrées (pictogrammes colorés, état choisi, coche) ; frise d'étapes à pastilles ; carte « En résumé » mise en évidence (mots clés surlignés) ; animations coupées en mouvement réduit.
+
 ## [0.2.1] - 2026-11-22
 
 ### Corrigé
