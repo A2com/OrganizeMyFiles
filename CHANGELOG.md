@@ -9,6 +9,7 @@ décrite dans `docs/VERSIONNEMENT.md`.
 
 ### Modifié
 
+- Installateur `.dmg` illustré : fond, icône de l'appli à gauche, raccourci « Applications » avec son icône à droite (glisser-déposer).
 - Règles (mode simple) plus « friendly » : grande illustration du dossier qui déroule, avec animation, la liste de tous les dossiers suivis ; modèles de conditions et actions en cartes illustrées (pictogrammes colorés, état choisi, coche) ; frise d'étapes à pastilles ; carte « En résumé » mise en évidence (mots clés surlignés) ; animations coupées en mouvement réduit.
 
 ### Ajouté

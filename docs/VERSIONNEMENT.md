@@ -105,3 +105,27 @@ Pour qu'une release soit proposée aux utilisateurs :
 - GitHub calcule l'empreinte SHA-256 du fichier ; l'appli la vérifie avant d'installer.
 
 Une release marquée « pre-release » ou « brouillon » n'est jamais proposée (l'API `latest` les ignore).
+
+## Fabrication du `.dmg`
+
+`scripts/emballer-mac.sh` fabrique un installateur illustré avec `dmgbuild` (version épinglée, installé la première
+fois dans `~/.cache/omf-dmg-venv` : **connexion Internet nécessaire au premier build**). Pas de Finder ni
+d'AppleScript : la mise en page est écrite directement dans le `.DS_Store`.
+
+- `scripts/dmg-reglages.py` : taille de fenêtre (658 × 398, celle du fond), taille des icônes, positions ;
+- `assets/dmg/background.png` et `background@2x.png` : fond (1× et Retina, combinés par `dmgbuild`) ; `assets/dmg/applications-folder.png` : icône du raccourci ;
+- `scripts/alias-applications.swift` : crée l'alias « Applications » (un alias, pas un lien symbolique, pour pouvoir
+  lui donner une icône personnalisée).
+
+`scripts/dmg-finder.sh` repasse ensuite l'image par Finder (AppleScript) : le `.DS_Store` écrit par `dmgbuild` n'était
+pas toujours respecté (bande d'état affichée, fenêtre à la mauvaise taille) ; écrit par Finder lui-même, il est relu
+fidèlement. Cette étape exige une **session ouverte sur le Mac** et l'autorisation d'automatiser Finder ; sinon
+`emballer-mac.sh` avertit et garde l'image `dmgbuild`. Le fond vient de `~/…/OrganizeMyFiles/DMG Installer/`
+(fichier `installer-background.jpg` en 1316 × 796, réduit en 658 × 398 pour la version 1×).
+
+La fenêtre fait **exactement la taille du fond** : les bornes AppleScript de Finder comptent la barre de titre, dont la
+hauteur dépend de macOS (28 pt avant macOS 26, 32 pt ensuite). `dmg-finder.sh` la **mesure** (`hauteur-barre-titre.swift`)
+et ajoute le résultat aux 398 pt du fond ; sur macOS 27 : fenêtre de 658 × 430 pt, contenu de 658 × 398 pt. Un `.dmg`
+construit sur un autre macOS aurait donc la bonne taille pour **ce** macOS, à 4 pt près sur l'autre.
+
+L'appli reste à la **racine** du volume : la mise à jour intégrée l'y cherche.
