@@ -113,6 +113,20 @@ Version testée : X.Y.Z (celle de `app/Cargo.toml` et du `.dmg`) · Mac : ______
 | [ ] | Nouveau logotype ; « Bienvenue » deux fois plus petit | À faire (Andy, Mac) |
 | [x] | Captures de l'intro, des 3 étapes et de l'en-tête Règles relues | Captures relues (2026-11-23) |
 
+## 3 decies. Icônes illustrées et rendu lisse
+| | Contrôle | État |
+|---|---|---|
+| [ ] | Étapes 1, 2, 3 des règles : icônes illustrées nettes, halo, survol qui grossit, carte choisie lisible | À faire (Andy, Mac) |
+| [ ] | Bords des images, du logo et des formes moins crénelés (écran Retina et externe) | À faire (Andy, Mac) |
+| [x] | Captures des 3 étapes et de la liste des dossiers relues | Captures relues (2026-11-23) |
+| [ ] | Règles (mode simple) : l'accueil propose « Ajouter une nouvelle règle » et liste les règles ; un clic sur une règle ouvre l'assistant | À faire (Andy, Mac) |
+| [ ] | « Terminer » affiche la confirmation (coche animée) ; « Terminé » revient à l'accueil ; « Ajouter une autre règle » ouvre une règle vierge | À faire (Andy, Mac) |
+| [ ] | Logos (barre latérale, intro, À propos) nets et lisses sur écran Retina, sans dents ni flou | À faire (Andy, Mac) |
+| [ ] | Réglages : cartes sans vide en bas et qui suivent la largeur de la fenêtre (980 à 1600 px) | À faire (Andy, Mac) |
+| [ ] | VoiceOver (⌘F5) : cartes, tuiles, étapes, cases et boutons sont annoncés avec leur nom et leur état | À faire (Andy, Mac) |
+| [ ] | Navigation au clavier (Tab) : les contrôles reçoivent le focus | À faire (Andy, Mac) |
+| [ ] | Réglages Système › Accessibilité › Réduire les animations : le fond et le dossier ne bougent plus | À faire (Andy, Mac) |
+
 ## 4. Lecture du contenu (PDF et images)
 | | Contrôle | État |
 |---|---|---|
