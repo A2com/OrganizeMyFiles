@@ -114,6 +114,12 @@ fn smooth(x: f32) -> f32 {
     x * x * (3.0 - 2.0 * x)
 }
 
+/// Progression du stylo : vitesse presque constante (geste régulier), adoucie seulement au départ et à l'arrivée.
+fn pen_progress(x: f32) -> f32 {
+    let x = unit(x);
+    0.3 * smooth(x) + 0.7 * x
+}
+
 /// Arrivée en douceur avec un léger dépassement (rebond).
 fn ease_out_back(x: f32) -> f32 {
     let (c1, c3) = (1.2_f32, 2.2_f32);
@@ -140,7 +146,7 @@ pub fn frame(t: f32) -> IntroFrame {
         backdrop: smooth(t / BACKDROP_SECS),
         icon_alpha: smooth(icon * 1.6),
         icon_scale: 0.8 + 0.2 * ease_out_back(icon),
-        write: smooth((t - WRITE_START) / WRITE_SECS),
+        write: pen_progress((t - WRITE_START) / WRITE_SECS),
         subtitle: smooth((t - SUBTITLE_START) / SUBTITLE_SECS),
         button: smooth((t - BUTTON_START) / BUTTON_SECS),
     }
@@ -195,7 +201,7 @@ mod tests {
     #[test]
     fn the_word_asset_is_usable() {
         let w = word();
-        assert!(w.strokes.len() >= 9, "au moins une courbe par lettre");
+        assert!((2..=4).contains(&w.strokes.len()), "gestes continus : B, le reste du mot, puis le point du i");
         assert!(w.width > 50.0 && w.height > 10.0 && w.pen > 0.0);
         for s in &w.strokes {
             assert!(s.len() >= 2);
@@ -207,6 +213,31 @@ mod tests {
         let first_end = w.strokes.first().and_then(|s| s.last()).unwrap()[0];
         let last_end = w.strokes.last().and_then(|s| s.last()).unwrap()[0];
         assert!(last_end > first_end);
+    }
+
+    #[test]
+    fn the_word_is_written_in_a_few_continuous_gestures() {
+        // Un seul levé de stylo dans le mot (après le « B »), le point du « i » est écrit en dernier.
+        let w = word();
+        let lengths: Vec<f32> = w.strokes.iter().map(|s| polyline_length(s)).collect();
+        let longest = lengths.iter().cloned().fold(0.0, f32::max);
+        assert!(longest > w.total_length() * 0.6, "un long geste continu pour « ienvenue » : {lengths:?}");
+        let dot = w.strokes.last().unwrap();
+        assert!(polyline_length(dot) < 5.0, "le dernier tracé est le point du « i »");
+        // Pas de saut à l'intérieur d'un geste : les points consécutifs restent proches.
+        for s in &w.strokes {
+            let biggest = s.windows(2).map(|p| dist(p[0], p[1])).fold(0.0, f32::max);
+            assert!(biggest < 3.0, "saut de {biggest} dans un geste");
+        }
+    }
+
+    #[test]
+    fn pen_speed_is_nearly_constant() {
+        // Entre 10 % et 90 % du temps, la longueur écrite progresse presque linéairement.
+        let slope = |a: f32, b: f32| (pen_progress(b) - pen_progress(a)) / (b - a);
+        let (early, mid, late) = (slope(0.1, 0.2), slope(0.45, 0.55), slope(0.8, 0.9));
+        assert!((early - mid).abs() < 0.35 && (late - mid).abs() < 0.35, "{early} {mid} {late}");
+        assert_eq!((pen_progress(0.0), pen_progress(1.0)), (0.0, 1.0));
     }
 
     #[test]

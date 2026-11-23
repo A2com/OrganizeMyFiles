@@ -66,7 +66,58 @@ def flatten_path(d, origin):
     return points
 
 
+# Réglages de la liaison entre deux lettres (unités de la police-tracé).
+JOIN_MAX = 8.0  # au-delà, c'est une levée de stylo (pas de trait de liaison)
+JOIN_HANDLE = 0.45  # longueur des poignées de la courbe de liaison, en part de la distance
+TANGENT_POINTS = 6  # nombre de points pour estimer la direction d'entrée et de sortie
+
+
+def unit_tangent(a, b):
+    d = math.dist(a, b) or 1.0
+    return ((b[0] - a[0]) / d, (b[1] - a[1]) / d)
+
+
+def bridge(exit_pt, entry_pt, exit_dir, entry_dir, steps=14):
+    """Courbe de Bézier qui prolonge la sortie d'une lettre jusqu'à l'entrée de la suivante, en douceur."""
+    d = math.dist(exit_pt, entry_pt)
+    h = d * JOIN_HANDLE
+    c1 = (exit_pt[0] + exit_dir[0] * h, exit_pt[1] + exit_dir[1] * h)
+    c2 = (entry_pt[0] - entry_dir[0] * h, entry_pt[1] - entry_dir[1] * h)
+    pts = []
+    for i in range(1, steps):
+        t, u = i / steps, 1 - i / steps
+        pts.append(
+            (
+                u**3 * exit_pt[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t**3 * entry_pt[0],
+                u**3 * exit_pt[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t**3 * entry_pt[1],
+            )
+        )
+    return pts
+
+
+def entry_index(stroke, exit_pt, exit_dir, max_skip=30, max_turn_cos=0.45):
+    """Premier point de la lettre suivante vers lequel le stylo peut continuer sans faire demi-tour : l'amorce de la
+    lettre qui repart en arrière (petite pointe) est ignorée, la courbe de liaison la remplace."""
+    for k in range(min(max_skip, len(stroke) - 2)):
+        v = unit_tangent(exit_pt, stroke[k]) if math.dist(exit_pt, stroke[k]) > 0.2 else exit_dir
+        if v[0] * exit_dir[0] + v[1] * exit_dir[1] >= max_turn_cos:
+            return k
+    return 0
+
+
+def is_dot(path):
+    """Point (du « i ») : un tracé minuscule qui revient sur lui-même."""
+    xs, ys = [x for x, _ in path], [y for _, y in path]
+    return max(xs) - min(xs) < 1.2 and max(ys) - min(ys) < 1.2
+
+
 def build(font, text):
+    """Le mot en tracés de stylo : lettres liées en un seul geste continu, points écrits à la fin du mot.
+
+    Chaque lettre de la police-tracé est dessinée seule : posées bout à bout, leurs liaisons ne se rejoignent pas et le
+    stylo « saute » d'une lettre à l'autre. On garde l'espacement naturel des lettres (largeur de leur dessin), puis on
+    relie par une courbe douce la sortie d'une lettre à l'entrée de la suivante quand l'écart est petit ; le grand
+    écart (après le « B ») reste une levée de stylo, et les points sont écrits une fois le mot terminé."""
     glyphs = font["c"]
     advance = 0.0
     strokes = []
@@ -78,6 +129,24 @@ def build(font, text):
         for path in paths:
             strokes.append([(x - left + advance, y) for x, y in path])
         advance += width
+
+    body = [s for s in strokes if not is_dot(s)]
+    dots = [s for s in strokes if is_dot(s)]
+    runs = []
+    for stroke in body:
+        if runs:
+            tail = runs[-1]
+            exit_pt = tail[-1]
+            exit_dir = unit_tangent(tail[-1 - min(TANGENT_POINTS, len(tail) - 1)], exit_pt)
+            start = entry_index(stroke, exit_pt, exit_dir)
+            entry_pt = stroke[start]
+            if math.dist(exit_pt, stroke[0]) <= JOIN_MAX:
+                entry_dir = unit_tangent(entry_pt, stroke[min(start + TANGENT_POINTS, len(stroke) - 1)])
+                tail.extend(bridge(exit_pt, entry_pt, exit_dir, entry_dir))
+                tail.extend(stroke[start:])
+                continue
+        runs.append(list(stroke))
+    strokes = runs + dots
     xs = [x for s in strokes for x, _ in s]
     ys = [y for s in strokes for _, y in s]
     min_x, min_y = min(xs), min(ys)
