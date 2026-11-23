@@ -53,5 +53,6 @@ mod tests {
         assert_eq!(summary(&[entry(Status::Applied), entry(Status::Applied)]).unwrap(), "2 action(s) appliquée(s)");
         assert!(summary(&[entry(Status::Failed)]).unwrap().contains("en échec"));
         assert_eq!(summary(&[entry(Status::Applied), entry(Status::Failed)]).unwrap(), "1 action(s) appliquée(s), 1 en échec");
+        assert_eq!(summary(&[entry(Status::Skipped)]), None, "une règle incomplète n'est pas une panne");
     }
 }

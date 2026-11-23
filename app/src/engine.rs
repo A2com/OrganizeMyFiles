@@ -608,6 +608,20 @@ impl Action {
             v
         }
     }
+
+    /// Réglage indispensable qui manque pour exécuter cette action. `None` = action exécutable.
+    /// Sert au moteur (règle ignorée, pas en échec) et à l'assistant de création.
+    pub fn invalid_reason(&self) -> Option<&'static str> {
+        let missing = |key: &str| self.param(key).is_empty();
+        match self.kind {
+            ActionKind::Move | ActionKind::Copy if missing("destination") => Some("Choisissez le dossier de destination."),
+            ActionKind::Rename if missing("pattern") => Some("Indiquez le nouveau nom."),
+            ActionKind::AddTag if missing("tags") => Some("Indiquez l'étiquette à ajouter."),
+            ActionKind::OpenApplication if missing("application_path") => Some("Choisissez l'application à ouvrir."),
+            ActionKind::RunShortcut if missing("shortcut_name") => Some("Indiquez le nom du raccourci."),
+            _ => None,
+        }
+    }
 }
 
 /// Relit un identifiant seul (ancien format) ou une liste d'identifiants.
@@ -640,6 +654,18 @@ pub struct Rule {
 }
 
 impl Rule {
+    /// La règle est-elle assez complète pour être exécutée ? `None` = oui. Une règle incomplète
+    /// (brouillon d'assistant sauvegardé en cours de saisie) est ignorée au lieu d'échouer fichier par fichier.
+    pub fn invalid_reason(&self) -> Option<&'static str> {
+        if self.conditions.is_empty() {
+            return Some("Ajoutez au moins une condition.");
+        }
+        if self.actions.is_empty() {
+            return Some("Choisissez ce qu'il faut faire des fichiers.");
+        }
+        self.actions.iter().find_map(|a| a.invalid_reason())
+    }
+
     /// La règle vise-t-elle explicitement les dossiers (ou les applications) ? Seules ces règles voient
     /// les dossiers : une règle « plus vieux que 30 jours → Corbeille » ne doit jamais jeter un dossier entier.
     pub fn targets_dirs(&self) -> bool {
@@ -678,6 +704,9 @@ pub enum Status {
     BlockedByConflict,
     DryRun,
     Undone,
+    /// Règle incomplète (destination, motif, condition manquants) : rien n'a été tenté. Ce n'est
+    /// pas une panne, donc l'entrée reste neutre et n'entre dans aucun compte d'échecs.
+    Skipped,
 }
 
 impl Status {
@@ -688,6 +717,7 @@ impl Status {
             Status::BlockedByConflict => "bloqué (conflit)",
             Status::DryRun => "aperçu",
             Status::Undone => "annulé",
+            Status::Skipped => "ignorée",
         }
     }
 }
@@ -819,6 +849,10 @@ impl Runner {
             let mut rule_list: Vec<&Rule> = rules.iter().filter(|r| r.folder_ids.contains(&folder.id) && r.enabled).collect();
             rule_list.sort_by_key(|r| (r.priority, r.id));
 
+            // Une règle incomplète (brouillon d'assistant : destination, motif ou condition pas encore
+            // choisis) n'est jamais exécutée : une seule entrée neutre par lot, pas un échec par fichier.
+            let (rule_list, incomplete): (Vec<&Rule>, Vec<&Rule>) = rule_list.into_iter().partition(|r| r.invalid_reason().is_none());
+
             // Scan at the deepest recursion any rule asks for; each rule then
             // only sees files within its own `recursion_depth`.
             let max_depth = rule_list.iter().map(|r| r.recursion_depth as usize).max().unwrap_or(0);
@@ -830,9 +864,27 @@ impl Runner {
             if let Some(only) = &self.only_paths {
                 let only: std::collections::HashSet<PathBuf> =
                     only.iter().map(|p| p.canonicalize().unwrap_or_else(|_| p.clone())).collect();
-                files.retain(|p| only.contains(&p.canonicalize().unwrap_or_else(|_| p.clone())));
+                files.retain(|p| !is_ignorable(p) && only.contains(&p.canonicalize().unwrap_or_else(|_| p.clone())));
             }
             scanned += files.len();
+
+            // Rien à ranger (ou seulement des fichiers système) : pas de ligne « ignorée » inutile.
+            if !files.is_empty() {
+                for rule in incomplete {
+                    history.push(HistoryEntry {
+                        batch_id: self.batch_id,
+                        rule_name: rule.name.clone(),
+                        action_label: "Règle incomplète".into(),
+                        original_path: PathBuf::new(),
+                        result_path: PathBuf::new(),
+                        undo: None,
+                        reversible: false,
+                        status: Status::Skipped,
+                        message: format!("Règle incomplète — {}. Aucun fichier traité.", rule.invalid_reason().unwrap_or_default()),
+                        created: now,
+                    });
+                }
+            }
 
             for path in &files {
                 if self.dry_run && matched >= PREVIEW_MATCH_LIMIT {
@@ -1240,12 +1292,30 @@ fn unique_zip_path(dir: &Path, name: &str) -> PathBuf {
     target
 }
 
+/// Fichiers de métadonnées (macOS, Windows) et téléchargements partiels : jamais rangés par une règle.
+/// Un fichier caché ordinaire (`.gitignore`, `.env`) reste triable — seules les métadonnées système
+/// et les fichiers commençant par `._` (copies AppleDouble) sont écartés.
+pub fn is_ignorable(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if matches!(name.as_str(), ".ds_store" | ".localized" | ".trashes" | "thumbs.db" | "desktop.ini" | "icon\r") {
+        return true;
+    }
+    if name.starts_with("._") {
+        return true;
+    }
+    let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "download" | "crdownload" | "part" | "partial" | "tmp" | "opdownload")
+}
+
 /// Liste les fichiers sous `root`. Avec `include_dirs`, les sous-dossiers (et les `.app`) sont aussi des candidats ;
 /// on ne descend jamais à l'intérieur d'un `.app`, qui est un paquet et non un dossier à ranger.
 fn collect_files(root: &Path, depth: usize, include_dirs: bool, out: &mut Vec<PathBuf>) {
     let Ok(rd) = fs::read_dir(root) else { return };
     for e in rd.flatten() {
         let p = e.path();
+        if is_ignorable(&p) {
+            continue;
+        }
         if p.is_dir() {
             let is_bundle = p.extension().is_some_and(|x| x.eq_ignore_ascii_case("app"));
             if include_dirs {
@@ -1890,6 +1960,87 @@ mod tests {
         // Un utilisateur root lit tout : on ne vérifie le refus que pour un utilisateur normal.
         if std::env::var("USER").map(|u| u != "root").unwrap_or(true) {
             assert_eq!(denied, Access::Denied);
+        }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("omf-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn runner() -> Runner {
+        Runner { monthly_used: 0, batch_id: 7, dry_run: false, commands: Box::new(crate::system::SystemCommands), only_paths: None }
+    }
+
+    #[test]
+    fn invalid_reason_lists_the_missing_setting() {
+        let mut action = Action::new(ActionKind::Move);
+        assert_eq!(action.invalid_reason(), Some("Choisissez le dossier de destination."));
+        action.params.insert("destination".into(), "/tmp/out".into());
+        assert_eq!(action.invalid_reason(), None);
+
+        let mut rule = rule_with(true, vec![]);
+        rule.actions = vec![Action::new(ActionKind::Trash)];
+        assert_eq!(rule.invalid_reason(), Some("Ajoutez au moins une condition."));
+        rule.conditions = vec![Condition { field: Field::Name, op: Op::Contains, value: "a".into() }];
+        assert_eq!(rule.invalid_reason(), None);
+    }
+
+    #[test]
+    fn incomplete_rule_is_skipped_and_touches_nothing() {
+        let dir = scratch("skip");
+        fs::write(dir.join("notes.txt"), "x").unwrap();
+        let folder = Folder { id: 1, path: dir.clone(), enabled: true, priority: 0 };
+        // Brouillon d'assistant : condition choisie, destination pas encore renseignée.
+        let mut rule = rule_with(true, vec![Condition { field: Field::Name, op: Op::Contains, value: "notes".into() }]);
+        rule.actions = vec![Action::new(ActionKind::Move)];
+
+        let out = runner().run(&[folder], &[rule], SystemTime::now());
+
+        assert_eq!(out.history.len(), 1, "une seule ligne neutre, pas un échec par fichier");
+        assert_eq!(out.history[0].status, Status::Skipped);
+        assert_eq!(out.history[0].rule_name, "r");
+        assert!(out.history[0].message.contains("destination"), "{}", out.history[0].message);
+        assert_eq!(out.matched, 0);
+        assert!(dir.join("notes.txt").exists(), "le fichier n'a pas été touché");
+    }
+
+    #[test]
+    fn system_metadata_is_never_scanned_but_ordinary_hidden_files_are() {
+        let dir = scratch("meta-in");
+        let out_dir = scratch("meta-out");
+        for name in [".DS_Store", ".localized", "._photo.jpg", "Thumbs.db", "desktop.ini"] {
+            fs::write(dir.join(name), "x").unwrap();
+        }
+        for name in [".hidden.conf", "notes.txt"] {
+            fs::write(dir.join(name), "x").unwrap();
+        }
+        let folder = Folder { id: 1, path: dir.clone(), enabled: true, priority: 0 };
+        let mut rule = rule_with(true, vec![Condition { field: Field::Extension, op: Op::IsNot, value: "zzz".into() }]);
+        let mut action = Action::new(ActionKind::Move);
+        action.params.insert("destination".into(), out_dir.to_string_lossy().into_owned());
+        rule.actions = vec![action];
+
+        let out = runner().run(&[folder], &[rule], SystemTime::now());
+
+        assert_eq!(out.history.len(), 2, "seuls les deux vrais fichiers sont traités");
+        assert!(out.history.iter().all(|e| e.status == Status::Applied));
+        assert!(out_dir.join("notes.txt").exists());
+        assert!(out_dir.join(".hidden.conf").exists(), "un fichier caché ordinaire reste triable");
+        for name in [".DS_Store", ".localized", "._photo.jpg", "Thumbs.db", "desktop.ini"] {
+            assert!(dir.join(name).exists(), "{name} ne doit pas être déplacé");
+        }
+    }
+
+    #[test]
+    fn ignorable_names_cover_macos_and_windows_metadata() {
+        for n in [".DS_Store", ".localized", ".Trashes", "._x.pdf", "Icon\r", "Thumbs.db", "desktop.ini", "a.part"] {
+            assert!(is_ignorable(Path::new(n)), "{n}");
+        }
+        for n in [".gitignore", ".env", "photo.png", "notes.txt", "webos_rsa"] {
+            assert!(!is_ignorable(Path::new(n)), "{n}");
         }
     }
 }
