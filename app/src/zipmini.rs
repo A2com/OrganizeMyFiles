@@ -21,6 +21,10 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<(std::path::PathBuf, String)>)
     for e in std::fs::read_dir(dir)? {
         let e = e?;
         let p = e.path();
+        // Les liens ne sont pas suivis : un lien qui remonte au dossier parent ferait boucler la compression.
+        if std::fs::symlink_metadata(&p)?.file_type().is_symlink() {
+            continue;
+        }
         if p.is_dir() {
             collect(root, &p, out)?;
         } else {
@@ -109,4 +113,62 @@ fn crc32(data: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("omf-zip-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Lance `zip_dir` dans un fil : un lien circulaire ferait boucler la version fautive.
+    fn zip_dir_with_timeout(src: &Path, out: &Path) -> io::Result<u64> {
+        let (src, out) = (src.to_path_buf(), out.to_path_buf());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(zip_dir(&src, &out));
+        });
+        rx.recv_timeout(Duration::from_secs(10)).expect("la compression ne doit pas boucler")
+    }
+
+    #[test]
+    fn a_directory_is_written_with_its_files() {
+        let dir = temp_dir("plain");
+        std::fs::write(dir.join("a.txt"), b"abcde").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/b.txt"), b"xy").unwrap();
+        let out = dir.join("sortie.zip");
+        let total = zip_dir_with_timeout(&dir, &out).unwrap();
+        assert_eq!(total, 7, "seuls les fichiers réguliers sont compressés");
+        let bytes = std::fs::read(&out).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("a.txt") && text.contains("sub/b.txt"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_not_followed() {
+        use std::os::unix::fs::symlink;
+        let dir = temp_dir("liens");
+        std::fs::write(dir.join("a.txt"), b"abc").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/b.txt"), b"de").unwrap();
+        symlink("..", dir.join("sub/remonte")).unwrap();
+        symlink(".", dir.join("ici")).unwrap();
+        let out = dir.join("sortie.zip");
+        let total = zip_dir_with_timeout(&dir, &out).unwrap();
+        assert_eq!(total, 5, "les liens ne sont pas suivis");
+        let bytes = std::fs::read(&out).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("remonte") && !text.contains("ici"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
